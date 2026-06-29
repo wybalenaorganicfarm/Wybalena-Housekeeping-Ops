@@ -1,0 +1,14 @@
+# dependencies / build
+node_modules
+dist
+tsconfig.tsbuildinfo
+*.log
+
+# env (never commit secrets)
+.env
+.env.local
+supabase/functions/.env
+
+# supabase local
+supabase/.branches
+supabase/.temp

@@ -2,7 +2,25 @@
   "permissions": {
     "allow": [
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__list_projects",
+      "Bash(command -v deno)",
+      "Bash(deno --version)",
+      "Bash(npm -v)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(npx tsc --noEmit -p tsconfig.json 2>&1)",
+      "PowerShell(npx vite build 2>&1)",
+      "Bash(openssl rand *)",
+      "Bash(python -c \"import secrets;print\\(secrets.token_hex\\(32\\)\\)\")",
+      "Bash(cd \"c:/Clients/Julian Mateer\" && sed -i 's/Cleaning Ops/Housekeeping Operations/g' index.html src/pages/Login.tsx supabase/migrations/*.sql && echo \"done\"; grep -rin \"cleaning ops\" index.html src/ supabase/ || echo \"no remaining occurrences\")",
+      "PowerShell(supabase --version)",
+      "PowerShell(supabase functions deploy whatsapp-inbound --project-ref wctunwynyugdncbiwwhs)",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npm install libphonenumber-js)"
     ]
   }
 }

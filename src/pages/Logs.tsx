@@ -1,0 +1,245 @@
+import { useEffect, useMemo, useState } from "react";
+import { c, font, SHIFT_TYPE_LABEL } from "../theme";
+import { Icon } from "../components/Icon";
+import { Spinner } from "../components/ui";
+import { PageHeader } from "../components/PageHeader";
+import { AUDIT_PAGE_SIZE, getAuditLogs, getRecentFailureCount } from "../lib/api";
+import type { AuditLogResolved, AuditStatus } from "../lib/types";
+
+// source (code) -> plain-English display name (Spec §4).
+const SOURCE_LABEL: Record<string, string> = {
+  "sync-bookings": "Weekly Booking Sync",
+  "confirm-reminder": "Confirmation Reminder",
+  "offer-tier-1": "Tier 1 Offers",
+  "remind-nonresponders": "Non-Responder Reminders",
+  "escalate-tier-2": "Tier 2 Escalation",
+  "escalate-tier-3": "Tier 3 Escalation",
+  "pre-shift-reminder": "Pre-Shift Reminders",
+  "cancellation-followup": "Cancellation Follow-up",
+  "whatsapp-inbound": "WhatsApp Reply Received",
+  // Manual / admin actions
+  "manual-assign": "Manual Assignment",
+  "confirm-shifts": "Shift Confirmation",
+  "confirm-cancellation": "Cancellation Confirmed",
+  "add-cleaner": "Cleaner Added",
+  "remove-cleaner": "Cleaner Removed",
+  "set-cleaner-status": "Cleaner Status Changed",
+  "provision-user": "User Invited",
+  "remove-user": "User Removed",
+  "activate-self": "Account Activated",
+};
+
+const STATUS_META: Record<AuditStatus, { label: string; dot: string; fg: string; bg: string }> = {
+  success: { label: "Success", dot: c.greenMid, fg: "#256b43", bg: "#eaf4ee" },
+  failed: { label: "Failed", dot: c.danger, fg: "#a8392b", bg: "#fbeae8" },
+  warning: { label: "Warning", dot: c.warn, fg: "#9a6512", bg: "#fdf4e3" },
+  skipped: { label: "Skipped", dot: c.faint, fg: "#6b665c", bg: "#f0eee9" },
+};
+
+const TRIGGER_LABEL: Record<string, string> = {
+  cron: "Scheduled", webhook: "Webhook", manual: "Manual", system: "System",
+};
+
+const STATUS_CHIPS: [string, string][] = [
+  ["all", "All"], ["success", "Success"], ["failed", "Failed"], ["warning", "Warning"], ["skipped", "Skipped"],
+];
+
+// "Mon 23 Jun · 3:30 PM" in IST (testing tz; swap to venue tz on go-live).
+function logTime(iso: string): string {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-GB", {
+    timeZone: "Asia/Calcutta", weekday: "short", day: "numeric", month: "short",
+  });
+  const time = d.toLocaleTimeString("en-US", {
+    timeZone: "Asia/Calcutta", hour: "numeric", minute: "2-digit",
+  });
+  return `${date} · ${time}`;
+}
+
+function entityLine(log: AuditLogResolved): string | null {
+  const parts: string[] = [];
+  if (log.shift) parts.push(`Shift: ${SHIFT_TYPE_LABEL[log.shift.shift_type] ?? log.shift.shift_type} · ${log.shift.shift_date}`);
+  if (log.cleaner) parts.push(`Cleaner: ${log.cleaner.full_name}`);
+  if (log.booking) parts.push(`Booking: ${log.booking.guest_name ?? "Guest"} · ${log.booking.check_in.slice(0, 10)} → ${log.booking.check_out.slice(0, 10)}`);
+  return parts.length ? parts.join("  ·  ") : null;
+}
+
+export function Logs() {
+  const [rows, setRows] = useState<AuditLogResolved[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+
+  const [status, setStatus] = useState("all");
+  const [source, setSource] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [search, setSearch] = useState("");
+
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [showJson, setShowJson] = useState<string | null>(null);
+  const [failures24h, setFailures24h] = useState(0);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // Reset to first page whenever a filter changes.
+  useEffect(() => { setPage(0); }, [status, source, from, to, search]);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    getAuditLogs({
+      status, source,
+      from: from ? new Date(from + "T00:00:00").toISOString() : undefined,
+      to: to ? new Date(to + "T23:59:59").toISOString() : undefined,
+      search, page,
+    }).then((res) => {
+      if (!live) return;
+      setRows(res.rows); setTotal(res.total); setLoading(false);
+    });
+    return () => { live = false; };
+  }, [status, source, from, to, search, page]);
+
+  useEffect(() => { getRecentFailureCount().then(setFailures24h); }, []);
+
+  const anyFilter = status !== "all" || source !== "all" || from || to || search.trim();
+  const pageCount = Math.max(1, Math.ceil(total / AUDIT_PAGE_SIZE));
+
+  const sourceOptions = useMemo(
+    () => [["all", "All functions"] as [string, string], ...Object.entries(SOURCE_LABEL)],
+    [],
+  );
+
+  return (
+    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      <PageHeader title="System Logs" subtitle="A record of everything the system has done automatically." />
+
+      {/* Filter bar */}
+      <div style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, padding: "10px 24px" }}>
+        {STATUS_CHIPS.map(([k, l]) => {
+          const on = status === k;
+          return (
+            <span key={k} onClick={() => setStatus(k)} style={{ background: on ? c.green : "#fff", color: on ? "#fff" : "#5d665f", border: on ? "none" : `1px solid ${c.chipBd}`, fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 20, cursor: "pointer" }}>{l}</span>
+          );
+        })}
+        <span style={{ width: 1, height: 22, background: c.border, margin: "0 4px" }} />
+        <select value={source} onChange={(e) => setSource(e.target.value)} style={selStyle}>
+          {sourceOptions.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={selStyle} title="From date" />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={selStyle} title="To date" />
+        <div style={{ position: "relative", minWidth: 180, flex: 1, maxWidth: 280 }}>
+          <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: c.muted2, display: "flex", pointerEvents: "none" }}><Icon name="search" size={13} strokeWidth={2} /></span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search summary" style={{ ...selStyle, width: "100%", boxSizing: "border-box", padding: "6px 8px 6px 28px" }} />
+        </div>
+        <button onClick={() => setStatus(status === "failed" ? "all" : "failed")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, background: status === "failed" ? c.danger : "#fff", color: status === "failed" ? "#fff" : c.danger, border: `1px solid ${status === "failed" ? c.danger : "#e6c4be"}`, borderRadius: 6, padding: "6px 11px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+          <Icon name="alert" size={13} strokeWidth={2} /> Failed only
+        </button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
+        {/* Failure banner */}
+        {failures24h > 0 && !bannerDismissed && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#fbeae8", border: `1px solid #e6c4be`, color: "#a8392b", borderRadius: 8, padding: "11px 14px", marginBottom: 16, fontSize: 13, fontWeight: 600 }}>
+            <Icon name="alert" size={16} strokeWidth={2} />
+            <span style={{ flex: 1 }}>⚠️ {failures24h} failure{failures24h === 1 ? "" : "s"} in the last 24 hours. Review below.</span>
+            <button onClick={() => { setStatus("failed"); }} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "5px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Show failures</button>
+            <button onClick={() => setBannerDismissed(true)} style={{ background: "none", border: "none", color: "#a8392b", cursor: "pointer", display: "flex" }}><Icon name="x" size={15} strokeWidth={2} /></button>
+          </div>
+        )}
+
+        {loading ? <Spinner /> : rows.length === 0 ? (
+          <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: 40, textAlign: "center", color: c.faint, fontSize: 13 }}>
+            {anyFilter
+              ? "No log entries match your filters. Try adjusting the date range or status."
+              : "The system hasn't run any automated jobs yet. Logs will appear here once the first scheduled jobs execute."}
+          </div>
+        ) : (
+          <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+            {rows.map((log, i) => {
+              const m = STATUS_META[log.status] ?? STATUS_META.skipped;
+              const open = expanded === log.id;
+              const entity = entityLine(log);
+              return (
+                <div key={log.id} style={{ borderBottom: i < rows.length - 1 ? `1px solid ${c.rowBd}` : "none", borderLeft: `3px solid ${m.dot}` }}>
+                  <div onClick={() => setExpanded(open ? null : log.id)} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "13px 16px", cursor: "pointer" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: m.dot, flex: "none", marginTop: 5 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{log.event_label}</span>
+                        <span style={{ background: m.bg, color: m.fg, fontSize: 10, letterSpacing: "0.03em", textTransform: "uppercase", fontWeight: 700, padding: "1px 7px", borderRadius: 5 }}>{m.label}</span>
+                      </div>
+                      <div style={{ fontSize: 13, color: "#5d665f", marginTop: 4, lineHeight: 1.5 }}>{log.summary}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, fontSize: 11, color: c.faint }}>
+                        <span>{SOURCE_LABEL[log.source] ?? log.source}</span>
+                        <span>·</span>
+                        <span>{TRIGGER_LABEL[log.triggered_by] ?? log.triggered_by}</span>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 11, color: c.faint, flex: "none", whiteSpace: "nowrap", marginTop: 2 }}>{logTime(log.created_at)}</span>
+                    <span style={{ flex: "none", color: c.faint, marginTop: 2 }}><Icon name={open ? "chevronDown" : "chevronRight"} size={15} /></span>
+                  </div>
+
+                  {open && (
+                    <div style={{ padding: "0 16px 14px 40px", display: "flex", flexDirection: "column", gap: 10 }}>
+                      {log.error_message && (
+                        <div style={{ background: "#fbeae8", border: `1px solid #e6c4be`, borderRadius: 6, padding: "9px 11px", fontSize: 12.5, color: "#a8392b", fontFamily: font.body }}>
+                          <span style={{ fontWeight: 700 }}>Error: </span>{log.error_message}
+                        </div>
+                      )}
+                      {entity && (
+                        <div style={{ fontSize: 12.5, color: c.body }}>
+                          <span style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.05em", color: c.muted2, fontWeight: 700, marginRight: 8 }}>Linked</span>
+                          {entity}
+                        </div>
+                      )}
+                      {log.detail && (
+                        <div>
+                          <button onClick={() => setShowJson(showJson === log.id ? null : log.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", color: c.green, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0 }}>
+                            <Icon name={showJson === log.id ? "chevronDown" : "chevronRight"} size={13} /> Raw detail
+                          </button>
+                          {showJson === log.id && (
+                            <pre style={{ background: "#f7f5f0", border: `1px solid ${c.border}`, borderRadius: 6, padding: 11, fontSize: 11.5, color: c.body, overflowX: "auto", marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
+                              {JSON.stringify(log.detail, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                      {!log.error_message && !entity && !log.detail && (
+                        <div style={{ fontSize: 12, color: c.faint }}>No extra detail recorded.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && total > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14, fontSize: 12.5, color: c.muted }}>
+            <span>{total} entr{total === 1 ? "y" : "ies"} · page {page + 1} of {pageCount}</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} style={pageBtn(page === 0)}>Previous</button>
+              <button disabled={page >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} style={pageBtn(page >= pageCount - 1)}>Next</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const selStyle: React.CSSProperties = {
+  border: `1px solid ${c.border3}`, borderRadius: 6, padding: "6px 8px", fontSize: 12.5,
+  color: c.ink, background: "#fff", outline: "none", fontFamily: font.body,
+};
+
+function pageBtn(disabled: boolean): React.CSSProperties {
+  return {
+    background: "#fff", color: disabled ? c.faint : c.body, border: `1px solid ${c.border3}`,
+    borderRadius: 6, padding: "6px 13px", fontSize: 12.5, fontWeight: 600,
+    cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1,
+  };
+}

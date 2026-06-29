@@ -1,0 +1,37 @@
+project_id = "wctunwynyugdncbiwwhs"
+
+# ── Edge Functions ───────────────────────────────────────────────────────────
+# System (cron) + webhook functions are invoked WITHOUT a Supabase user JWT
+# (pg_net / Whapi), so verify_jwt = false. The webhook verifies its own shared
+# secret; cron functions are only reachable with the service-role bearer.
+[functions.sync-bookings]
+verify_jwt = false
+[functions.confirm-reminder]
+verify_jwt = false
+[functions.offer-tier-1]
+verify_jwt = false
+[functions.remind-nonresponders]
+verify_jwt = false
+[functions.escalate-tier-2]
+verify_jwt = false
+[functions.escalate-tier-3]
+verify_jwt = false
+[functions.pre-shift-reminder]
+verify_jwt = false
+[functions.cancellation-followup]
+verify_jwt = false
+[functions.whatsapp-inbound]
+verify_jwt = false
+[functions.health-check]
+verify_jwt = false
+
+# App-facing functions are called by the frontend WITH the user's JWT; they
+# verify the caller's role internally. Keep verify_jwt = true.
+[functions.confirm-shifts]
+verify_jwt = true
+[functions.manual-assign]
+verify_jwt = true
+[functions.confirm-cancellation]
+verify_jwt = true
+[functions.provision-user]
+verify_jwt = true
