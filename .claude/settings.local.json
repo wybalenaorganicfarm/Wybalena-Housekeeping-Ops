@@ -20,7 +20,8 @@
       "PowerShell(supabase --version)",
       "PowerShell(supabase functions deploy whatsapp-inbound --project-ref wctunwynyugdncbiwwhs)",
       "PowerShell(npx tsc --noEmit)",
-      "PowerShell(npm install libphonenumber-js)"
+      "PowerShell(npm install libphonenumber-js)",
+      "mcp__claude_ai_Supabase__execute_sql"
     ]
   }
 }

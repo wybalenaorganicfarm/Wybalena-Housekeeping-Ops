@@ -68,14 +68,18 @@ begin
 end;
 $$;
 
--- IST testing schedules (UTC cron — IST local time):
-select cron.schedule('wy-sync-bookings',         '30 3 * * 1', $$ select public.invoke_edge('sync-bookings') $$);          -- 03:30 UTC Mon — Mon 09:00 IST
-select cron.schedule('wy-confirm-reminder',      '0 * * * *',  $$ select public.invoke_edge('confirm-reminder') $$);       -- hourly — evaluates created_at + 5h in code
-select cron.schedule('wy-offer-tier-1',          '30 9 * * *', $$ select public.invoke_edge('offer-tier-1') $$);           -- 09:30 UTC — daily 15:00 IST
-select cron.schedule('wy-remind-nonresponders',  '0 * * * *',  $$ select public.invoke_edge('remind-nonresponders') $$);   -- hourly — evaluates offered_at + 18h in code
-select cron.schedule('wy-escalate-tier-2',       '30 3 * * 2', $$ select public.invoke_edge('escalate-tier-2') $$);        -- 03:30 UTC Tue — Tue 09:00 IST
-select cron.schedule('wy-escalate-tier-3',       '30 8 * * 3', $$ select public.invoke_edge('escalate-tier-3') $$);        -- 08:30 UTC Wed — Wed 14:00 IST
-select cron.schedule('wy-pre-shift-reminder',    '0 1 * * *',  $$ select public.invoke_edge('pre-shift-reminder') $$);     -- 01:00 UTC — daily 06:30 IST
-select cron.schedule('wy-cancellation-followup', '30 3 * * *', $$ select public.invoke_edge('cancellation-followup') $$);  -- 03:30 UTC — daily 09:00 IST
+-- IST testing schedules (UTC cron — IST local time).
+-- TEST-DAY OVERRIDE (Tuesday end-to-end run): the weekly jobs are pinned to this
+-- Tuesday's afternoon IST slots; the three "daily" jobs run every evening IST.
+-- confirm-reminder / remind-nonresponders still gate on created_at+5h / offered_at+18h
+-- in code, so seed timestamps accordingly for a live test.
+select cron.schedule('wy-sync-bookings',         '0 8 * * 2',   $$ select public.invoke_edge('sync-bookings') $$);          -- 08:00 UTC Tue — Tue 13:30 IST
+select cron.schedule('wy-confirm-reminder',      '0 9 * * 2',   $$ select public.invoke_edge('confirm-reminder') $$);       -- 09:00 UTC Tue — Tue 14:30 IST
+select cron.schedule('wy-offer-tier-1',          '30 9 * * 2',  $$ select public.invoke_edge('offer-tier-1') $$);           -- 09:30 UTC Tue — Tue 15:00 IST
+select cron.schedule('wy-remind-nonresponders',  '0 10 * * 2',  $$ select public.invoke_edge('remind-nonresponders') $$);   -- 10:00 UTC Tue — Tue 15:30 IST
+select cron.schedule('wy-escalate-tier-2',       '30 10 * * 2', $$ select public.invoke_edge('escalate-tier-2') $$);        -- 10:30 UTC Tue — Tue 16:00 IST
+select cron.schedule('wy-escalate-tier-3',       '0 11 * * 2',  $$ select public.invoke_edge('escalate-tier-3') $$);        -- 11:00 UTC Tue — Tue 16:30 IST
+select cron.schedule('wy-pre-shift-reminder',    '30 11 * * *', $$ select public.invoke_edge('pre-shift-reminder') $$);     -- 11:30 UTC — daily 17:00 IST
+select cron.schedule('wy-cancellation-followup', '30 12 * * *', $$ select public.invoke_edge('cancellation-followup') $$);  -- 12:30 UTC — daily 18:00 IST
 -- Daily connection health check (read-only probes; not in the spec's 8 jobs).
-select cron.schedule('wy-health-check',          '30 1 * * *', $$ select public.invoke_edge('health-check') $$);           -- 01:30 UTC — daily 07:00 IST
+select cron.schedule('wy-health-check',          '0 13 * * *',  $$ select public.invoke_edge('health-check') $$);           -- 13:00 UTC — daily 18:30 IST

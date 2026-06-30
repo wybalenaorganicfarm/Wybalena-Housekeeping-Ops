@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
-import { Avatar, Button, Field, Input, Modal, Spinner } from "../components/ui";
+import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import type { CountryCode } from "libphonenumber-js";
@@ -116,6 +116,7 @@ export function Cleaners() {
   const [showAdd, setShowAdd] = useState(false);
 
   const [removing, setRemoving] = useState<string | null>(null);
+  const [toRemove, setToRemove] = useState<Cleaner | null>(null);
 
   async function load() {
     const [cs, r] = await Promise.all([getCleaners(), getReliability()]);
@@ -130,10 +131,10 @@ export function Cleaners() {
   }
 
   async function remove(cl: Cleaner) {
-    if (!confirm(`Remove ${cl.full_name} from the roster? They will be notified by email.`)) return;
     setRemoving(cl.id);
     const { data, error } = await removeCleaner(cl.id);
     setRemoving(null);
+    setToRemove(null);
     if (error) { alert(error); return; }
     await load();
     const where = data?.mode === "deactivated" ? "deactivated (kept for shift history)" : "removed";
@@ -247,7 +248,7 @@ export function Cleaners() {
                         <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>
                           {cl.is_team_leader
                             ? <KebabMenu items={[{ label: "Remove in User management", icon: "users", onClick: () => navigate("/users") }]} />
-                            : <KebabMenu disabled={removing === cl.id} items={[{ label: "Remove cleaner", danger: true, onClick: () => remove(cl) }]} />}
+                            : <KebabMenu disabled={removing === cl.id} items={[{ label: "Remove cleaner", danger: true, onClick: () => setToRemove(cl) }]} />}
                         </div>
                       )}
                     </div>
@@ -261,6 +262,17 @@ export function Cleaners() {
       </div>
 
       {showAdd && <AddCleanerModal existing={cleaners} onClose={() => setShowAdd(false)} onSaved={load} />}
+      {toRemove && (
+        <ConfirmDialog
+          title="Remove cleaner"
+          message={<>Remove <b>{toRemove.full_name}</b> from the roster? They will be notified by email.</>}
+          confirmLabel="Remove cleaner"
+          danger
+          busy={removing === toRemove.id}
+          onCancel={() => setToRemove(null)}
+          onConfirm={() => remove(toRemove)}
+        />
+      )}
     </div>
   );
 }

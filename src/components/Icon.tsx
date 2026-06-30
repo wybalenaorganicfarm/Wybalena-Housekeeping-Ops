@@ -26,6 +26,8 @@ const PATHS: Record<string, string> = {
   book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
   trash: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6",
   activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+  eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+  eyeOff: "M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.16 3.19M6.6 6.6A17.6 17.6 0 0 0 2 12s3.5 7 10 7a9.1 9.1 0 0 0 3.1-.54M9.9 9.9a3 3 0 0 0 4.2 4.2M2 2l20 20",
 };
 
 export function Icon({ name, size = 16, color = "currentColor", strokeWidth = 1.7 }: {

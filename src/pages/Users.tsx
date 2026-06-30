@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { c, ROLE_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
-import { Avatar, Button, Field, Input, Modal, Select, Spinner } from "../components/ui";
+import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Select, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { PageHeader } from "../components/PageHeader";
@@ -89,15 +89,16 @@ export function Users() {
   const [q, setQ] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [toRemove, setToRemove] = useState<Profile | null>(null);
 
   async function load() { setUsers(await getUsers()); setLoading(false); }
   useEffect(() => { load(); }, []);
 
   async function remove(u: Profile) {
-    if (!confirm(`Remove ${u.full_name || u.email}? They'll lose access and be notified by email.`)) return;
     setRemoving(u.id);
     const { data, error } = await removeUser(u.id);
     setRemoving(null);
+    setToRemove(null);
     if (error) { alert(error); return; }
     await load();
     alert(`${u.full_name || u.email} removed.${data?.emailed ? " Email notification sent." : ""}`);
@@ -215,7 +216,7 @@ export function Users() {
                 <div style={{ flex: "none", width: 40, textAlign: "right", color: c.faint }}>
                   {isYou ? <span style={{ fontSize: 11, fontStyle: "italic", color: "#c4bdb0" }}>You</span>
                     : u.role === "super_admin" ? null
-                      : <KebabMenu disabled={removing === u.id} items={[{ label: "Remove user", danger: true, onClick: () => remove(u) }]} />}
+                      : <KebabMenu disabled={removing === u.id} items={[{ label: "Remove user", danger: true, onClick: () => setToRemove(u) }]} />}
                 </div>
               </div>
             );
@@ -229,6 +230,17 @@ export function Users() {
       </div>
 
       {showAdd && <AddUserModal onClose={() => setShowAdd(false)} onSaved={load} />}
+      {toRemove && (
+        <ConfirmDialog
+          title="Remove user"
+          message={<>Remove <b>{toRemove.full_name || toRemove.email}</b>? They'll lose access and be notified by email.</>}
+          confirmLabel="Remove user"
+          danger
+          busy={removing === toRemove.id}
+          onCancel={() => setToRemove(null)}
+          onConfirm={() => remove(toRemove)}
+        />
+      )}
     </div>
   );
 }

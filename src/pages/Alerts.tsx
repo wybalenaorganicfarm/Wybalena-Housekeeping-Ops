@@ -5,9 +5,10 @@ import { c, font } from "../theme";
 import { Icon } from "../components/Icon";
 import { Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
-import { confirmCancellation, dismissAlert, getAlerts } from "../lib/api";
+import { ShiftDrawer } from "../components/ShiftDrawer";
+import { confirmCancellation, dismissAlert, getAlerts, getShifts } from "../lib/api";
 import { timeLabel } from "../lib/format";
-import type { Alert, AlertType } from "../lib/types";
+import type { Alert, AlertType, Shift } from "../lib/types";
 
 const META: Record<AlertType, { icon: string; accent: string; iconBg: string; badge: string; badgeBg: string; badgeFg: string }> = {
   understaffed_urgent: { icon: "alert", accent: c.danger, iconBg: "#F8E5E1", badge: "Urgent", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
@@ -21,11 +22,18 @@ export function Alerts() {
   const { canEdit } = useAuth();
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [drawer, setDrawer] = useState<Shift | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
 
-  async function load() { setAlerts(await getAlerts()); setLoading(false); }
+  async function load() {
+    const [a, s] = await Promise.all([getAlerts(), getShifts()]);
+    setAlerts(a); setShifts(s); setLoading(false);
+  }
   useEffect(() => { load(); }, []);
+
+  const shiftFor = (a: Alert) => (a.shift_id ? shifts.find((s) => s.id === a.shift_id) ?? null : null);
 
   const open = useMemo(() => alerts.filter((a) => a.status === "open"), [alerts]);
   const resolved = useMemo(() => alerts.filter((a) => a.status !== "open"), [alerts]);
@@ -74,8 +82,9 @@ export function Alerts() {
         {shownOpen.length === 0 && <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: 34, textAlign: "center", color: c.faint, fontSize: 13, marginBottom: 24 }}>No open alerts here.</div>}
         {shownOpen.map((a) => {
           const m = META[a.alert_type];
+          const shift = shiftFor(a);
           return (
-            <div key={a.id} style={{ background: "#fff", border: `1px solid ${c.border}`, borderLeft: `3px solid ${m.accent}`, borderRadius: 8, padding: "16px 18px", marginBottom: 12 }}>
+            <div key={a.id} onClick={() => shift && setDrawer(shift)} style={{ background: "#fff", border: `1px solid ${c.border}`, borderLeft: `3px solid ${m.accent}`, borderRadius: 8, padding: "16px 18px", marginBottom: 12, cursor: shift ? "pointer" : "default" }}>
               <div style={{ display: "flex", gap: 13 }}>
                 <div style={{ width: 34, height: 34, borderRadius: 8, background: m.iconBg, color: m.accent, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}>
                   <Icon name={m.icon} size={18} strokeWidth={1.8} />
@@ -87,7 +96,7 @@ export function Alerts() {
                   </div>
                   {a.body && <div style={{ fontSize: 13, color: "#5d665f", marginTop: 4, lineHeight: 1.5 }}>{a.body}</div>}
                   {canEdit && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 12 }}>
+                    <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 12 }}>
                       {a.alert_type === "booking_cancelled" ? (
                         <>
                           <button onClick={async () => { await confirmCancellation(a.id); await load(); }} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Confirm cancellation</button>
@@ -101,10 +110,13 @@ export function Alerts() {
                       ) : a.alert_type === "understaffed_urgent" ? (
                         <>
                           <button onClick={() => navigate("/shifts")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Assign manually</button>
-                          <button onClick={() => navigate("/shifts")} style={{ background: "none", border: "none", color: c.green, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift →</button>
+                          {shift && <button onClick={() => setDrawer(shift)} style={{ background: "none", border: "none", color: c.green, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift →</button>}
                         </>
                       ) : (
-                        <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+                        <>
+                          {shift && <button onClick={() => setDrawer(shift)} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift</button>}
+                          <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+                        </>
                       )}
                       <span style={{ flex: 1 }} />
                       <span style={{ fontSize: 11, color: c.faint }}>{timeLabel(a.created_at)}</span>
@@ -136,6 +148,7 @@ export function Alerts() {
           </>
         )}
       </div>
+      {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={() => { setDrawer(null); navigate("/shifts"); }} />}
     </div>
   );
 }

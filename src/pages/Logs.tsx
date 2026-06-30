@@ -64,6 +64,48 @@ function entityLine(log: AuditLogResolved): string | null {
   return parts.length ? parts.join("  ·  ") : null;
 }
 
+// Plain-English labels for the technical keys stored in `detail`.
+const DETAIL_LABEL: Record<string, string> = {
+  mode: "Action", count: "Cleaners offered", open_spots: "Open spots",
+  cleaners: "Cleaners offered", offers: "Offers sent", offered: "Cleaners offered",
+  cleaners_messaged: "Cleaners messaged", createdBookings: "Bookings created",
+  createdShifts: "Shifts created", cancellations: "Cancellations", gapsRaised: "Venue gaps raised",
+  cancelledShifts: "Shifts cancelled", notified: "People notified", pending: "Pending confirmations",
+  nights: "Nights", gap_days: "Gap (days)", accepted: "Accepted so far", required: "Cleaners required",
+  status: "New status", role: "Role", shift_type: "Shift type", from: "From", to: "To",
+  phone: "Phone number", text: "Message text",
+};
+
+// Raw UUID / internal-reference keys an ops manager never needs to see.
+const isIdKey = (k: string) => k === "by" || k === "id" || /_?id$/i.test(k) || /event_id$/i.test(k);
+
+const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function humanizeKey(k: string): string {
+  if (DETAIL_LABEL[k]) return DETAIL_LABEL[k];
+  return titleCase(k.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2"));
+}
+
+function formatVal(v: unknown): string {
+  if (v == null || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (Array.isArray(v)) {
+    // Arrays of cleaner/people objects → list their names instead of a bare count.
+    const names = v.map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>).full_name ?? (x as Record<string, unknown>).name : null)).filter(Boolean);
+    if (names.length === v.length && names.length > 0) return names.join(", ");
+    return String(v.length);
+  }
+  if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "string" && /^[a-z]+$/.test(v)) return titleCase(v);
+  return String(v);
+}
+
+function detailLines(detail: Record<string, unknown>): { label: string; value: string }[] {
+  return Object.entries(detail)
+    .filter(([k, v]) => !isIdKey(k) && v != null && v !== "")
+    .map(([k, v]) => ({ label: humanizeKey(k), value: formatVal(v) }));
+}
+
 export function Logs() {
   const [rows, setRows] = useState<AuditLogResolved[]>([]);
   const [total, setTotal] = useState(0);
@@ -77,7 +119,6 @@ export function Logs() {
   const [search, setSearch] = useState("");
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [showJson, setShowJson] = useState<string | null>(null);
   const [failures24h, setFailures24h] = useState(0);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
@@ -160,6 +201,7 @@ export function Logs() {
               const m = STATUS_META[log.status] ?? STATUS_META.skipped;
               const open = expanded === log.id;
               const entity = entityLine(log);
+              const detailRows = log.detail ? detailLines(log.detail) : [];
               return (
                 <div key={log.id} style={{ borderBottom: i < rows.length - 1 ? `1px solid ${c.rowBd}` : "none", borderLeft: `3px solid ${m.dot}` }}>
                   <div onClick={() => setExpanded(open ? null : log.id)} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "13px 16px", cursor: "pointer" }}>
@@ -193,19 +235,17 @@ export function Logs() {
                           {entity}
                         </div>
                       )}
-                      {log.detail && (
-                        <div>
-                          <button onClick={() => setShowJson(showJson === log.id ? null : log.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", color: c.green, fontSize: 11.5, fontWeight: 600, cursor: "pointer", padding: 0 }}>
-                            <Icon name={showJson === log.id ? "chevronDown" : "chevronRight"} size={13} /> Raw detail
-                          </button>
-                          {showJson === log.id && (
-                            <pre style={{ background: "#f7f5f0", border: `1px solid ${c.border}`, borderRadius: 6, padding: 11, fontSize: 11.5, color: c.body, overflowX: "auto", marginTop: 6, fontFamily: "ui-monospace, monospace" }}>
-                              {JSON.stringify(log.detail, null, 2)}
-                            </pre>
-                          )}
+                      {detailRows.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 28px" }}>
+                          {detailRows.map((d) => (
+                            <div key={d.label} style={{ minWidth: 120 }}>
+                              <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.05em", color: c.muted2, fontWeight: 700 }}>{d.label}</div>
+                              <div style={{ fontSize: 12.5, color: c.body, marginTop: 2 }}>{d.value}</div>
+                            </div>
+                          ))}
                         </div>
                       )}
-                      {!log.error_message && !entity && !log.detail && (
+                      {!log.error_message && !entity && detailRows.length === 0 && (
                         <div style={{ fontSize: 12, color: c.faint }}>No extra detail recorded.</div>
                       )}
                     </div>

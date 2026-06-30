@@ -1,18 +1,13 @@
 import { useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { c, font, ROLE_LABEL } from "../theme";
-
-const ROLES = [
-  { key: "admin", name: "Admin", who: "Ashleigh" },
-  { key: "team_leader", name: "Team Lead", who: "Zara" },
-  { key: "super_admin", name: "Super Admin", who: "Julian" },
-];
+import { c, font } from "../theme";
+import { Icon } from "../components/Icon";
 
 export function Login() {
   const { signIn } = useAuth();
-  const [pickedRole, setPickedRole] = useState("admin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -49,31 +44,23 @@ export function Login() {
           <h2 style={{ fontFamily: font.display, fontSize: 24, fontWeight: 700, margin: 0 }}>Sign in</h2>
           <p style={{ fontSize: 13.5, color: c.muted2, margin: "7px 0 26px" }}>Welcome back. Sign in to continue.</p>
 
-          <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 9 }}>Signing in as</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 22 }}>
-            {ROLES.map((r) => (
-              <div key={r.key} onClick={() => setPickedRole(r.key)} style={{
-                border: `1.5px solid ${pickedRole === r.key ? c.greenMid : c.border3}`,
-                background: pickedRole === r.key ? "#eef3ef" : "#fff",
-                borderRadius: 8, padding: "11px 8px", textAlign: "center", cursor: "pointer",
-              }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600 }}>{r.name}</div>
-                <div style={{ fontSize: 10.5, color: c.muted2, marginTop: 2 }}>{r.who}</div>
-              </div>
-            ))}
-          </div>
-
           <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 7 }}>Email</div>
           <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" style={inp} />
           <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 7 }}>Password</div>
-          <input value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} type="password" style={{ ...inp, marginBottom: 20 }} />
+          <div style={{ position: "relative", marginBottom: 20 }}>
+            <input value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} type={showPw ? "text" : "password"} style={{ ...inp, marginBottom: 0, paddingRight: 42 }} />
+            <button type="button" onClick={() => setShowPw((s) => !s)} title={showPw ? "Hide password" : "Show password"}
+              style={{ position: "absolute", top: "50%", right: 8, transform: "translateY(-50%)", width: 30, height: 30, border: "none", background: "none", color: c.muted2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+              <Icon name={showPw ? "eyeOff" : "eye"} size={17} />
+            </button>
+          </div>
 
           {error && (
             <div style={{ background: "#F8E5E1", color: "#a8392b", borderRadius: 7, padding: "10px 12px", fontSize: 12.5, fontWeight: 500, marginBottom: 14 }}>{error}</div>
           )}
 
           <button onClick={submit} disabled={busy} style={{ width: "100%", background: c.green, color: "#fff", border: "none", borderRadius: 8, padding: 12, fontSize: 14, fontWeight: 600, cursor: busy ? "wait" : "pointer" }}>
-            {busy ? "Signing in…" : `Sign in as ${ROLE_LABEL[pickedRole]}`}
+            {busy ? "Signing in…" : "Sign in"}
           </button>
           <p style={{ fontSize: 11.5, color: c.faint, textAlign: "center", margin: "24px 0 0", lineHeight: 1.5 }}>Accounts are provisioned by the Super Admin.<br />Contact Julian if you need access.</p>
         </div>

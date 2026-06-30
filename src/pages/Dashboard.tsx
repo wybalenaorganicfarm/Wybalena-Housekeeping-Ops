@@ -200,15 +200,15 @@ export function Dashboard() {
               {pendingShifts.map((s) => {
                 const tp = timeParts(s.start_time);
                 return (
-                  <Card key={s.id} style={{ padding: 13, marginBottom: 10 }}>
+                  <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: 13, marginBottom: 10, cursor: "pointer" }}>
                     <div style={{ display: "flex", gap: 9 }}>
                       <Icon name="clock" size={15} color={c.warn} strokeWidth={2} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>{shiftTitle(s)}</div>
                         <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2, lineHeight: 1.4 }}>{dateLabel(s.shift_date)} · {tp.hour}:{tp.min}</div>
-                        <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 9 }}>
+                        <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 9 }} onClick={(e) => e.stopPropagation()}>
                           <Button onClick={() => confirm(s.id)} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm</Button>
-                          <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "6px 11px", fontSize: 11.5 }}>Edit</Button>
+                          <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "6px 11px", fontSize: 11.5 }}>View</Button>
                         </div>
                       </div>
                     </div>

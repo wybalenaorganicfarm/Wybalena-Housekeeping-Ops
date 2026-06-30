@@ -56,6 +56,23 @@ export function Modal({ title, onClose, children, width = 460 }: {
   );
 }
 
+export function ConfirmDialog({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger, busy, onConfirm, onCancel }: {
+  title: string; message: ReactNode; confirmLabel?: string; cancelLabel?: string; danger?: boolean; busy?: boolean; onConfirm: () => void; onCancel: () => void;
+}) {
+  return (
+    <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: "rgba(20,30,25,.34)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 400, maxWidth: "100%", boxShadow: "0 24px 60px -20px rgba(20,30,25,.4)", padding: "22px 22px 18px" }}>
+        <h3 style={{ margin: 0, fontFamily: font.display, fontSize: 17, fontWeight: 700 }}>{title}</h3>
+        <div style={{ fontSize: 13.5, color: c.muted, lineHeight: 1.5, margin: "10px 0 20px" }}>{message}</div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 9 }}>
+          <Button kind="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
+          <Button kind={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>{busy ? "Working…" : confirmLabel}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
