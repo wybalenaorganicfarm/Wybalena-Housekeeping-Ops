@@ -1,0 +1,27 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@supabase/supabase-js@2": "2.108.2"
+  },
+  "jsr": {
+    "@supabase/supabase-js@2.108.2": {
+      "integrity": "db603b534b1939a216ef004fe9fdd0c72bb4ba097fb04be23ea76cb8c70272aa"
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@supabase/supabase-js@^2.45.0",
+        "npm:@types/react-dom@^18.3.0",
+        "npm:@types/react@^18.3.3",
+        "npm:@vitejs/plugin-react@^4.3.1",
+        "npm:libphonenumber-js@^1.13.7",
+        "npm:react-dom@^18.3.1",
+        "npm:react-router-dom@^6.26.0",
+        "npm:react@^18.3.1",
+        "npm:typescript@^5.5.4",
+        "npm:vite@^5.4.0"
+      ]
+    }
+  }
+}

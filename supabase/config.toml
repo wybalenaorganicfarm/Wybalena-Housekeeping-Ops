@@ -24,6 +24,10 @@ verify_jwt = false
 verify_jwt = false
 [functions.health-check]
 verify_jwt = false
+# Public one-click confirm link from the confirmation email — secured by its own
+# HMAC token (CONFIRM_LINK_SECRET), so no user JWT.
+[functions.confirm-shift-email]
+verify_jwt = false
 
 # App-facing functions are called by the frontend WITH the user's JWT; they
 # verify the caller's role internally. Keep verify_jwt = true.
@@ -34,4 +38,6 @@ verify_jwt = true
 [functions.confirm-cancellation]
 verify_jwt = true
 [functions.provision-user]
+verify_jwt = true
+[functions.update-shift]
 verify_jwt = true

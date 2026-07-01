@@ -4,6 +4,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
+import { reminderEmail } from "../_shared/emailTemplates.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "confirm-reminder";
@@ -53,11 +54,8 @@ Deno.serve(async (req) => {
     return json({ ok: true, raised });
   }
 
-  const sent = await sendEmail(
-    `Wybalena: ${raised} shift(s) still need confirming`,
-    `${raised} auto-created shift(s) have been pending confirmation for over 5 hours. ` +
-      `Please review them in the app.`,
-  );
+  const email = reminderEmail({ count: raised, dashboardUrl: Deno.env.get("APP_URL") ?? "" });
+  const sent = await sendEmail(email.subject, email.text, undefined, email.html);
   await writeAuditLog(sb, {
     event_type: "reminder.confirmation_sent",
     event_label: "Confirmation Reminder",

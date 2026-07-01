@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
@@ -58,6 +58,7 @@ const ALERT_COLOR: Record<string, string> = {
 export function Dashboard() {
   const { canEdit, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [staffing, setStaffing] = useState<Record<string, ShiftStaffing>>({});
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -72,6 +73,17 @@ export function Dashboard() {
     setShifts(s); setStaffing(st); setAlerts(a); setLoading(false);
   }
   useEffect(() => { load(); }, []);
+
+  // Deep-link from the confirmation email's "Edit Shift" button: /?edit=<shiftId>
+  // opens that shift's drawer (which exposes Confirm + Edit), then clears the param.
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (!editId || loading) return;
+    const target = shifts.find((s) => s.id === editId);
+    if (target) setDrawer(target);
+    searchParams.delete("edit");
+    setSearchParams(searchParams, { replace: true });
+  }, [loading, shifts, searchParams, setSearchParams]);
 
   const active = useMemo(() => shifts.filter((s) => s.status !== "cancelled"), [shifts]);
   const kpis = useMemo(() => ({

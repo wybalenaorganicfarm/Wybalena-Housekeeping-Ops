@@ -38,6 +38,10 @@ Deno.serve(async (req) => {
     .eq("alert_type", "unconfirmed_shifts")
     .eq("status", "open");
 
+  // Name the admin who confirmed, for a plain-English log summary.
+  const { data: me } = await sb.from("profiles").select("full_name").eq("id", caller.userId).maybeSingle();
+  const who = me?.full_name ?? "The admin";
+
   const confirmed = (updated ?? []).map((s) => s.id);
   for (const id of confirmed) {
     const { data: sh } = await sb.from("shifts").select("shift_date, shift_type").eq("id", id).maybeSingle();
@@ -45,7 +49,7 @@ Deno.serve(async (req) => {
       event_type: "shift.confirmed",
       event_label: "Shift Confirmation",
       status: "success",
-      summary: `Shift on ${sh?.shift_date ?? "—"} confirmed. It can now be staffed.`,
+      summary: `${who} confirmed the shift on ${sh?.shift_date ?? "—"}. It can now be staffed.`,
       detail: { shift_id: id, by: caller.userId },
       source: "confirm-shifts",
       shift_id: id,

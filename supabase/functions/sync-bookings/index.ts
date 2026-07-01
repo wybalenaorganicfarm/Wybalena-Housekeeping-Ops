@@ -7,6 +7,9 @@ import { handleOptions, json } from "../_shared/http.ts";
 import { fetchBookings } from "../_shared/adapters/calendar.ts";
 import { requiredForType } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
+import { confirmationEmail, type ConfirmShift } from "../_shared/emailTemplates.ts";
+import { signShift } from "../_shared/confirmToken.ts";
+import { resolveAdminName } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const DAY = 86400000;
@@ -41,6 +44,7 @@ Deno.serve(async (req) => {
   }
 
   const newShiftSummaries: string[] = [];
+  const pendingForEmail: ConfirmShift[] = [];
   let createdBookings = 0;
   let createdShifts = 0;
   let cancellations = 0;
@@ -137,9 +141,20 @@ Deno.serve(async (req) => {
         required_cleaners: requiredForType("mid_retreat"),
       });
     }
-    const { data: insertedShifts } = await sb.from("shifts").insert(shiftRows).select("id, shift_type, shift_date");
+    const { data: insertedShifts } = await sb.from("shifts").insert(shiftRows).select("id, shift_type, shift_date, start_time, required_cleaners");
     createdShifts += (insertedShifts ?? []).length;
     for (const sh of insertedShifts ?? []) {
+      pendingForEmail.push({
+        id: sh.id,
+        shift_type: sh.shift_type,
+        shift_date: sh.shift_date,
+        start_time: sh.start_time,
+        required_cleaners: sh.required_cleaners,
+        guest_name: ev.guestName,
+        nights: ev.nights,
+        check_in: ev.checkIn,
+        check_out: ev.checkOut,
+      });
       const summary = sh.shift_type === "mid_retreat"
         ? `Mid-Retreat Clean shift created for ${sh.shift_date} (long stay ≥7 nights).`
         : `${SHIFT_LABEL[sh.shift_type] ?? sh.shift_type} shift created for ${sh.shift_date} from ${ev.guestName ?? "guest"}'s booking.`;
@@ -201,13 +216,39 @@ Deno.serve(async (req) => {
     }
   }
 
-  // --- Summary email to Ashley ---------------------------------------------
-  if (newShiftSummaries.length) {
-    await sendEmail(
-      `Wybalena: ${newShiftSummaries.length} new booking(s) need confirming`,
-      `New shifts were auto-created and are pending your confirmation:\n\n` +
-        newShiftSummaries.map((s) => ` • ${s}`).join("\n"),
+  // --- Confirmation email to Ashley: one email, every pending shift, per-shift
+  //     Confirm/Edit buttons (Confirm = signed one-click link; Edit = app deep-link).
+  if (pendingForEmail.length) {
+    const base = Deno.env.get("SUPABASE_URL") ?? "";
+    const appUrl = Deno.env.get("APP_URL") ?? "";
+    const fmtWeek = (d: Date) => d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+
+    const shiftsWithLinks = await Promise.all(
+      pendingForEmail.map(async (s) => ({ s, sig: await signShift(s.id) })),
     );
+    const linkBySig = new Map(shiftsWithLinks.map(({ s, sig }) => [s.id, sig]));
+
+    const email = confirmationEmail(pendingForEmail, {
+      weekFrom: fmtWeek(timeMin),
+      weekTo: fmtWeek(timeMax),
+      signedLinkFor: (id) => `${base}/functions/v1/confirm-shift-email?shift=${id}&token=${linkBySig.get(id) ?? ""}`,
+      editUrlFor: (id) => `${appUrl}/?edit=${id}`,
+    });
+
+    const sent = await sendEmail(email.subject, email.text, undefined, email.html);
+    const who = await resolveAdminName(sb);
+    await writeAuditLog(sb, {
+      event_type: "notification.confirmation_email",
+      event_label: "Confirmation Email",
+      status: sent.ok ? "success" : "failed",
+      summary: sent.ok
+        ? `Confirmation email sent to ${who} — ${pendingForEmail.length} shift(s) awaiting confirmation.`
+        : `Failed to send confirmation email to ${who}. Error: email provider returned an error.`,
+      error_message: sent.ok ? undefined : "email provider returned an error",
+      detail: { shifts: pendingForEmail.map((s) => `${s.shift_type} · ${s.shift_date}`) },
+      source: SOURCE,
+      triggered_by: "cron",
+    });
   }
 
   // --- Run summary ---------------------------------------------------------

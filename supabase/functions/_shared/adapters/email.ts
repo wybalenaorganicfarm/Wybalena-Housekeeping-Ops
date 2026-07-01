@@ -55,6 +55,7 @@ export async function sendEmail(
   subject: string,
   body: string,
   to?: string,
+  html?: string,
 ): Promise<EmailResult> {
   const sender = Deno.env.get("GMAIL_SENDER");
   const recipient = to ?? Deno.env.get("ALERT_EMAIL_TO");
@@ -62,18 +63,19 @@ export async function sendEmail(
 
   // ── SWAP POINT: stub until creds exist ─────────────────────────────────────
   if (!sender || !recipient || !accessToken) {
-    console.log(`[email:STUB] to=${recipient ?? "?"} subject="${subject}"\n${body}`);
+    console.log(`[email:STUB] to=${recipient ?? "?"} subject="${subject}"\n${html ?? body}`);
     return { ok: true, stubbed: true };
   }
 
   // RFC 2822 message, base64url-encoded, posted to the Gmail send endpoint.
+  // When `html` is provided, send an HTML body (buttons/tables); otherwise plain text.
   const raw = [
     `From: ${sender}`,
     `To: ${recipient}`,
     `Subject: ${subject}`,
-    "Content-Type: text/plain; charset=UTF-8",
+    html ? "Content-Type: text/html; charset=UTF-8" : "Content-Type: text/plain; charset=UTF-8",
     "",
-    body,
+    html ?? body,
   ].join("\r\n");
   // btoa() only handles Latin1; encode UTF-8 bytes first so non-ASCII (em-dash,
   // emoji, accents) in the subject/body don't throw.

@@ -135,10 +135,13 @@ export async function deleteShift(id: string): Promise<string | null> {
   return error ? error.message : null;
 }
 
+// Routed through the update-shift Edge Function so the edit is recorded in the audit
+// log ("<admin> edited the shift…"); a direct RLS update can't write audit_logs.
 export async function updateShift(id: string, patch: Partial<Shift>): Promise<string | null> {
-  const { error } = await supabase
-    .from("shifts").update({ ...patch, is_modified: true } as never).eq("id", id);
-  return error ? error.message : null;
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("update-shift", { shiftId: id, patch });
+  if (error) return error;
+  if (data?.error) return data.error;
+  return null;
 }
 
 export async function addCleaner(input: {

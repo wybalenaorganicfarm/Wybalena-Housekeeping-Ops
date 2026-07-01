@@ -21,7 +21,13 @@
       "PowerShell(supabase functions deploy whatsapp-inbound --project-ref wctunwynyugdncbiwwhs)",
       "PowerShell(npx tsc --noEmit)",
       "PowerShell(npm install libphonenumber-js)",
-      "mcp__claude_ai_Supabase__execute_sql"
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Read(//c/Users/Admin/.cache/**)",
+      "Bash(npx --yes supabase functions --help)",
+      "Bash(rm -f /tmp/deno.zip /tmp/deno.exe /tmp/LICENSE.md 2>/dev/null; echo done)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }
