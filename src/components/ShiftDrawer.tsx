@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { EditShiftModal } from "./EditShiftModal";
 import { dateLabel, statusOf, typeLabel } from "../lib/format";
 import { deleteShift, getAssignmentsForShift, getCleaners, getStaffing, updateShift } from "../lib/api";
+import { toastError } from "../lib/toast";
 import type { Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "../lib/types";
 import { useAuth } from "../auth/AuthProvider";
 
@@ -64,7 +65,7 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
   async function removeShift() {
     if (!confirm("Permanently delete this shift? This cannot be undone.")) return;
     const err = await deleteShift(shift.id);
-    if (err) { alert(err); return; }
+    if (err) { toastError(err); return; }
     onChanged(); onClose();
   }
 

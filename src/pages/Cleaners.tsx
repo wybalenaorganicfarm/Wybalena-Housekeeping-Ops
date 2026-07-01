@@ -9,6 +9,7 @@ import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import type { CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
 import { addCleaner, getCleaners, getReliability, removeCleaner, setCleanerStatus } from "../lib/api";
+import { toastError, toastOk } from "../lib/toast";
 import { acceptRate, monthYear } from "../lib/format";
 import type { Cleaner, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
 
@@ -126,7 +127,7 @@ export function Cleaners() {
 
   async function changeStatus(cl: Cleaner, status: CleanerStatus) {
     const { error } = await setCleanerStatus(cl.id, status);
-    if (error) { alert(error); return; }
+    if (error) { toastError(error); return; }
     setCleaners((prev) => prev.map((x) => x.id === cl.id ? { ...x, status, is_active: status === "active" } : x));
   }
 
@@ -135,10 +136,10 @@ export function Cleaners() {
     const { data, error } = await removeCleaner(cl.id);
     setRemoving(null);
     setToRemove(null);
-    if (error) { alert(error); return; }
+    if (error) { toastError(error); return; }
     await load();
     const where = data?.mode === "deactivated" ? "deactivated (kept for shift history)" : "removed";
-    alert(`${cl.full_name} ${where}.${data?.emailed ? " Email notification sent." : cl.email ? "" : " No email on file — not notified."}`);
+    toastOk(`${cl.full_name} ${where}.${data?.emailed ? " Email notification sent." : cl.email ? "" : " No email on file — not notified."}`);
   }
 
   const counts = useMemo(() => ({

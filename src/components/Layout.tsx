@@ -65,6 +65,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <NavIcon to="/bookings" icon="book" label="Bookings" />
             <NavIcon to="/shifts" icon="calendar" label="Shifts" />
             <NavIcon to="/cleaners" icon="users" label="Cleaners" />
+            {canEdit && <NavIcon to="/schedule" icon="clock" label="Schedule" />}
             {canEdit && <NavIcon to="/logs" icon="activity" label="System Logs" />}
             {isSuperAdmin && <NavIcon to="/users" icon="user" label="Users" />}
           </nav>
@@ -94,6 +95,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <NavItem to="/bookings" icon="book" label="Bookings" />
           <NavItem to="/shifts" icon="calendar" label="Shifts" />
           <NavItem to="/cleaners" icon="users" label="Cleaners" />
+          {canEdit && <NavItem to="/schedule" icon="clock" label="Schedule" />}
           {canEdit && <NavItem to="/logs" icon="activity" label="System Logs" />}
           {isSuperAdmin && (
             <>

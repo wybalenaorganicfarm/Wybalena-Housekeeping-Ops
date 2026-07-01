@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { ClipLoader } from "react-spinners";
 import { c, font } from "../theme";
 
 export function Card({ children, style, onClick }: { children: ReactNode; style?: CSSProperties; onClick?: () => void }) {
@@ -96,8 +97,13 @@ export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
   return <textarea {...props} style={{ ...inputStyle, resize: "vertical", ...(props.style as object) }} />;
 }
 
-export function Spinner() {
-  return <div style={{ padding: 40, textAlign: "center", color: c.faint, fontSize: 13 }}>Loading…</div>;
+export function Spinner({ label = "Loading…", size = 34 }: { label?: string; size?: number }) {
+  return (
+    <div style={{ padding: 48, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+      <ClipLoader color={c.greenMid} size={size} speedMultiplier={0.9} />
+      {label && <div style={{ color: c.faint, fontSize: 12.5, fontWeight: 500 }}>{label}</div>}
+    </div>
+  );
 }
 
 export function Avatar({ name, bg = c.greenMid, size = 28 }: { name: string; bg?: string; size?: number }) {

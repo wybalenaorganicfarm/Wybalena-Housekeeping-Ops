@@ -51,6 +51,17 @@ export async function checkHealth(): Promise<HealthResult> {
   }
 }
 
+// Subject headers must be ASCII; RFC 2047-encode when they contain non-ASCII
+// (em-dash, emoji, accents) so mail clients don't mojibake them.
+function encodeSubject(subject: string): string {
+  // deno-lint-ignore no-control-regex
+  if (/^[\x00-\x7F]*$/.test(subject)) return subject;
+  const bytes = new TextEncoder().encode(subject);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return `=?UTF-8?B?${btoa(bin)}?=`;
+}
+
 export async function sendEmail(
   subject: string,
   body: string,
@@ -72,7 +83,8 @@ export async function sendEmail(
   const raw = [
     `From: ${sender}`,
     `To: ${recipient}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeSubject(subject)}`,
+    "MIME-Version: 1.0",
     html ? "Content-Type: text/html; charset=UTF-8" : "Content-Type: text/plain; charset=UTF-8",
     "",
     html ?? body,

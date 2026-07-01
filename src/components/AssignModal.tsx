@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Avatar } from "./ui";
 import { Icon } from "./Icon";
 import { getAssignmentsForShift, getCleaners, getStaffing, manualAssign } from "../lib/api";
+import { toastError } from "../lib/toast";
 import { c, font, TIER_LABEL } from "../theme";
 import { typeLabel } from "../lib/format";
 import type { Cleaner, Shift } from "../lib/types";
@@ -29,7 +30,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
     setBusyId(cleanerId);
     const { error } = await manualAssign(shift.id, cleanerId);
     setBusyId(null);
-    if (error) { alert(error); return; }
+    if (error) { toastError(error); return; }
     await load();
     onAssigned();
   }

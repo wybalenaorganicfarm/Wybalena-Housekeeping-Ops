@@ -198,3 +198,22 @@ export async function setCleanerStatusByEmail(email: string, status: string): Pr
 // team-leader → profiles sync works regardless of the caller's RLS write rights.
 export const setCleanerStatus = (cleanerId: string, status: string) =>
   invokeFn<{ ok: boolean }>("set-cleaner-status", { cleanerId, status });
+
+// ---- Automation schedule (pg_cron) — via manage-cron Edge Function -----------
+
+export interface CronJob { fn: string; schedule: string; active: boolean }
+
+export async function getCronSchedules(): Promise<CronJob[]> {
+  const { data, error } = await invokeFn<{ jobs: CronJob[]; error?: string }>("manage-cron", { action: "list" });
+  if (error || data?.error) throw new Error(error ?? data?.error ?? "Failed to load schedules");
+  return data?.jobs ?? [];
+}
+
+export async function updateCronSchedule(fn: string, schedule: string, active: boolean): Promise<string | null> {
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("manage-cron", {
+    action: "update", fn, schedule, active,
+  });
+  if (error) return error;
+  if (data?.error) return data.error;
+  return null;
+}

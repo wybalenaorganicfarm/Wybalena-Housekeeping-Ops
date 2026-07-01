@@ -7,6 +7,7 @@ import { KebabMenu } from "../components/KebabMenu";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { PageHeader } from "../components/PageHeader";
 import { getUsers, provisionUser, removeUser, setCleanerStatusByEmail, setUserStatus } from "../lib/api";
+import { toastError, toastOk } from "../lib/toast";
 import { lastActiveLabel } from "../lib/format";
 import type { CountryCode } from "libphonenumber-js";
 import type { Profile, UserRole, UserStatus } from "../lib/types";
@@ -99,14 +100,14 @@ export function Users() {
     const { data, error } = await removeUser(u.id);
     setRemoving(null);
     setToRemove(null);
-    if (error) { alert(error); return; }
+    if (error) { toastError(error); return; }
     await load();
-    alert(`${u.full_name || u.email} removed.${data?.emailed ? " Email notification sent." : ""}`);
+    toastOk(`${u.full_name || u.email} removed.${data?.emailed ? " Email notification sent." : ""}`);
   }
 
   async function changeStatus(u: Profile, status: UserStatus) {
     const err = await setUserStatus(u.id, status);
-    if (err) { alert(err); return; }
+    if (err) { toastError(err); return; }
     // Two-way sync: a team leader is also a cleaner — mirror the status.
     if (u.role === "team_leader" && u.email) await setCleanerStatusByEmail(u.email, status);
     setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, status, is_active: status !== "inactive" } : x));

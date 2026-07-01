@@ -24,7 +24,11 @@
       "mcp__claude_ai_Supabase__execute_sql",
       "Read(//c/Users/Admin/.cache/**)",
       "Bash(npx --yes supabase functions --help)",
-      "Bash(rm -f /tmp/deno.zip /tmp/deno.exe /tmp/LICENSE.md 2>/dev/null; echo done)"
+      "Bash(rm -f /tmp/deno.zip /tmp/deno.exe /tmp/LICENSE.md 2>/dev/null; echo done)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/react-spinners/package.json'\\).version, require\\('./node_modules/react-hot-toast/package.json'\\).version\\)\")",
+      "Bash(npm run *)",
+      "WebSearch"
     ],
     "additionalDirectories": [
       "\\tmp"

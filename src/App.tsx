@@ -10,10 +10,16 @@ import { Alerts } from "./pages/Alerts";
 import { Cleaners } from "./pages/Cleaners";
 import { Users } from "./pages/Users";
 import { Logs } from "./pages/Logs";
+import { Schedule } from "./pages/Schedule";
+import { ShiftConfirmed } from "./pages/ShiftConfirmed";
 import { Spinner } from "./components/ui";
 
 export function App() {
   const { loading, userId, isSuperAdmin, canEdit, needsPassword } = useAuth();
+
+  // Public landing for the email "Confirm Shift" button — no auth, no waiting on
+  // the session. Must come before every auth/loading gate below.
+  if (window.location.pathname === "/confirmed") return <ShiftConfirmed />;
 
   if (loading) return <Spinner />;
   // Invited user (or password reset) must set a password before entering — even
@@ -33,6 +39,7 @@ export function App() {
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/cleaners" element={<Cleaners />} />
+        <Route path="/schedule" element={canEdit ? <Schedule /> : <Navigate to="/" />} />
         <Route path="/logs" element={canEdit ? <Logs /> : <Navigate to="/" />} />
         <Route path="/users" element={isSuperAdmin ? <Users /> : <Navigate to="/" />} />
         <Route path="*" element={<Navigate to="/" />} />

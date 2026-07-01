@@ -17,7 +17,9 @@
         "npm:@vitejs/plugin-react@^4.3.1",
         "npm:libphonenumber-js@^1.13.7",
         "npm:react-dom@^18.3.1",
+        "npm:react-hot-toast@^2.6.0",
         "npm:react-router-dom@^6.26.0",
+        "npm:react-spinners@0.17",
         "npm:react@^18.3.1",
         "npm:typescript@^5.5.4",
         "npm:vite@^5.4.0"

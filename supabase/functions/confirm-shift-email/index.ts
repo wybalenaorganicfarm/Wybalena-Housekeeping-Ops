@@ -1,36 +1,41 @@
 // confirm-shift-email — PUBLIC (verify_jwt = false). The "Confirm Shift" button in
 // the confirmation email is a plain link; clicking it lands here. We verify the HMAC
-// token, confirm the shift if still pending, log who confirmed, and return a tiny
-// branded page. No app, no sign-in. Idempotent: re-clicking a confirmed shift is a
-// no-op (no duplicate log).
+// token, confirm the shift if still pending, log who confirmed, then REDIRECT to the
+// app's /confirmed page.
+//
+// Why redirect instead of returning HTML: Supabase Edge Functions on the default
+// *.supabase.co domain rewrite text/html responses to text/plain, so a page built
+// here shows as raw source in the browser. The app (real hosting) renders HTML fine,
+// so we hand off to it. Idempotent: re-clicking a confirmed shift is a no-op.
 import { serviceClient } from "../_shared/client.ts";
 import { verifyShift } from "../_shared/confirmToken.ts";
 import { resolveAdminName } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
-const GREEN = "#1F4D3A";
+const SHIFT_LABEL: Record<string, string> = {
+  standard: "Standard Clean",
+  mid_retreat: "Mid-Retreat Clean",
+  deep_full_venue: "Deep Clean",
+  other: "Other Clean",
+};
 
-function page(title: string, message: string, ok: boolean): Response {
-  const icon = ok ? "✓" : "⚠";
-  const accent = ok ? GREEN : "#a8392b";
-  const html = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>${title}</title></head>
-  <body style="margin:0;background:#eef0ee;font-family:Helvetica,Arial,sans-serif;">
-    <table role="presentation" width="100%" height="100%" cellpadding="0" cellspacing="0" style="min-height:100vh;">
-      <tr><td align="center" valign="middle" style="padding:40px;">
-        <table role="presentation" width="420" cellpadding="0" cellspacing="0" style="max-width:420px;width:100%;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.08);">
-          <tr><td style="background:${accent};text-align:center;padding:26px;">
-            <div style="color:#fff;font-size:40px;line-height:1;">${icon}</div>
-          </td></tr>
-          <tr><td style="padding:28px 28px 32px;text-align:center;">
-            <div style="font-size:19px;font-weight:700;color:#1c241f;margin-bottom:8px;">${title}</div>
-            <div style="font-size:14px;color:#6b7671;line-height:1.6;">${message}</div>
-          </td></tr>
-        </table>
-      </td></tr>
-    </table>
-  </body></html>`;
-  return new Response(html, { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=UTF-8" } });
+// "Standard Clean on 6 August 2026" — human label for the confirmation page.
+function shiftLabel(shiftType: string, shiftDate: string): string {
+  const type = SHIFT_LABEL[shiftType] ?? shiftType;
+  const d = new Date(shiftDate);
+  const when = isNaN(+d) ? shiftDate : d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+  return `${type} on ${when}`;
+}
+
+// Redirect the browser to the app's public /confirmed page with the outcome.
+function landing(status: "confirmed" | "already" | "invalid" | "notfound", label?: string): Response {
+  const appUrl = Deno.env.get("APP_URL") ?? "";
+  const qs = new URLSearchParams({ status, ...(label ? { label } : {}) });
+  if (!appUrl) {
+    // No app URL configured — plain-text fallback (HTML would be rewritten anyway).
+    return new Response(`Shift ${status}${label ? `: ${label}` : ""}.`, { status: 200 });
+  }
+  return new Response(null, { status: 302, headers: { Location: `${appUrl}/confirmed?${qs}` } });
 }
 
 Deno.serve(async (req) => {
@@ -39,23 +44,23 @@ Deno.serve(async (req) => {
   const token = url.searchParams.get("token") ?? "";
 
   if (!shiftId || !(await verifyShift(shiftId, token))) {
-    return page("Link no longer valid", "This confirmation link is invalid or has expired. Please open the app to confirm the shift.", false);
+    return landing("invalid");
   }
 
   const sb = serviceClient();
   const { data: shift } = await sb
     .from("shifts")
-    .select("id, status, shift_date")
+    .select("id, status, shift_date, shift_type")
     .eq("id", shiftId)
     .maybeSingle();
 
-  if (!shift) {
-    return page("Shift not found", "We couldn't find that shift. It may have been removed.", false);
-  }
+  if (!shift) return landing("notfound");
 
-  // Idempotent: only act while pending; re-clicks just show success with no dup log.
+  const label = shiftLabel(shift.shift_type, shift.shift_date);
+
+  // Idempotent: only act while pending; re-clicks just land on success with no dup log.
   if (shift.status !== "pending_confirmation") {
-    return page("Already confirmed", "This shift is already confirmed — no further action needed. You can close this tab.", true);
+    return landing("already", label);
   }
 
   await sb.from("shifts")
@@ -82,5 +87,5 @@ Deno.serve(async (req) => {
     triggered_by: "webhook",
   });
 
-  return page("Shift confirmed", "✓ The shift has been confirmed. You can close this tab.", true);
+  return landing("confirmed", label);
 });
