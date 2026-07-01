@@ -24,6 +24,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.health-check]
 verify_jwt = false
+[functions.wipeover-notify]
+verify_jwt = false
 # Public one-click confirm link from the confirmation email — secured by its own
 # HMAC token (CONFIRM_LINK_SECRET), so no user JWT.
 [functions.confirm-shift-email]

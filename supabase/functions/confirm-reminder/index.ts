@@ -1,6 +1,7 @@
-// confirm-reminder — cron: hourly. If a shift is still pending_confirmation
-// ~5h after creation, raise an unconfirmed_shifts alert + email Ashley (Spec §2, §7.1).
-// Runs hourly and evaluates the +5h condition in code (pg_cron is wall-clock).
+// confirm-reminder — cron. Reminds Ashley about EVERY shift still awaiting
+// confirmation, raising an unconfirmed_shifts alert per shift + one summary email.
+// No internal age check: the admin controls cadence purely through the schedule,
+// so whenever this runs it reminds about all currently-pending shifts.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
@@ -14,15 +15,15 @@ Deno.serve(async (req) => {
   if (pre) return pre;
   const sb = serviceClient();
 
-  const cutoff = new Date(Date.now() - 5 * 3600_000).toISOString();
-  const { data: stale } = await sb
+  // Every shift still awaiting confirmation — no created_at filter; the schedule
+  // decides when reminders go out.
+  const { data: pending } = await sb
     .from("shifts")
-    .select("id, shift_date, shift_type, created_at")
-    .eq("status", "pending_confirmation")
-    .lte("created_at", cutoff);
+    .select("id, shift_date, shift_type")
+    .eq("status", "pending_confirmation");
 
   let raised = 0;
-  for (const s of stale ?? []) {
+  for (const s of pending ?? []) {
     // Dedupe: one open unconfirmed_shifts alert per shift.
     const { data: dup } = await sb
       .from("alerts")
@@ -37,31 +38,41 @@ Deno.serve(async (req) => {
       alert_type: "unconfirmed_shifts",
       shift_id: s.id,
       title: "Shift still unconfirmed",
-      body: `A ${s.shift_type} shift on ${s.shift_date} has been pending for 5+ hours.`,
+      body: `A ${s.shift_type} shift on ${s.shift_date} is still awaiting confirmation.`,
     });
     raised++;
   }
 
   if (raised === 0) {
+    // Two different reasons to send nothing — report the accurate one:
+    //   • no pending shifts at all, or
+    //   • pending shifts exist but every one was already reminded (open alert),
+    //     which is why no email goes out a second time.
+    const pendingCount = pending?.length ?? 0;
+    const summary = pendingCount === 0
+      ? "No shifts awaiting confirmation. No reminder needed."
+      : `${pendingCount} shift(s) are awaiting confirmation, but a reminder was already sent for each — no duplicate reminder sent.`;
     await writeAuditLog(sb, {
       event_type: "reminder.confirmation_skipped",
       event_label: "Confirmation Reminder",
       status: "skipped",
-      summary: "No unconfirmed shifts found older than 5 hours. No reminder needed.",
+      summary,
+      detail: pendingCount ? { awaiting_confirmation: pendingCount, already_reminded: pendingCount } : undefined,
       source: SOURCE,
       triggered_by: "cron",
     });
     return json({ ok: true, raised });
   }
 
-  const email = reminderEmail({ count: raised, dashboardUrl: Deno.env.get("APP_URL") ?? "" });
+  const appUrl = (Deno.env.get("APP_URL") ?? "https://wybalena-housekeeping-ops.vercel.app").replace(/\/$/, "");
+  const email = reminderEmail({ count: raised, shiftsUrl: `${appUrl}/shifts` });
   const sent = await sendEmail(email.subject, email.text, undefined, email.html);
   await writeAuditLog(sb, {
     event_type: "reminder.confirmation_sent",
     event_label: "Confirmation Reminder",
     status: sent.ok ? "success" : "failed",
     summary: sent.ok
-      ? `Confirmation reminder sent to Ashley — ${raised} shift(s) still pending after 5 hours.`
+      ? `Confirmation reminder sent to Ashley — ${raised} shift(s) still awaiting confirmation.`
       : "Failed to send confirmation reminder email to Ashley. Error: email provider returned an error.",
     error_message: sent.ok ? undefined : "email provider returned an error",
     detail: { pending: raised },

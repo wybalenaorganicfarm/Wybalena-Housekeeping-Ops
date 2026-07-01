@@ -1,5 +1,6 @@
-// escalate-tier-2 — cron: Tue 09:00 IST testing (Tue 03:30 UTC); go-live tz TBD.
-// 24h after Tier 1: any shift still not fully staffed -> offer Tier 2 (Spec §2, §7.1).
+// escalate-tier-2 — cron (admin-scheduled). Any shift still in Tier-1 staffing ->
+// offer Tier 2. No internal delay: the admin controls the spacing after Tier 1 via
+// this job's schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
@@ -12,9 +13,9 @@ Deno.serve(async (req) => {
   if (pre) return pre;
 
   const sb = serviceClient();
-  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
 
-  // Shifts in Tier-1 staffing whose Tier-1 batch is >=24h old and still open.
+  // Every shift still in Tier-1 staffing. No internal age gate — the admin decides
+  // when to escalate purely through this job's schedule.
   const { data: shifts } = await sb
     .from("shifts")
     .select("id, shift_date")
@@ -23,16 +24,6 @@ Deno.serve(async (req) => {
 
   let escalated = 0;
   for (const s of shifts ?? []) {
-    const { data: lastT1 } = await sb
-      .from("shift_assignments")
-      .select("offered_at")
-      .eq("shift_id", s.id)
-      .eq("tier_at_offer", "tier_1")
-      .order("offered_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!lastT1 || lastT1.offered_at > cutoff) continue; // not yet 24h
-
     try {
       const res = await offerTier(sb, s.id, "tier_2");
       if (res.count > 0) {
@@ -64,11 +55,16 @@ Deno.serve(async (req) => {
   }
 
   if (escalated === 0) {
+    const tier1Count = shifts?.length ?? 0;
+    const summary = tier1Count === 0
+      ? "No shifts are in Tier 1 staffing. All confirmed shifts are staffed or not yet offered — no Tier 2 escalation needed."
+      : `${tier1Count} shift(s) in Tier 1 staffing, but no available Tier 2 cleaner to offer.`;
     await writeAuditLog(sb, {
       event_type: "escalation.tier2_skipped",
       event_label: "Tier 2 Escalation",
       status: "skipped",
-      summary: "All confirmed shifts are fully staffed. No Tier 2 escalation needed.",
+      summary,
+      detail: { in_tier1_staffing: tier1Count },
       source: SOURCE,
       triggered_by: "cron",
     });

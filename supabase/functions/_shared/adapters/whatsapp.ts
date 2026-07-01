@@ -98,25 +98,54 @@ export async function sendButtons(
   return { ok: true, providerMessageId: data?.message?.id ?? data?.id };
 }
 
+// Send the "Are you sure you want to decline?" confirmation with Yes/No buttons
+// whose payloads carry the assignment id. Returns the message id so the caller can
+// store it for quoted-id matching of the Yes/No tap.
+export function sendDeclineConfirm(
+  toPhone: string,
+  dateLabel: string,
+  assignmentId: string,
+): Promise<SendResult> {
+  return sendButtons(
+    toPhone,
+    `Are you sure you want to decline the cleaning shift on ${dateLabel}?`,
+    [
+      { id: `declineyes:${assignmentId}`, title: "✅ Yes, decline" },
+      { id: `declineno:${assignmentId}`, title: "↩️ No, go back" },
+    ],
+    { footer: "Wybalena Organic Farm" },
+  );
+}
+
 // Parse an inbound Whapi webhook payload into a normalized reply.
 // Keyword baseline: first token = action, optional second token = offer code.
 // If the Whapi plan supports interactive buttons, map the button payload here.
+export type InboundAction =
+  | "accept" | "decline" | "cancel"
+  | "decline_confirm" | "decline_cancel"  // from the "Are you sure?" Yes/No buttons
+  | "unknown";
+
 export interface InboundReply {
   providerMessageId: string;
   fromPhone: string;
-  action: "accept" | "decline" | "cancel" | "unknown";
+  action: InboundAction;
   offerCode: string | null;
   // Set when the reply came from a quick-reply button whose payload encoded the
   // assignment row id (e.g. "accept:<uuid>"). Lets the webhook skip phone/code
   // correlation and act on the exact offer.
   assignmentId: string | null;
+  // The id of the message this reply is quoting/replying to (Whapi context). We
+  // store each offer's outbound message id on the assignment, so this maps a tap
+  // back to the exact offer even with several open offers.
+  quotedMessageId: string | null;
   rawText: string;
 }
 
-const ACTION_FROM_KEYWORD: Record<string, InboundReply["action"]> = {
-  YES: "accept", ACCEPT: "accept", Y: "accept", "1": "accept",
-  NO: "decline", DECLINE: "decline", N: "decline", "2": "decline",
-  CANCEL: "cancel", C: "cancel", "3": "cancel",
+// Button payload verb → action. Offer buttons use accept/decline/cancel; the
+// decline confirmation buttons use declineyes/declineno.
+const TAG_ACTION: Record<string, InboundAction> = {
+  accept: "accept", decline: "decline", cancel: "cancel",
+  declineyes: "decline_confirm", declineno: "decline_cancel",
 };
 
 // Pull a button payload id out of the several shapes Whapi/WhatsApp may use.
@@ -145,12 +174,22 @@ function buttonTitle(m: Record<string, unknown>): string {
   );
 }
 
-// Map any free text/title to an action (handles "✅ Accept", "YES", "1", etc).
+// The id of the message this reply quotes/replies to. Whapi surfaces it under a
+// `context` object (shapes vary by plan); we check the common fields.
+function quotedMessageId(m: Record<string, unknown>): string | null {
+  const ctx = m.context as Record<string, unknown> | undefined;
+  const id = (ctx?.quoted_id ?? ctx?.id ?? ctx?.message_id ??
+    m.quoted_id ?? m.reply_to ?? (m.quoted as Record<string, unknown> | undefined)?.id) as string | undefined;
+  return id ? String(id) : null;
+}
+
+// Map any free text/title to an action (handles "✅ Accept", "YES 4823", "N", "1").
 function actionFromText(s: string): InboundReply["action"] {
   const u = s.toUpperCase();
-  if (/\bACCEPT\b|\bYES\b|^Y$|\b1\b/.test(u)) return "accept";
-  if (/\bDECLINE\b|\bNO\b|^N$|\b2\b/.test(u)) return "decline";
-  if (/\bCANCEL\b|^C$|\b3\b/.test(u)) return "cancel";
+  const first = u.trim().split(/\s+/)[0] ?? "";
+  if (/\b(ACCEPT|YES)\b/.test(u) || first === "Y" || first === "1") return "accept";
+  if (/\b(DECLINE|NO)\b/.test(u) || first === "N" || first === "2") return "decline";
+  if (/\bCANCEL\b/.test(u) || first === "C" || first === "3") return "cancel";
   return "unknown";
 }
 
@@ -213,21 +252,27 @@ export function parseInbound(payload: unknown): InboundReply[] {
     // Preferred path: interactive quick-reply button.
     const payload = buttonPayload(m);
     if (payload) {
-      const tagged = payload.match(/^(accept|decline|cancel)[:|](.+)$/i);
-      if (tagged) {
+      const tagged = payload.match(/^([a-z]+)[:|](.+)$/i);
+      if (tagged && TAG_ACTION[tagged[1].toLowerCase()]) {
         // Our scheme: action encoded in the payload ("accept:<assignmentId>").
-        action = tagged[1].toLowerCase() as InboundReply["action"];
-        assignmentId = tagged[2];
+        action = TAG_ACTION[tagged[1].toLowerCase()];
+        const id = tagged[2].trim();
+        // Guard against a missing id ("accept:undefined") — fall back to open-offer
+        // resolution downstream rather than looking up a bogus id.
+        assignmentId = id && id !== "undefined" && id !== "null" ? id : null;
       } else {
         // Make-style: payload is a bare id, action conveyed by the button title.
-        assignmentId = payload;
-        action = actionFromText(buttonTitle(m));
+        assignmentId = payload && payload !== "undefined" ? payload : null;
+        action = actionFromText(buttonTitle(m) || payload);
       }
     } else {
-      // Fallback path: keyword text ("YES <code>" / "NO <code>" / "CANCEL <code>").
+      // Fallback path: free text. Covers both keyword replies ("YES 4823") and a
+      // tapped button echoed by Whapi as plain text ("✅ Accept" / "Accept") when
+      // the interactive payload isn't present. actionFromText handles titles,
+      // emojis and keywords alike; the code is any 3–6 digit token in the message.
+      action = actionFromText(text);
       const tokens = text.trim().toUpperCase().split(/\s+/);
-      action = ACTION_FROM_KEYWORD[tokens[0] ?? ""] ?? "unknown";
-      offerCode = tokens.slice(1).find((t) => /^[0-9]{3,6}$/.test(t)) ?? null;
+      offerCode = tokens.find((t) => /^[0-9]{3,6}$/.test(t)) ?? null;
     }
 
     out.push({
@@ -236,6 +281,7 @@ export function parseInbound(payload: unknown): InboundReply[] {
       action,
       offerCode,
       assignmentId,
+      quotedMessageId: quotedMessageId(m),
       rawText: text,
     });
   }

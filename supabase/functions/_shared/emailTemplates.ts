@@ -118,7 +118,78 @@ export function confirmationEmail(shifts: ConfirmShift[], opts: ConfirmOpts): { 
   return { subject, text, html };
 }
 
-export function reminderEmail(opts: { count: number; dashboardUrl: string }): { subject: string; text: string; html: string } {
+export interface GapBooking {
+  guest_name?: string | null;
+  gcal_event_id?: string | null;
+  check_in: string;   // ISO
+  check_out: string;  // ISO
+}
+
+// "11 May 2026, 3:00 AM" from an ISO timestamp; falls back to the raw string.
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(+d)) return esc(iso);
+  return d.toLocaleString("en-AU", { day: "numeric", month: "long", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" }) + " UTC";
+}
+
+function gapRow(label: string, value: string): string {
+  return `<tr>
+    <td style="padding:10px 14px;font-size:12px;color:${MUTED};border-bottom:1px solid #eee;width:42%;">${esc(label)}</td>
+    <td style="padding:10px 14px;font-size:13px;color:${INK};border-bottom:1px solid #eee;font-weight:600;">${value}</td>
+  </tr>`;
+}
+
+function bookingCard(headerBg: string, heading: string, b: GapBooking): string {
+  const rows =
+    gapRow("Booking Name", esc(b.guest_name ?? "Guest booking")) +
+    gapRow("Event ID", `<span style="font-family:monospace;font-size:12px;color:${MUTED};">${esc(b.gcal_event_id ?? "—")}</span>`) +
+    gapRow("Check-In Time", fmtDateTime(b.check_in)) +
+    gapRow("Check-Out Time", fmtDateTime(b.check_out));
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eee;border-radius:8px;overflow:hidden;margin:6px 0 14px;">
+    <tr><td style="background:${headerBg};padding:11px 14px;color:#fff;font-size:13px;font-weight:700;">${heading}</td></tr>
+    <tr><td style="padding:0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table></td></tr>
+  </table>`;
+}
+
+// Notifies Ashley that a wipeover (interim) clean is needed in the >3-day gap
+// between two bookings. Mirrors the original make.com layout.
+export function wipeoverEmail(prev: GapBooking, next: GapBooking, gapDays: number): { subject: string; text: string; html: string } {
+  const subject = `Wipeover Cleaning Required — ${gapDays}-day gap between bookings`;
+  const html = `<!DOCTYPE html><html><body style="margin:0;background:#eef0ee;font-family:Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0ee;padding:24px 0;"><tr><td align="center">
+    <table role="presentation" width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
+      <tr><td style="padding:22px 24px 4px;">
+        <div style="font-size:19px;font-weight:700;color:${INK};">🧹 Wipeover Cleaning Required</div>
+      </td></tr>
+      <tr><td style="padding:8px 24px 0;color:${INK};font-size:13.5px;line-height:1.6;">
+        This is to inform you that a <strong>wipeover cleaning</strong> is required between the following two bookings.
+        <div style="margin-top:10px;">Reason: The gap between these bookings is <strong>more than 3 days</strong>.</div>
+      </td></tr>
+      <tr><td style="padding:14px 24px 0;">
+        <div style="background:#FBF3E2;border-radius:8px;padding:11px 14px;font-size:13px;font-weight:600;color:#9a7320;">⏳ Gap Between Bookings: ${gapDays} days</div>
+      </td></tr>
+      <tr><td style="padding:16px 24px 0;">
+        ${bookingCard("#2f6fb0", "📅 Previous Booking (Ends)", prev)}
+        <div style="text-align:center;margin:2px 0 12px;">
+          <span style="display:inline-block;background:${AMBER};color:#fff;font-size:12px;font-weight:700;padding:7px 16px;border-radius:20px;">⬇️ Gap: ${gapDays} Days ⬇️</span>
+        </div>
+        ${bookingCard("#2e8b57", "📅 Next Booking (Starts)", next)}
+      </td></tr>
+      <tr><td style="padding:6px 24px 22px;color:${MUTED};font-size:12.5px;line-height:1.6;">
+        Please ensure the wipeover cleaning is scheduled accordingly.<br/><br/>Thank you,<br/>Wybalena Organic Farm
+      </td></tr>
+    </table>
+  </td></tr></table>
+  </body></html>`;
+  const text = `Wipeover Cleaning Required — a wipeover clean is needed in the ${gapDays}-day gap between two bookings.\n\n` +
+    `Previous booking (${prev.guest_name ?? "guest"}): ${fmtDateTime(prev.check_in)} → ${fmtDateTime(prev.check_out)}\n` +
+    `Gap: ${gapDays} days\n` +
+    `Next booking (${next.guest_name ?? "guest"}): ${fmtDateTime(next.check_in)} → ${fmtDateTime(next.check_out)}\n\n` +
+    `Please ensure the wipeover cleaning is scheduled accordingly.`;
+  return { subject, text, html };
+}
+
+export function reminderEmail(opts: { count: number; shiftsUrl: string }): { subject: string; text: string; html: string } {
   const subject = `Wybalena: ${opts.count} shift(s) still need confirming`;
   const html = `<!DOCTYPE html><html><body style="margin:0;background:#eef0ee;font-family:Helvetica,Arial,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0ee;padding:24px 0;"><tr><td align="center">
@@ -127,16 +198,16 @@ export function reminderEmail(opts: { count: number; dashboardUrl: string }): { 
         <div style="color:#ffffff;font-size:18px;font-weight:700;">Shifts awaiting confirmation</div>
       </td></tr>
       <tr><td style="padding:24px;color:${INK};font-size:14px;line-height:1.6;text-align:center;">
-        <strong>${opts.count} cleaning shift(s)</strong> have been pending confirmation for over 5 hours.<br/><br/>
-        Please check the previous confirmation email and confirm the shifts, or open the dashboard to review and confirm them there.
+        <strong>${opts.count} cleaning shift(s)</strong> are still awaiting confirmation.<br/><br/>
+        Please check the previous confirmation email and confirm the shifts, or open the Shifts page to review and confirm them there.
       </td></tr>
       <tr><td style="padding:0 24px 26px;text-align:center;">
-        ${button(opts.dashboardUrl, "Go to Dashboard", GREEN)}
+        ${button(opts.shiftsUrl, "Confirm Shifts", GREEN)}
       </td></tr>
     </table>
   </td></tr></table>
   </body></html>`;
-  const text = `${opts.count} cleaning shift(s) have been pending confirmation for over 5 hours.\n\n` +
-    `Please check the previous confirmation email and confirm the shifts, or open the dashboard: ${opts.dashboardUrl}`;
+  const text = `${opts.count} cleaning shift(s) are still awaiting confirmation.\n\n` +
+    `Please check the previous confirmation email and confirm the shifts, or open the Shifts page: ${opts.shiftsUrl}`;
   return { subject, text, html };
 }

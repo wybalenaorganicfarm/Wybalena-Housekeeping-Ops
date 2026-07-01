@@ -52,11 +52,32 @@ Deno.serve(async (req) => {
   }
 
   if (offered === 0) {
+    // Explain WHY nothing was sent, accurately:
+    //   • shifts already offered to Tier 1 (now "staffing"), or
+    //   • confirmed shifts exist but no Tier 1 cleaner was available, or
+    //   • genuinely nothing to staff.
+    const { count: alreadyOffered } = await sb
+      .from("shifts")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "staffing")
+      .eq("current_tier", "tier_1");
+    const confirmedRemaining = shifts?.length ?? 0;
+
+    let summary: string;
+    if (confirmedRemaining > 0) {
+      summary = `${confirmedRemaining} confirmed shift(s) found, but no available Tier 1 cleaner to offer. No offers sent.`;
+    } else if ((alreadyOffered ?? 0) > 0) {
+      summary = `${alreadyOffered} shift(s) have already been offered to Tier 1 cleaners — no new Tier 1 offers needed.`;
+    } else {
+      summary = "No confirmed shifts needed staffing today. No Tier 1 offers sent.";
+    }
+
     await writeAuditLog(sb, {
       event_type: "offer.tier1_skipped",
       event_label: "Tier 1 Offers",
       status: "skipped",
-      summary: "No confirmed shifts needed staffing today. No Tier 1 offers sent.",
+      summary,
+      detail: { confirmed_awaiting_offer: confirmedRemaining, already_offered_tier1: alreadyOffered ?? 0 },
       source: SOURCE,
       triggered_by: "cron",
     });

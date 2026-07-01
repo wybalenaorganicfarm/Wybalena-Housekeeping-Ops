@@ -4,7 +4,7 @@ import { Avatar } from "./ui";
 import { Icon } from "./Icon";
 import { EditShiftModal } from "./EditShiftModal";
 import { dateLabel, statusOf, typeLabel } from "../lib/format";
-import { deleteShift, getAssignmentsForShift, getCleaners, getStaffing, updateShift } from "../lib/api";
+import { confirmShifts, deleteShift, getAssignmentsForShift, getCleaners, getStaffing, updateShift } from "../lib/api";
 import { toastError } from "../lib/toast";
 import type { Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "../lib/types";
 import { useAuth } from "../auth/AuthProvider";
@@ -55,6 +55,15 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
   const responders = assignments
     .map((a) => ({ a, cl: cleaners[a.cleaner_id] }))
     .filter((r) => r.cl && r.a.status !== "no_response");
+
+  const [confirming, setConfirming] = useState(false);
+  async function confirmShift() {
+    setConfirming(true);
+    const { error } = await confirmShifts([shift.id]);
+    setConfirming(false);
+    if (error) { toastError(error); return; }
+    onChanged(); onClose();
+  }
 
   async function cancelShift() {
     if (!confirm("Cancel this shift?")) return;
@@ -162,7 +171,12 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
 
         {canEdit && shift.status !== "cancelled" && (
           <div style={{ flex: "none", padding: "14px 22px", borderTop: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 9 }}>
-            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit shift</button>
+            {shift.status === "pending_confirmation" && (
+              <button onClick={confirmShift} disabled={confirming} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: confirming ? "wait" : "pointer", opacity: confirming ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                <Icon name="check" size={15} strokeWidth={2.4} /> {confirming ? "Confirming…" : "Confirm shift"}
+              </button>
+            )}
+            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: shift.status === "pending_confirmation" ? "#fff" : c.green, color: shift.status === "pending_confirmation" ? c.body : "#fff", border: shift.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit shift</button>
             <button onClick={() => onAssign(shift)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Override</button>
             <button onClick={cancelShift} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
             <button onClick={removeShift} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>

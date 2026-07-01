@@ -93,3 +93,44 @@ export function describe(form: ScheduleForm): string {
 // "HH:MM" for <input type="time"> (24h, zero-padded).
 export const toTimeInput = (hour: number, minute: number) =>
   `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+// Next fire time (as a Date) for the cron forms this app produces: single
+// minute + hour, day-of-month "*", month "*", day-of-week "*" or a comma list of
+// UTC weekday ints. The stored expression is UTC. Returns null for exotic
+// expressions or when nothing matches within ~2 weeks.
+export function nextCronRun(expr: string, from: Date = new Date()): Date | null {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [m, h, dom, mon, dow] = parts;
+  const minute = Number(m), hour = Number(h);
+  if (!Number.isInteger(minute) || !Number.isInteger(hour)) return null;
+  if (dom !== "*" || mon !== "*") return null;
+
+  let days: number[] | null = null;
+  if (dow !== "*") {
+    days = dow.split(",").map((d) => Number(d.trim()) % 7);
+    if (days.some((d) => !Number.isInteger(d))) return null;
+  }
+  for (let i = 0; i <= 14; i++) {
+    const cand = new Date(Date.UTC(
+      from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + i, hour, minute, 0, 0,
+    ));
+    if (cand <= from) continue;
+    if (days && !days.includes(cand.getUTCDay())) continue;
+    return cand;
+  }
+  return null;
+}
+
+// Short human label for a future time: "in <1h", "in ~5h", else venue-local
+// "Wed 1:45 PM".
+export function fmtRelative(target: Date, now: Date = new Date()): string {
+  const ms = target.getTime() - now.getTime();
+  if (ms <= 0) return "due now";
+  const hours = ms / 3600000;
+  if (hours < 1) return "in <1h";
+  if (hours < 48) return `in ~${Math.round(hours)}h`;
+  return target.toLocaleString("en-AU", {
+    timeZone: "Asia/Calcutta", weekday: "short", hour: "numeric", minute: "2-digit",
+  });
+}

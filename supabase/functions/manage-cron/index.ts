@@ -17,7 +17,7 @@ import { writeAuditLog } from "../_shared/auditLog.ts";
 const KNOWN_FNS = new Set([
   "sync-bookings", "confirm-reminder", "offer-tier-1", "remind-nonresponders",
   "escalate-tier-2", "escalate-tier-3", "pre-shift-reminder", "cancellation-followup",
-  "health-check",
+  "health-check", "wipeover-notify",
 ]);
 
 // Guard: "m h dom mon dow", each field digits / * / , / - / /. Keeps obviously

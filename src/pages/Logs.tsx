@@ -4,7 +4,24 @@ import { Icon } from "../components/Icon";
 import { Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { AUDIT_PAGE_SIZE, getAuditLogs, getRecentFailureCount } from "../lib/api";
+import { describe, parseCron } from "../lib/cron";
 import type { AuditLogResolved, AuditStatus } from "../lib/types";
+
+// Cron expression → plain-English local time, e.g. "2 8 * * 3" → "Every Wednesday
+// at 1:32 PM (IST)". Falls back to the raw expression if it isn't parseable.
+function humanCron(expr: string): string {
+  const f = parseCron(expr.trim());
+  return f ? describe(f) : expr;
+}
+
+// manage-cron summaries embed the raw cron ("…rescheduled … to 2 8 * * 3."). Swap
+// that expression for the readable time so the log row shows an actual time.
+const CRON_IN_TEXT = /(?:\d+|\*)\s+(?:\d+|\*)\s+[\d*,\-/]+\s+[\d*,\-/]+\s+[\d*,\-/]+/;
+function humanizeSummary(summary: string, source: string): string {
+  if (source !== "manage-cron") return summary;
+  const m = summary.match(CRON_IN_TEXT);
+  return m ? summary.replace(m[0], humanCron(m[0])) : summary;
+}
 
 // source (code) -> plain-English display name (Spec §4).
 const SOURCE_LABEL: Record<string, string> = {
@@ -103,7 +120,7 @@ function formatVal(v: unknown): string {
 function detailLines(detail: Record<string, unknown>): { label: string; value: string }[] {
   return Object.entries(detail)
     .filter(([k, v]) => !isIdKey(k) && v != null && v !== "")
-    .map(([k, v]) => ({ label: humanizeKey(k), value: formatVal(v) }));
+    .map(([k, v]) => ({ label: humanizeKey(k), value: k === "schedule" && typeof v === "string" ? humanCron(v) : formatVal(v) }));
 }
 
 export function Logs() {
@@ -211,7 +228,7 @@ export function Logs() {
                         <span style={{ fontSize: 13.5, fontWeight: 600 }}>{log.event_label}</span>
                         <span style={{ background: m.bg, color: m.fg, fontSize: 10, letterSpacing: "0.03em", textTransform: "uppercase", fontWeight: 700, padding: "1px 7px", borderRadius: 5 }}>{m.label}</span>
                       </div>
-                      <div style={{ fontSize: 13, color: "#5d665f", marginTop: 4, lineHeight: 1.5 }}>{log.summary}</div>
+                      <div style={{ fontSize: 13, color: "#5d665f", marginTop: 4, lineHeight: 1.5 }}>{humanizeSummary(log.summary, log.source)}</div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, fontSize: 11, color: c.faint }}>
                         <span>{SOURCE_LABEL[log.source] ?? log.source}</span>
                         <span>·</span>
@@ -227,6 +244,12 @@ export function Logs() {
                       {log.error_message && (
                         <div style={{ background: "#fbeae8", border: `1px solid #e6c4be`, borderRadius: 6, padding: "9px 11px", fontSize: 12.5, color: "#a8392b", fontFamily: font.body }}>
                           <span style={{ fontWeight: 700 }}>Error: </span>{log.error_message}
+                        </div>
+                      )}
+                      {/* Skipped/warning runs aren't failures — spell out why the job did nothing. */}
+                      {!log.error_message && (log.status === "skipped" || log.status === "warning") && (
+                        <div style={{ background: "#f4f2ec", border: `1px solid ${c.border}`, borderRadius: 6, padding: "9px 11px", fontSize: 12.5, color: c.body }}>
+                          <span style={{ fontWeight: 700 }}>Reason it was {log.status === "warning" ? "flagged" : "skipped"}: </span>{humanizeSummary(log.summary, log.source)}
                         </div>
                       )}
                       {entity && (
@@ -245,7 +268,7 @@ export function Logs() {
                           ))}
                         </div>
                       )}
-                      {!log.error_message && !entity && detailRows.length === 0 && (
+                      {log.status === "success" && !log.error_message && !entity && detailRows.length === 0 && (
                         <div style={{ fontSize: 12, color: c.faint }}>No extra detail recorded.</div>
                       )}
                     </div>

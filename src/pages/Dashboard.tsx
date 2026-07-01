@@ -10,14 +10,15 @@ import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
 import {
-  confirmCancellation, confirmShifts, dismissAlert, getAlerts,
+  confirmCancellation, confirmShifts, dismissAlert, getAlerts, getBookings,
   getShifts, getStaffing,
 } from "../lib/api";
 import {
   countLabel, dateLabel, longDateLabel, shiftSubtitle, shiftTitle, shortType,
   staffingDots, statusOf, timeParts,
 } from "../lib/format";
-import type { Alert, Shift, ShiftStaffing } from "../lib/types";
+import { useEscalationLabel } from "../lib/useEscalation";
+import type { Alert, Booking, Shift, ShiftStaffing } from "../lib/types";
 
 function Kpi({ icon, color, label, value, sub }: { icon: string; color: string; label: string; value: number; sub: string }) {
   return (
@@ -57,10 +58,12 @@ const ALERT_COLOR: Record<string, string> = {
 
 export function Dashboard() {
   const { canEdit, profile } = useAuth();
+  const escLabel = useEscalationLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [staffing, setStaffing] = useState<Record<string, ShiftStaffing>>({});
+  const [bookings, setBookings] = useState<Record<string, Booking>>({});
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState<Shift | null>(null);
@@ -69,9 +72,14 @@ export function Dashboard() {
   const [view, setView] = useState<View>("agenda");
 
   async function load() {
-    const [s, st, a] = await Promise.all([getShifts(), getStaffing(), getAlerts()]);
-    setShifts(s); setStaffing(st); setAlerts(a); setLoading(false);
+    const [s, st, a, b] = await Promise.all([getShifts(), getStaffing(), getAlerts(), getBookings()]);
+    setShifts(s); setStaffing(st); setAlerts(a);
+    setBookings(Object.fromEntries(b.map((x) => [x.id, x])));
+    setLoading(false);
   }
+  // Booking (guest) name for a shift; falls back to the clean-type label for
+  // manual shifts with no linked booking.
+  const shiftName = (s: Shift) => (s.booking_id && bookings[s.booking_id]?.guest_name) || shiftTitle(s);
   useEffect(() => { load(); }, []);
 
   // Deep-link from the confirmation email's "Edit Shift" button: /?edit=<shiftId>
@@ -172,11 +180,11 @@ export function Dashboard() {
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
                         <Badge label={shortType(s)} bg={(TYPE_BADGE[s.shift_type] ?? TYPE_BADGE.other).bg} fg={(TYPE_BADGE[s.shift_type] ?? TYPE_BADGE.other).fg} />
                         <Badge label={tierLabel} dot={status.dot} bg={status.bg} fg={status.fg} />
-                        {escalating && <Badge label="Tier 3 in 6h" bg="#eaf4ee" fg="#256b43" />}
+                        {escalating && <Badge label={escLabel ? `Tier 3 ${escLabel}` : "Escalating · Tier 3"} bg="#eaf4ee" fg="#256b43" />}
                         <Badge label={s.source === "manual" ? "Manual" : "Auto"} bg={s.source === "manual" ? "#e7f0ed" : "#f0eee9"} fg={s.source === "manual" ? "#21564b" : "#6b665c"} />
                         {s.is_modified && <span style={{ fontSize: 10, color: c.muted2, border: `1px solid ${c.border3}`, borderRadius: 3, padding: "0 5px" }}>Edited</span>}
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{shiftTitle(s)}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>{shiftName(s)}</div>
                       <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2 }}>{shiftSubtitle(s, staffing[s.id])}</div>
                     </div>
                     <div style={{ flex: "none", textAlign: "center" }}>
@@ -256,8 +264,11 @@ export function Dashboard() {
                             <Button kind="danger" onClick={async () => { await confirmCancellation(a.id); await load(); }} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm cancel</Button>
                             <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>No action</button>
                           </>
-                        ) : a.alert_type === "understaffed_urgent" ? (
-                          <button onClick={() => shift && setAssign(shift)} style={{ background: "none", border: "none", color: c.danger, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Assign manually <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
+                        ) : a.alert_type === "understaffed_urgent" || a.alert_type === "cleaner_cancelled" ? (
+                          <>
+                            <button onClick={() => shift && setAssign(shift)} style={{ background: "none", border: "none", color: c.danger, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Assign manually <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
+                            {a.alert_type === "cleaner_cancelled" && <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>}
+                          </>
                         ) : a.alert_type === "venue_gap" ? (
                           <button onClick={() => setShowNew(true)} style={{ background: "none", border: "none", color: c.teal, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Plan a clean <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
                         ) : (

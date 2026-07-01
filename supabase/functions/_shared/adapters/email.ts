@@ -24,8 +24,13 @@ export interface HealthResult {
   detail: string;
 }
 
-// Read-only connection probe — reads the Gmail profile (users.getProfile).
-// Does NOT send any email. Returns configured:false when creds are absent.
+// Connection probe that works with a SEND-ONLY token. We don't call any Gmail
+// data endpoint (users.getProfile etc. need a read scope this token doesn't have
+// and would 403). Instead:
+//   1. exchange the refresh token → access token  (proves the login still works)
+//   2. call Google's OAuth tokeninfo on that token (works with any scope) and
+//      confirm the send scope is present         (proves sending will work)
+// Sends no email. Returns configured:false when creds are absent.
 export async function checkHealth(): Promise<HealthResult> {
   const sender = Deno.env.get("GMAIL_SENDER");
   if (!sender || !googleConfigured()) {
@@ -33,19 +38,22 @@ export async function checkHealth(): Promise<HealthResult> {
   }
   const accessToken = await getGoogleAccessToken();
   if (!accessToken) {
-    return { name: "gmail", configured: true, ok: false, detail: "refresh-token exchange failed" };
+    return { name: "gmail", configured: true, ok: false, detail: "refresh-token exchange failed — the Google login needs reconnecting" };
   }
   try {
     const res = await fetch(
-      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
     );
-    return {
-      name: "gmail",
-      configured: true,
-      ok: res.ok,
-      detail: res.ok ? "profile readable, token valid" : `HTTP ${res.status}: ${await res.text()}`,
-    };
+    if (!res.ok) {
+      return { name: "gmail", configured: true, ok: false, detail: `token check failed — HTTP ${res.status}: ${await res.text()}` };
+    }
+    const info = await res.json().catch(() => ({}));
+    const scopes = String((info as { scope?: string }).scope ?? "");
+    // gmail.send, or full-access mail.google.com, both allow sending.
+    const canSend = /gmail\.send|mail\.google\.com/.test(scopes);
+    return canSend
+      ? { name: "gmail", configured: true, ok: true, detail: "token valid, send scope present" }
+      : { name: "gmail", configured: true, ok: false, detail: `token valid but missing the gmail.send scope (has: ${scopes || "none"})` };
   } catch (e) {
     return { name: "gmail", configured: true, ok: false, detail: String(e) };
   }

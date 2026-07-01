@@ -21,6 +21,7 @@ const META: JobMeta[] = [
   { fn: "remind-nonresponders", label: "Non-Responder Reminders", desc: "Re-pings cleaners who were offered a shift but haven't replied.", group: "weekly", order: 4 },
   { fn: "escalate-tier-2", label: "Tier 2 Escalation", desc: "Opens shifts still unfilled up to Tier 2 cleaners.", group: "weekly", order: 5 },
   { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Opens shifts still unfilled up to Tier 3 cleaners.", group: "weekly", order: 6 },
+  { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashley when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about their upcoming shift.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },

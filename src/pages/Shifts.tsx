@@ -9,6 +9,7 @@ import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
 import { confirmShifts, getAlerts, getShifts, getStaffing } from "../lib/api";
+import { useEscalationLabel } from "../lib/useEscalation";
 import {
   countLabel, shiftTitle, staffingDots, statusOf, timeParts, typeColumn, weekKey, weekRangeLabel,
 } from "../lib/format";
@@ -20,6 +21,7 @@ const GRID = "26px 150px 92px 1fr 110px 110px 170px 110px";
 
 export function Shifts() {
   const { canEdit } = useAuth();
+  const escLabel = useEscalationLabel();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [staffing, setStaffing] = useState<Record<string, ShiftStaffing>>({});
   const [urgentIds, setUrgentIds] = useState<Set<string>>(new Set());
@@ -164,7 +166,7 @@ export function Shifts() {
                             {badgeLabel}
                           </span>
                           <span style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.04em", color: s.venue_scope === "partial_venue" ? "#9a6512" : "#21564b", background: s.venue_scope === "partial_venue" ? "#fdf4e3" : "#e7f0ed", borderRadius: 3, padding: "1px 6px" }}>{s.venue_scope === "partial_venue" ? "Partial venue" : "Full venue"}</span>
-                          {escalating && <span style={{ fontSize: 9.5, fontWeight: 700, color: c.warn }}>Tier 3 in 6h</span>}
+                          {escalating && <span style={{ fontSize: 9.5, fontWeight: 700, color: c.warn }}>{escLabel ? `Tier 3 ${escLabel}` : "Escalating · Tier 3"}</span>}
                           {s.is_modified && <span style={{ fontSize: 9.5, color: c.muted2, border: `1px solid ${c.border3}`, borderRadius: 3, padding: "0 5px" }}>Edited</span>}
                         </div>
                       </div>

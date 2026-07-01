@@ -6,7 +6,8 @@ import { Icon } from "../components/Icon";
 import { Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
-import { confirmCancellation, dismissAlert, getAlerts, getShifts } from "../lib/api";
+import { AssignModal } from "../components/AssignModal";
+import { confirmCancellation, confirmShifts, dismissAlert, getAlerts, getShifts } from "../lib/api";
 import { timeLabel } from "../lib/format";
 import type { Alert, AlertType, Shift } from "../lib/types";
 
@@ -24,6 +25,7 @@ export function Alerts() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [drawer, setDrawer] = useState<Shift | null>(null);
+  const [assign, setAssign] = useState<Shift | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
 
@@ -107,14 +109,20 @@ export function Alerts() {
                           <button onClick={() => navigate("/shifts")} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Schedule a cleaning shift</button>
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
                         </>
-                      ) : a.alert_type === "understaffed_urgent" ? (
+                      ) : a.alert_type === "understaffed_urgent" || a.alert_type === "cleaner_cancelled" ? (
                         <>
-                          <button onClick={() => navigate("/shifts")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Assign manually</button>
+                          <button onClick={() => shift ? setAssign(shift) : navigate("/shifts")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Assign manually</button>
                           {shift && <button onClick={() => setDrawer(shift)} style={{ background: "none", border: "none", color: c.green, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift →</button>}
+                          <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
                         </>
                       ) : (
                         <>
-                          {shift && <button onClick={() => setDrawer(shift)} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift</button>}
+                          {shift?.status === "pending_confirmation" && (
+                            <button onClick={async () => { await confirmShifts([shift.id]); await load(); }} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                              <Icon name="check" size={13} strokeWidth={2.4} /> Confirm shift
+                            </button>
+                          )}
+                          {shift && <button onClick={() => setDrawer(shift)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift</button>}
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
                         </>
                       )}
@@ -148,7 +156,8 @@ export function Alerts() {
           </>
         )}
       </div>
-      {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={() => { setDrawer(null); navigate("/shifts"); }} />}
+      {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} />}
+      {assign && <AssignModal shift={assign} onClose={() => setAssign(null)} onAssigned={load} />}
     </div>
   );
 }

@@ -1,5 +1,7 @@
-// remind-nonresponders — cron: hourly. WhatsApp reminder to offered cleaners
-// with no response 18h after the offer; stamps reminder_sent_at (Spec §2, §7.1).
+// remind-nonresponders — cron (admin-scheduled). WhatsApp reminder to offered
+// cleaners who haven't responded and haven't already been reminded; stamps
+// reminder_sent_at. No internal delay — the admin controls timing via the
+// schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
@@ -12,13 +14,13 @@ Deno.serve(async (req) => {
   if (pre) return pre;
   const sb = serviceClient();
 
-  const cutoff = new Date(Date.now() - 18 * 3600_000).toISOString();
+  // Offered but not yet responded and not yet reminded — no age filter; the
+  // schedule decides when reminders go out.
   const { data: pending } = await sb
     .from("shift_assignments")
     .select("id, cleaner_id, offer_code, shift_id, shifts(shift_date, start_time)")
     .eq("status", "offered")
-    .is("reminder_sent_at", null)
-    .lte("offered_at", cutoff);
+    .is("reminder_sent_at", null);
 
   let reminded = 0;
   for (const a of pending ?? []) {
@@ -29,7 +31,7 @@ Deno.serve(async (req) => {
       await sendMessage(
         cleaner.phone,
         `Reminder: please respond to the cleaning shift offer on ${sh?.shift_date ?? ""}.\n` +
-          `Reply YES ${a.offer_code} / NO ${a.offer_code}.`,
+          `Tap Accept or Decline on the offer, or reply ACCEPT ${a.offer_code} / DECLINE ${a.offer_code}.`,
       );
     }
     await sb.from("shift_assignments")
@@ -50,11 +52,21 @@ Deno.serve(async (req) => {
   }
 
   if (reminded === 0) {
+    // Distinguish "nobody has an open offer" from "offers exist but were all
+    // already reminded".
+    const { count: openOffers } = await sb
+      .from("shift_assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "offered");
+    const summary = (openOffers ?? 0) === 0
+      ? "No cleaners have an open offer awaiting a reply. No reminders needed."
+      : `${openOffers} open offer(s) exist, but all have already been reminded. No new reminders sent.`;
     await writeAuditLog(sb, {
       event_type: "reminder.nonresponder_skipped",
       event_label: "Non-Responder Reminders",
       status: "skipped",
-      summary: "No non-responding cleaners found past 18 hours. No reminders needed.",
+      summary,
+      detail: { open_offers: openOffers ?? 0 },
       source: SOURCE,
       triggered_by: "cron",
     });

@@ -1,6 +1,7 @@
-// escalate-tier-3 — cron: Wed 14:00 IST testing (Wed 08:30 UTC); go-live tz TBD.
-// 24h after Tier 2: still not fully staffed -> offer Tier 3 + raise
-// understaffed_urgent alert + urgent email to Ashley (Spec §2, §7.1).
+// escalate-tier-3 — cron (admin-scheduled). Any shift still in Tier-2 staffing ->
+// offer Tier 3 + raise understaffed_urgent alert + urgent email to Ashley. No
+// internal delay: the admin controls the spacing after Tier 2 via this job's
+// schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
@@ -14,8 +15,9 @@ Deno.serve(async (req) => {
   if (pre) return pre;
 
   const sb = serviceClient();
-  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
 
+  // Every shift still in Tier-2 staffing. No internal age gate — the admin decides
+  // when to escalate to Tier 3 purely through this job's schedule.
   const { data: shifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type")
@@ -24,16 +26,6 @@ Deno.serve(async (req) => {
 
   let escalated = 0;
   for (const s of shifts ?? []) {
-    const { data: lastT2 } = await sb
-      .from("shift_assignments")
-      .select("offered_at")
-      .eq("shift_id", s.id)
-      .eq("tier_at_offer", "tier_2")
-      .order("offered_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!lastT2 || lastT2.offered_at > cutoff) continue;
-
     try {
       const res = await offerTier(sb, s.id, "tier_3");
       escalated++;
@@ -89,7 +81,8 @@ Deno.serve(async (req) => {
       event_type: "escalation.tier3_skipped",
       event_label: "Tier 3 Escalation",
       status: "skipped",
-      summary: "All shifts fully staffed. No Tier 3 escalation needed.",
+      summary: "No shifts are in Tier 2 staffing. All shifts are staffed or not yet at Tier 2 — no Tier 3 escalation needed.",
+      detail: { in_tier2_staffing: shifts?.length ?? 0 },
       source: SOURCE,
       triggered_by: "cron",
     });

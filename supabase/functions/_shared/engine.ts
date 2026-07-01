@@ -41,31 +41,54 @@ function gen4(): string {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-// Send the interactive Accept/Decline offer to one cleaner. Button payloads carry
-// the assignment id ("accept:<id>") so the inbound webhook maps the tap back to
-// this exact row; the keyword text is the fallback when buttons aren't available.
+// Send the interactive Accept/Decline/Cancel offer to one cleaner. Button payloads
+// carry the assignment id ("accept:<id>") so the inbound webhook maps the tap back
+// to this exact row. Cancel lets a cleaner who accepted later drop the shift from
+// the same message. Keyword text is the fallback when buttons aren't available.
 async function sendOfferMessage(
   phone: string,
   shift: ShiftRow,
   assignmentId: string | undefined,
   offerCode: string,
-): Promise<void> {
+) {
+  const time = shift.start_time.slice(0, 5);
   const body =
-    `*SHIFT DETAILS*\n\n📅 Date: ${shift.shift_date}\n⏰ Time: ${shift.start_time.slice(0, 5)}\n\n` +
-    `Please confirm your availability:`;
-  await sendButtons(
+    `*SHIFT DETAILS*\n\n📅 Date: ${shift.shift_date}\n⏰ Time: ${time}\n\n` +
+    `Tap *Accept* to take this shift, or *Decline* to pass.\n` +
+    `If you accept and later can't make it, tap *Cancel*.`;
+  return await sendButtons(
     phone,
     body,
     [
       { id: `accept:${assignmentId}`, title: "✅ Accept" },
       { id: `decline:${assignmentId}`, title: "❌ Decline" },
+      { id: `cancel:${assignmentId}`, title: "🚫 Cancel" },
     ],
     {
-      header: "New Cleaning Shift Available",
+      header: "🧹 New Cleaning Shift Available",
       footer: "Wybalena Organic Farm",
-      fallbackText: `New cleaning shift on ${shift.shift_date} at ${shift.start_time.slice(0, 5)}.\nReply: YES ${offerCode} to accept · NO ${offerCode} to decline.`,
+      fallbackText: `New cleaning shift on ${shift.shift_date} at ${time}.\n` +
+        `Reply: ACCEPT ${offerCode} to accept · DECLINE ${offerCode} to decline · CANCEL ${offerCode} to cancel.`,
     },
   );
+}
+
+// Send the offer to one cleaner and record the outbound message id on the
+// assignment, so an inbound tap/reply can be matched back to this exact offer.
+async function sendAndRecordOffer(
+  sb: SupabaseClient,
+  phone: string | null,
+  shift: ShiftRow,
+  assignmentId: string | undefined,
+  offerCode: string,
+): Promise<void> {
+  if (!phone || !assignmentId) return;
+  const res = await sendOfferMessage(phone, shift, assignmentId, offerCode);
+  if (res?.providerMessageId) {
+    await sb.from("shift_assignments")
+      .update({ offer_message_id: res.providerMessageId })
+      .eq("id", assignmentId);
+  }
 }
 
 // Manually offer a shift to one specific cleaner (admin override). Unlike the old
@@ -106,7 +129,7 @@ export async function offerToCleaner(
       .eq("id", shiftId);
   }
 
-  if (cleaner.phone) await sendOfferMessage(cleaner.phone, shift, row?.id, row?.offer_code ?? code);
+  await sendAndRecordOffer(sb, cleaner.phone, shift, row?.id, row?.offer_code ?? code);
   return "offered";
 }
 
@@ -188,7 +211,7 @@ export async function offerTier(
   const byId = new Map((inserted ?? []).map((r) => [r.cleaner_id, r]));
   for (const c of candidates) {
     const row = byId.get(c.id);
-    await sendOfferMessage(c.phone, shift, row?.id, row?.offer_code ?? "");
+    await sendAndRecordOffer(sb, c.phone, shift, row?.id, row?.offer_code ?? "");
   }
   return {
     count: candidates.length,

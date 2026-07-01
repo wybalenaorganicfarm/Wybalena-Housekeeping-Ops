@@ -7,9 +7,8 @@
 // cleaner (phone) + offer (offer_code) -> apply accept/decline/cancel -> reply.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { parseInbound } from "../_shared/adapters/whatsapp.ts";
+import { parseInbound, sendDeclineConfirm, sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { acceptOffer, cancelOffer, declineOffer } from "../_shared/engine.ts";
-import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "whatsapp-inbound";
@@ -23,7 +22,7 @@ function normPhone(p: string): string {
 async function shiftContext(sb: ReturnType<typeof serviceClient>, assignmentId: string) {
   const { data: a } = await sb
     .from("shift_assignments")
-    .select("shift_id, shifts(shift_date, required_cleaners, status)")
+    .select("shift_id, shifts(shift_date, start_time, required_cleaners, status)")
     .eq("id", assignmentId)
     .maybeSingle();
   const sh = (a as Record<string, any>)?.shifts;
@@ -40,6 +39,7 @@ async function shiftContext(sb: ReturnType<typeof serviceClient>, assignmentId: 
   return {
     shiftId,
     shiftDate: sh?.shift_date as string | undefined,
+    shiftTime: (sh?.start_time as string | undefined)?.slice(0, 5),
     required: sh?.required_cleaners as number | undefined,
     status: sh?.status as string | undefined,
     accepted,
@@ -59,6 +59,9 @@ Deno.serve(async (req) => {
   }
 
   const payload = await req.json().catch(() => ({}));
+  // Log the raw inbound shape so button-reply payload variants are diagnosable in
+  // the function logs if matching ever fails again.
+  console.log("[whatsapp-inbound] payload", JSON.stringify(payload));
   const sb = serviceClient();
   const replies = parseInbound(payload);
   const results: unknown[] = [];
@@ -102,53 +105,55 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // 2b. Resolve the offer this reply refers to.
-    //     Button taps carry the assignment id in the payload — use it directly,
-    //     but verify it belongs to this cleaner and is still actionable.
+    // 2b. Resolve the offer this reply refers to, trying each signal in turn and
+    //     FALLING THROUGH if one doesn't resolve. We only verify the row belongs to
+    //     this cleaner (no status filter) so a declined offer can still be
+    //     re-accepted; per-action logic below decides what's valid.
     let assignmentId: string | null = null;
-    if (r.assignmentId) {
-      const { data: own } = await sb
+    const ownedById = async (col: string, val: string) => {
+      const { data } = await sb
         .from("shift_assignments")
         .select("id")
-        .eq("id", r.assignmentId)
+        .eq(col, val)
         .eq("cleaner_id", cleaner.id)
-        .in("status", ["offered", "accepted"])
-        .maybeSingle();
-      assignmentId = own?.id ?? null;
-    } else if (r.offerCode) {
-      const { data: byCode } = await sb
-        .from("shift_assignments")
-        .select("id, status")
-        .eq("cleaner_id", cleaner.id)
-        .eq("offer_code", r.offerCode)
-        .in("status", ["offered", "accepted"])
         .order("offered_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      assignmentId = byCode?.id ?? null;
-    } else {
+      return data?.id ?? null;
+    };
+
+    // (a) button-encoded assignment id.
+    if (r.assignmentId) assignmentId = await ownedById("id", r.assignmentId);
+    // (b) the message this reply quotes → the offer's stored message id (reliable
+    //     even with several open offers, and for the Yes/No decline confirmation).
+    if (!assignmentId && r.quotedMessageId) assignmentId = await ownedById("offer_message_id", r.quotedMessageId);
+    // (c) explicit offer code in the text.
+    if (!assignmentId && r.offerCode) assignmentId = await ownedById("offer_code", r.offerCode);
+    // (d) last resort: the cleaner's single open offer.
+    if (!assignmentId) {
       const { data: open } = await sb
         .from("shift_assignments")
         .select("id")
         .eq("cleaner_id", cleaner.id)
-        .in("status", ["offered", "accepted"]);
+        .in("status", ["offered", "accepted"])
+        .order("offered_at", { ascending: false });
       if ((open ?? []).length === 1) assignmentId = open![0].id;
       else if ((open ?? []).length > 1) {
-        await sendMessage(cleaner.phone, "You have multiple offers — please include the code, e.g. YES 4823.");
+        await sendMessage(cleaner.phone, "You have more than one open shift offer. Please tap the buttons on the specific shift message, or reply with its code (e.g. ACCEPT 4823).");
         results.push({ id: r.providerMessageId, skipped: "ambiguous, nudged" });
         continue;
       }
     }
 
     if (!assignmentId) {
-      await sendMessage(cleaner.phone, "We couldn't match that to an open offer. Reply YES/NO/CANCEL with the code.");
+      await sendMessage(cleaner.phone, "Sorry, we couldn't find an open shift offer to apply that to. If you were offered a shift, please tap Accept, Decline or Cancel on the offer message.");
       results.push({ id: r.providerMessageId, skipped: "no matching offer" });
       await writeAuditLog(sb, {
         event_type: "response.unknown",
         event_label: "WhatsApp Reply Received",
         status: "warning",
         summary: `Unrecognised WhatsApp reply from ${cleaner.full_name}. Could not match to an open offer.`,
-        detail: { phone, text: r.rawText },
+        detail: { phone, text: r.rawText, action: r.action, assignment_id: r.assignmentId, offer_code: r.offerCode },
         source: SOURCE,
         cleaner_id: cleaner.id,
         triggered_by: "webhook",
@@ -156,97 +161,96 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Snapshot the shift context BEFORE acting (date stays valid even if the row
-    // changes), for plain-English log summaries.
+    // Snapshot the shift context + this assignment's current state BEFORE acting.
     const ctx = await shiftContext(sb, assignmentId);
     const dateLabel = ctx.shiftDate ?? "—";
+    const when = `${dateLabel}${ctx.shiftTime ? ` at ${ctx.shiftTime}` : ""}`;
+    const { data: assn } = await sb
+      .from("shift_assignments").select("status, offer_code").eq("id", assignmentId).maybeSingle();
+    const code = assn?.offer_code ?? "";
+    const alreadyAccepted = assn?.status === "accepted";
+    const logResponse = (event: string, status: "success" | "warning", summary: string) =>
+      writeAuditLog(sb, {
+        event_type: event, event_label: "WhatsApp Reply Received", status, summary,
+        detail: { assignment_id: assignmentId }, source: SOURCE,
+        shift_id: ctx.shiftId, cleaner_id: cleaner.id, triggered_by: "webhook",
+      });
 
     // 3. Apply the action.
     switch (r.action) {
       case "accept": {
+        if (alreadyAccepted) {
+          await sendMessage(cleaner.phone, `You're already confirmed for this shift ✅. If you can't make it, tap *Cancel* on the shift offer, or reply *CANCEL ${code}*.`);
+          results.push({ id: r.providerMessageId, action: "accept", result: "already_accepted" });
+          break;
+        }
         const res = await acceptOffer(sb, assignmentId);
-        if (res === "accepted") await sendMessage(cleaner.phone, "You're confirmed — thank you! ✅");
-        else if (res === "already_full") await sendMessage(cleaner.phone, "Sorry, that shift just filled up.");
-        else await sendMessage(cleaner.phone, "That offer is no longer open.");
-        results.push({ id: r.providerMessageId, action: "accept", result: res });
-
         if (res === "accepted") {
+          await sendMessage(cleaner.phone, `You're confirmed — thank you! ✅\nYou're on the cleaning team for ${when}.\nIf you later can't make it, tap *Cancel* on the shift offer, or reply *CANCEL ${code}*.`);
           const after = await shiftContext(sb, assignmentId);
-          await writeAuditLog(sb, {
-            event_type: "response.accepted",
-            event_label: "WhatsApp Reply Received",
-            status: "success",
-            summary: `${cleaner.full_name} accepted the shift on ${dateLabel}. Assigned count: ${after.accepted}/${after.required ?? "?"}.`,
-            detail: { assignment_id: assignmentId, accepted: after.accepted, required: after.required },
-            source: SOURCE,
-            shift_id: ctx.shiftId,
-            cleaner_id: cleaner.id,
-            triggered_by: "webhook",
-          });
-          // Shift just filled up as a result of this acceptance.
+          await logResponse("response.accepted", "success", `${cleaner.full_name} accepted the shift on ${dateLabel}. Assigned count: ${after.accepted}/${after.required ?? "?"}.`);
           if (after.status === "fully_staffed") {
-            await writeAuditLog(sb, {
-              event_type: "response.shift_full",
-              event_label: "WhatsApp Reply Received",
-              status: "success",
-              summary: `Shift on ${dateLabel} is now fully staffed. Remaining offered cleaners notified.`,
-              detail: { shift_id: ctx.shiftId, accepted: after.accepted, required: after.required },
-              source: SOURCE,
-              shift_id: ctx.shiftId,
-              triggered_by: "webhook",
-            });
+            await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. Remaining offered cleaners notified.`);
           }
         } else if (res === "already_full") {
-          await writeAuditLog(sb, {
-            event_type: "response.shift_full",
-            event_label: "WhatsApp Reply Received",
-            status: "success",
-            summary: `Shift on ${dateLabel} is now fully staffed. Remaining offered cleaners notified.`,
-            detail: { shift_id: ctx.shiftId },
-            source: SOURCE,
-            shift_id: ctx.shiftId,
-            cleaner_id: cleaner.id,
-            triggered_by: "webhook",
-          });
+          await sendMessage(cleaner.phone, "Sorry, this shift just filled up and is now fully staffed. Thanks for responding!");
+          await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. ${cleaner.full_name}'s acceptance came in after it filled.`);
+        } else {
+          await sendMessage(cleaner.phone, "Sorry, that shift offer is no longer open.");
         }
+        results.push({ id: r.providerMessageId, action: "accept", result: res });
         break;
       }
       case "decline": {
+        // Can't decline after accepting — give it up via Cancel instead.
+        if (alreadyAccepted) {
+          await sendMessage(cleaner.phone, `You've already accepted this shift. If you can't make it, please tap the *Cancel* button on that shift offer, or reply *CANCEL ${code}*.`);
+          results.push({ id: r.providerMessageId, action: "decline", result: "blocked_already_accepted" });
+          break;
+        }
+        // Re-verify before declining.
+        const res = await sendDeclineConfirm(cleaner.phone, dateLabel, assignmentId);
+        if (res?.providerMessageId) {
+          await sb.from("shift_assignments").update({ offer_message_id: res.providerMessageId }).eq("id", assignmentId);
+        }
+        results.push({ id: r.providerMessageId, action: "decline", result: "confirm_requested" });
+        break;
+      }
+      case "decline_confirm": { // tapped "Yes, decline"
         await declineOffer(sb, assignmentId);
-        await sendMessage(cleaner.phone, "Noted — thanks for letting us know.");
-        results.push({ id: r.providerMessageId, action: "decline" });
-        await writeAuditLog(sb, {
-          event_type: "response.declined",
-          event_label: "WhatsApp Reply Received",
-          status: "success",
-          summary: `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list.`,
-          detail: { assignment_id: assignmentId },
-          source: SOURCE,
-          shift_id: ctx.shiftId,
-          cleaner_id: cleaner.id,
-          triggered_by: "webhook",
-        });
+        await sendMessage(cleaner.phone, `No problem — you've declined the shift on ${dateLabel}. Thanks for letting us know.`);
+        await logResponse("response.declined", "success", `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list.`);
+        results.push({ id: r.providerMessageId, action: "decline_confirm" });
+        break;
+      }
+      case "decline_cancel": { // tapped "No, go back"
+        await sendMessage(cleaner.phone, "Great — please tap *Accept* to take the shift, or *Decline* if you can't make it.");
+        results.push({ id: r.providerMessageId, action: "decline_cancel" });
         break;
       }
       case "cancel": {
         await cancelOffer(sb, assignmentId);
-        await sendMessage(cleaner.phone, "Your spot has been cancelled and re-offered. Thanks for the heads up.");
+        await sendMessage(cleaner.phone, "Your spot has been cancelled and the shift has been re-offered. Thanks for the heads up.");
+        // Raise an alert so the admin sees it on the Dashboard + Alerts and can
+        // step in / assign manually. Dedupe one open alert per shift.
+        if (ctx.shiftId) {
+          const { data: dup } = await sb.from("alerts").select("id")
+            .eq("alert_type", "cleaner_cancelled").eq("shift_id", ctx.shiftId).eq("status", "open").maybeSingle();
+          if (!dup) {
+            await sb.from("alerts").insert({
+              alert_type: "cleaner_cancelled",
+              shift_id: ctx.shiftId,
+              title: "Cleaner cancelled",
+              body: `${cleaner.full_name} cancelled their spot on ${dateLabel}. Re-assignment is in progress — you can also assign a cleaner manually.`,
+            });
+          }
+        }
+        await logResponse("response.cancelled", "warning", `${cleaner.full_name} cancelled their spot on ${dateLabel}. Re-assignment triggered; admin alerted.`);
         results.push({ id: r.providerMessageId, action: "cancel" });
-        await writeAuditLog(sb, {
-          event_type: "response.cancelled",
-          event_label: "WhatsApp Reply Received",
-          status: "warning",
-          summary: `${cleaner.full_name} cancelled their confirmed spot on ${dateLabel}. Re-assignment triggered.`,
-          detail: { assignment_id: assignmentId },
-          source: SOURCE,
-          shift_id: ctx.shiftId,
-          cleaner_id: cleaner.id,
-          triggered_by: "webhook",
-        });
         break;
       }
       default: {
-        await sendMessage(cleaner.phone, "Please reply YES, NO, or CANCEL followed by your offer code.");
+        await sendMessage(cleaner.phone, "Sorry, I didn't catch that. Please tap Accept, Decline or Cancel on the shift offer — or reply ACCEPT, DECLINE or CANCEL with your offer code.");
         results.push({ id: r.providerMessageId, action: "unknown, nudged" });
       }
     }
