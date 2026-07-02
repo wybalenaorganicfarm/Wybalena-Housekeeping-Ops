@@ -1,14 +1,30 @@
-// Resolve the confirming admin's display name for plain-English audit summaries.
-// Prefers the profile that owns the confirmation inbox (ALERT_EMAIL_TO); falls back
-// to the first admin, then a generic label.
+// The Operations Manager is the recipient of all system emails and the person
+// attributed to email-driven actions (e.g. confirming a shift from the email).
+// Resolved from the profile with role = 'operations_manager'; falls back to the
+// ALERT_EMAIL_TO env inbox (matched to a profile if possible) so emails still send
+// before an operations manager is designated.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
-export async function resolveAdminName(sb: SupabaseClient): Promise<string> {
-  const inbox = Deno.env.get("ALERT_EMAIL_TO");
+export interface OpsManager {
+  name: string;
+  email: string | null;
+}
+
+export async function opsManager(sb: SupabaseClient): Promise<OpsManager> {
+  const { data: mgr } = await sb
+    .from("profiles")
+    .select("full_name, email")
+    .eq("role", "operations_manager")
+    .order("created_at")
+    .limit(1)
+    .maybeSingle();
+  if (mgr?.email) return { name: mgr.full_name ?? "Operations Manager", email: mgr.email };
+
+  // Fallback: the configured alert inbox (and its profile name if it matches one).
+  const inbox = Deno.env.get("ALERT_EMAIL_TO") ?? null;
   if (inbox) {
     const { data } = await sb.from("profiles").select("full_name").eq("email", inbox).maybeSingle();
-    if (data?.full_name) return data.full_name;
+    return { name: data?.full_name ?? "Operations Manager", email: inbox };
   }
-  const { data } = await sb.from("profiles").select("full_name").eq("role", "admin").order("created_at").limit(1).maybeSingle();
-  return data?.full_name ?? "The admin";
+  return { name: "Operations Manager", email: null };
 }

@@ -5,7 +5,7 @@ import { userClient } from "./client.ts";
 
 export interface Caller {
   userId: string;
-  role: "super_admin" | "admin" | "team_leader" | null;
+  role: "super_admin" | "admin" | "operations_manager" | "team_leader" | null;
 }
 
 export async function getCaller(
@@ -22,7 +22,8 @@ export async function getCaller(
 }
 
 export function isWriter(role: Caller["role"]): boolean {
-  return role === "admin" || role === "super_admin";
+  // Operations Manager has the same full access as Admin.
+  return role === "admin" || role === "super_admin" || role === "operations_manager";
 }
 
 // Team leaders may manage cleaner status + notes (but not other admin actions).

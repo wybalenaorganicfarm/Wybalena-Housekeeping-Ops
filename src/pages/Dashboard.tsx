@@ -70,6 +70,7 @@ export function Dashboard() {
   const [assign, setAssign] = useState<Shift | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [view, setView] = useState<View>("agenda");
+  const [confirming, setConfirming] = useState<Record<string, boolean>>({});
 
   async function load() {
     const [s, st, a, b] = await Promise.all([getShifts(), getStaffing(), getAlerts(), getBookings()]);
@@ -115,7 +116,14 @@ export function Dashboard() {
   const attention = kpis.pending + kpis.urgent + kpis.staffing;
 
   async function confirm(id: string) {
-    await confirmShifts([id]); await load();
+    setConfirming((c) => ({ ...c, [id]: true }));
+    const { error } = await confirmShifts([id]);
+    setConfirming((c) => ({ ...c, [id]: false }));
+    if (error) return;
+    // Optimistic: flip to confirmed locally instead of refetching everything.
+    setShifts((prev) => prev.map((s) => s.id === id ? { ...s, status: "confirmed" } : s));
+    setAlerts((prev) => prev.filter((a) => !(a.alert_type === "unconfirmed_shifts" && a.shift_id === id)));
+    setDrawer((d) => d && d.id === id ? { ...d, status: "confirmed" } : d);
   }
 
   if (loading) return <Spinner />;
@@ -195,7 +203,7 @@ export function Dashboard() {
                     </div>
                     <div style={{ flex: "none" }} onClick={(e) => e.stopPropagation()}>
                       {canEdit && s.status === "pending_confirmation"
-                        ? <Button onClick={() => confirm(s.id)} style={{ borderRadius: 9 }}>Confirm</Button>
+                        ? <Button onClick={() => confirm(s.id)} loading={confirming[s.id]} style={{ borderRadius: 9 }}>Confirm</Button>
                         : canEdit && s.status === "staffing"
                           ? <Button kind="danger" onClick={() => setAssign(s)} style={{ borderRadius: 9 }}>Assign</Button>
                           : <Button kind="secondary" onClick={() => setDrawer(s)} style={{ borderRadius: 9 }}>View</Button>}
@@ -227,7 +235,7 @@ export function Dashboard() {
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>{shiftTitle(s)}</div>
                         <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2, lineHeight: 1.4 }}>{dateLabel(s.shift_date)} · {tp.hour}:{tp.min}</div>
                         <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 9 }} onClick={(e) => e.stopPropagation()}>
-                          <Button onClick={() => confirm(s.id)} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm</Button>
+                          <Button onClick={() => confirm(s.id)} loading={confirming[s.id]} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm</Button>
                           <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "6px 11px", fontSize: 11.5 }}>View</Button>
                         </div>
                       </div>

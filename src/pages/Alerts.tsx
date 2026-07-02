@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font } from "../theme";
 import { Icon } from "../components/Icon";
-import { Spinner } from "../components/ui";
+import { Spin, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
 import { AssignModal } from "../components/AssignModal";
@@ -28,12 +28,24 @@ export function Alerts() {
   const [assign, setAssign] = useState<Shift | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
+  const [confirming, setConfirming] = useState<Record<string, boolean>>({});
 
   async function load() {
     const [a, s] = await Promise.all([getAlerts(), getShifts()]);
     setAlerts(a); setShifts(s); setLoading(false);
   }
   useEffect(() => { load(); }, []);
+
+  // Optimistic confirm from an alert: mark it actioned + the shift confirmed
+  // locally so the row updates instantly, no full refetch.
+  async function confirmFromAlert(alertId: string, shiftId: string) {
+    setConfirming((c) => ({ ...c, [alertId]: true }));
+    const { error } = await confirmShifts([shiftId]);
+    setConfirming((c) => ({ ...c, [alertId]: false }));
+    if (error) return;
+    setAlerts((prev) => prev.map((a) => a.id === alertId ? { ...a, status: "actioned" } : a));
+    setShifts((prev) => prev.map((s) => s.id === shiftId ? { ...s, status: "confirmed" } : s));
+  }
 
   const shiftFor = (a: Alert) => (a.shift_id ? shifts.find((s) => s.id === a.shift_id) ?? null : null);
 
@@ -118,8 +130,8 @@ export function Alerts() {
                       ) : (
                         <>
                           {shift?.status === "pending_confirmation" && (
-                            <button onClick={async () => { await confirmShifts([shift.id]); await load(); }} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
-                              <Icon name="check" size={13} strokeWidth={2.4} /> Confirm shift
+                            <button disabled={confirming[a.id]} onClick={() => confirmFromAlert(a.id, shift.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: confirming[a.id] ? "wait" : "pointer", opacity: confirming[a.id] ? 0.7 : 1 }}>
+                              {confirming[a.id] ? <Spin size={13} color="#fff" /> : <Icon name="check" size={13} strokeWidth={2.4} />} Confirm shift
                             </button>
                           )}
                           {shift && <button onClick={() => setDrawer(shift)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift</button>}

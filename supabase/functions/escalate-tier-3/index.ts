@@ -6,6 +6,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
@@ -62,6 +63,7 @@ Deno.serve(async (req) => {
         "Wybalena URGENT: shift understaffed at Tier 3",
         `The ${s.shift_type} shift on ${s.shift_date} has reached Tier 3 and is still ` +
           `not fully staffed. Please assign cleaners manually.`,
+        (await opsManager(sb)).email ?? undefined,
       );
 
       await writeAuditLog(sb, {

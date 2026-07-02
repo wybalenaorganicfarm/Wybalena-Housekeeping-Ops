@@ -3,6 +3,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "cancellation-followup";
@@ -21,11 +22,13 @@ Deno.serve(async (req) => {
     .eq("status", "open")
     .lte("created_at", cutoff);
 
+  const opsEmail = (stale ?? []).length ? (await opsManager(sb)).email ?? undefined : undefined;
   for (const a of stale ?? []) {
     await sendEmail(
       "Wybalena: cancellation still needs review",
       `A booking cancellation has been awaiting your review for 3+ days: "${a.title}". ` +
         `Please confirm or dismiss it in the app.`,
+      opsEmail,
     );
     await writeAuditLog(sb, {
       event_type: "followup.cancellation_sent",

@@ -9,7 +9,7 @@
 // so we hand off to it. Idempotent: re-clicking a confirmed shift is a no-op.
 import { serviceClient } from "../_shared/client.ts";
 import { verifyShift } from "../_shared/confirmToken.ts";
-import { resolveAdminName } from "../_shared/admin.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SHIFT_LABEL: Record<string, string> = {
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
     .eq("alert_type", "unconfirmed_shifts")
     .eq("status", "open");
 
-  const who = await resolveAdminName(sb);
+  const who = (await opsManager(sb)).name;
   await writeAuditLog(sb, {
     event_type: "shift.confirmed",
     event_label: "Shift Confirmation",

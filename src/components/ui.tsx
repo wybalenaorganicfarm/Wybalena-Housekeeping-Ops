@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { ClipLoader } from "react-spinners";
+import { ClipLoader, PuffLoader } from "react-spinners";
 import { c, font } from "../theme";
 
 export function Card({ children, style, onClick }: { children: ReactNode; style?: CSSProperties; onClick?: () => void }) {
@@ -19,14 +19,21 @@ export function Badge({ label, dot, bg, fg }: { label: string; dot?: string; bg:
   );
 }
 
+// Inline spinner (react-spinners). Defaults to the button/text colour via
+// currentColor so it works on any background.
+export function Spin({ size = 14, color = "currentColor" }: { size?: number; color?: string }) {
+  return <ClipLoader size={size} color={color} cssOverride={{ display: "inline-block", verticalAlign: "middle", borderWidth: 2 }} />;
+}
+
 type BtnKind = "primary" | "secondary" | "danger" | "ghost";
-export function Button({ children, onClick, kind = "primary", disabled, style, type }: {
-  children: ReactNode; onClick?: () => void; kind?: BtnKind; disabled?: boolean; style?: CSSProperties; type?: "button" | "submit";
+export function Button({ children, onClick, kind = "primary", disabled, loading, style, type }: {
+  children: ReactNode; onClick?: () => void; kind?: BtnKind; disabled?: boolean; loading?: boolean; style?: CSSProperties; type?: "button" | "submit";
 }) {
+  const off = disabled || loading;
   const base: CSSProperties = {
     display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
     border: "none", borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 600,
-    fontFamily: font.body, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1,
+    fontFamily: font.body, cursor: off ? (loading ? "wait" : "not-allowed") : "pointer", opacity: off ? 0.65 : 1,
   };
   const kinds: Record<BtnKind, CSSProperties> = {
     primary: { background: c.green, color: "#fff" },
@@ -35,8 +42,8 @@ export function Button({ children, onClick, kind = "primary", disabled, style, t
     ghost: { background: "rgba(31,77,58,.08)", color: c.green },
   };
   return (
-    <button type={type ?? "button"} onClick={onClick} disabled={disabled} style={{ ...base, ...kinds[kind], ...style }}>
-      {children}
+    <button type={type ?? "button"} onClick={onClick} disabled={off} style={{ ...base, ...kinds[kind], ...style }}>
+      {loading && <Spin size={14} />}{children}
     </button>
   );
 }
@@ -67,7 +74,7 @@ export function ConfirmDialog({ title, message, confirmLabel = "Confirm", cancel
         <div style={{ fontSize: 13.5, color: c.muted, lineHeight: 1.5, margin: "10px 0 20px" }}>{message}</div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 9 }}>
           <Button kind="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
-          <Button kind={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>{busy ? "Working…" : confirmLabel}</Button>
+          <Button kind={danger ? "danger" : "primary"} onClick={onConfirm} loading={busy}>{confirmLabel}</Button>
         </div>
       </div>
     </div>
@@ -97,11 +104,13 @@ export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
   return <textarea {...props} style={{ ...inputStyle, resize: "vertical", ...(props.style as object) }} />;
 }
 
-export function Spinner({ label = "Loading…", size = 34 }: { label?: string; size?: number }) {
+// Full-area loader: fills its container (the page/main region) and centres both
+// ways, so it sits in the middle of the screen rather than the top-left.
+export function Spinner({ label = "Loading…", size = 64 }: { label?: string; size?: number }) {
   return (
-    <div style={{ padding: 48, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
-      <ClipLoader color={c.greenMid} size={size} speedMultiplier={0.9} />
-      {label && <div style={{ color: c.faint, fontSize: 12.5, fontWeight: 500 }}>{label}</div>}
+    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, background: c.sand }}>
+      <PuffLoader color={c.greenMid} size={size} speedMultiplier={0.9} />
+      {label && <div style={{ color: c.muted2, fontSize: 13, fontWeight: 500, letterSpacing: "0.02em" }}>{label}</div>}
     </div>
   );
 }

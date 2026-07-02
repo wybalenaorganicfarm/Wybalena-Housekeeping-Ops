@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { c, ROLE_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
-import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Select, Spinner } from "../components/ui";
+import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Select, Spin, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { PageHeader } from "../components/PageHeader";
-import { getUsers, provisionUser, removeUser, setUserStatus } from "../lib/api";
+import { getUsers, provisionUser, removeUser, setUserRole, setUserStatus } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { lastActiveLabel } from "../lib/format";
 import type { CountryCode } from "libphonenumber-js";
@@ -15,6 +15,7 @@ import type { Profile, UserRole, UserStatus } from "../lib/types";
 const ROLE_BADGE: Record<UserRole, { bg: string; fg: string; dot: string; shield?: boolean }> = {
   super_admin: { bg: "#eaeeec", fg: "#1F4D3A", dot: "#1F4D3A", shield: true },
   admin: { bg: "#E2EFE5", fg: "#2c6446", dot: "#3D8B5F" },
+  operations_manager: { bg: "#e4eef5", fg: "#2f6fb0", dot: "#2f6fb0" },
   team_leader: { bg: "#FBF1DF", fg: "#9a7320", dot: "#C8821A" },
 };
 
@@ -27,8 +28,15 @@ const STATUS_META: Record<UserStatus, { label: string; color: string; dot: strin
 
 const ROLE_CARDS: { role: UserRole; desc: string }[] = [
   { role: "admin", desc: "Full access — all operations plus user management, schedule and system logs." },
+  { role: "operations_manager", desc: "Full access, same as Admin — and receives all system emails (confirmations, reminders, alerts)." },
   { role: "team_leader", desc: "Read-only view. Can set cleaner status and add cleaner notes; no Users, Schedule or Logs." },
 ];
+
+// Roles assignable from the UI (super_admin is legacy/hard-coded and not shown).
+const ASSIGNABLE_ROLES: UserRole[] = ["admin", "operations_manager", "team_leader"];
+// For your OWN row, only the full-access roles — so you can't demote yourself to
+// Team Lead and lose access to this page.
+const SELF_ROLES: UserRole[] = ["admin", "operations_manager"];
 
 function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [full_name, setName] = useState("");
@@ -61,6 +69,7 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
       <Field label="Role">
         <Select value={role} onChange={(e) => setRole(e.target.value)}>
           <option value="admin">Admin</option>
+          <option value="operations_manager">Operations Manager</option>
           <option value="team_leader">Team Leader</option>
         </Select>
       </Field>
@@ -84,6 +93,7 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
 export function Users() {
   const { profile } = useAuth();
   const [users, setUsers] = useState<Profile[]>([]);
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -105,14 +115,28 @@ export function Users() {
   }
 
   async function changeStatus(u: Profile, status: UserStatus) {
+    const prev = u.status, prevActive = u.is_active;
+    setUsers((us) => us.map((x) => x.id === u.id ? { ...x, status, is_active: status !== "inactive" } : x));
+    setSaving((s) => ({ ...s, [u.id]: true }));
     const err = await setUserStatus(u.id, status);
-    if (err) { toastError(err); return; }
-    setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, status, is_active: status !== "inactive" } : x));
+    setSaving((s) => ({ ...s, [u.id]: false }));
+    if (err) { toastError(err); setUsers((us) => us.map((x) => x.id === u.id ? { ...x, status: prev, is_active: prevActive } : x)); }
+  }
+
+  async function changeRole(u: Profile, role: UserRole) {
+    const prev = u.role;
+    setUsers((us) => us.map((x) => x.id === u.id ? { ...x, role } : x));
+    setSaving((s) => ({ ...s, [u.id]: true }));
+    const err = await setUserRole(u.id, role);
+    setSaving((s) => ({ ...s, [u.id]: false }));
+    if (err) { toastError(err); setUsers((us) => us.map((x) => x.id === u.id ? { ...x, role: prev } : x)); return; }
+    toastOk(`${u.full_name || u.email} is now ${ROLE_LABEL[role]}.`);
   }
 
   const counts = useMemo(() => ({
     all: users.length,
     admin: users.filter((u) => u.role === "admin").length,
+    operations_manager: users.filter((u) => u.role === "operations_manager").length,
     team_leader: users.filter((u) => u.role === "team_leader").length,
   }), [users]);
 
@@ -122,7 +146,7 @@ export function Users() {
   ), [users, roleFilter, q]);
 
   const chips: [string, string, string?][] = [
-    ["all", "All roles"], ["admin", "Admin", "#3D8B5F"], ["team_leader", "Team Leader", "#C8821A"],
+    ["all", "All roles"], ["admin", "Admin", "#3D8B5F"], ["operations_manager", "Operations Manager", "#2f6fb0"], ["team_leader", "Team Leader", "#C8821A"],
   ];
 
   if (loading) return <Spinner />;
@@ -172,7 +196,7 @@ export function Users() {
         <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
             <div style={{ flex: 1 }}>User</div>
-            <div style={{ flex: "none", width: 140 }}>Role</div>
+            <div style={{ flex: "none", width: 180 }}>Role</div>
             <div style={{ flex: "none", width: 120 }}>Status</div>
             <div style={{ flex: "none", width: 130 }}>Last active</div>
             <div style={{ flex: "none", width: 40 }} />
@@ -191,10 +215,19 @@ export function Users() {
                     <div style={{ fontSize: 11.5, color: c.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</div>
                   </div>
                 </div>
-                <div style={{ flex: "none", width: 140 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: b.bg, color: b.fg, fontSize: 11, fontWeight: 600, padding: "2px 9px", borderRadius: 5 }}>
-                    {b.shield && <Icon name="shield" size={11} strokeWidth={2} />}{ROLE_LABEL[u.role]}
-                  </span>
+                <div style={{ flex: "none", width: 180, display: "flex", alignItems: "center", gap: 6 }}>
+                  {u.role === "super_admin" ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: b.bg, color: b.fg, fontSize: 11, fontWeight: 600, padding: "2px 9px", borderRadius: 5 }}>
+                      {b.shield && <Icon name="shield" size={11} strokeWidth={2} />}{ROLE_LABEL[u.role]}
+                    </span>
+                  ) : (
+                    <>
+                    <select value={u.role} disabled={saving[u.id]} onChange={(e) => changeRole(u, e.target.value as UserRole)} style={{ fontSize: 11.5, fontWeight: 600, color: b.fg, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
+                      {(isYou ? SELF_ROLES : ASSIGNABLE_ROLES).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                    </select>
+                    {saving[u.id] && <Spin size={13} color={c.muted2} />}
+                    </>
+                  )}
                 </div>
                 <div style={{ flex: "none", width: 120 }}>
                   {u.status === "invite_sent" || isYou ? (
@@ -202,7 +235,7 @@ export function Users() {
                       <span style={{ width: 6, height: 6, borderRadius: "50%", background: STATUS_META[u.status].dot }} />{STATUS_META[u.status].label}
                     </span>
                   ) : (
-                    <select value={u.status} onChange={(e) => changeStatus(u, e.target.value as UserStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: STATUS_META[u.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: "pointer", outline: "none" }}>
+                    <select value={u.status} disabled={saving[u.id]} onChange={(e) => changeStatus(u, e.target.value as UserStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: STATUS_META[u.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
                       <option value="active">Active</option>
                       <option value="away">Away</option>
                       <option value="inactive">Inactive</option>

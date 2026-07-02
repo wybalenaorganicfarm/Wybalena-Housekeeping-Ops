@@ -43,3 +43,7 @@ verify_jwt = true
 verify_jwt = true
 [functions.update-shift]
 verify_jwt = true
+[functions.set-user-role]
+verify_jwt = true
+[functions.update-cleaner]
+verify_jwt = true

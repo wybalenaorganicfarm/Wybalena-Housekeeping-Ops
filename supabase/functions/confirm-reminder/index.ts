@@ -6,6 +6,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { reminderEmail } from "../_shared/emailTemplates.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "confirm-reminder";
@@ -66,7 +67,7 @@ Deno.serve(async (req) => {
 
   const appUrl = (Deno.env.get("APP_URL") ?? "https://wybalena-housekeeping-ops.vercel.app").replace(/\/$/, "");
   const email = reminderEmail({ count: raised, shiftsUrl: `${appUrl}/shifts` });
-  const sent = await sendEmail(email.subject, email.text, undefined, email.html);
+  const sent = await sendEmail(email.subject, email.text, (await opsManager(sb)).email ?? undefined, email.html);
   await writeAuditLog(sb, {
     event_type: "reminder.confirmation_sent",
     event_label: "Confirmation Reminder",

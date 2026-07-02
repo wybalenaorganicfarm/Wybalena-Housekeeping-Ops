@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     userId,
     profile,
     role,
-    canEdit: role === "admin" || role === "super_admin",
+    canEdit: role === "admin" || role === "super_admin" || role === "operations_manager",
     isSuperAdmin: role === "super_admin",
     isTeamLead: role === "team_leader",
     needsPassword,

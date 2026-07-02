@@ -1,6 +1,6 @@
 // Hand-written DB types matching the Supabase schema. (Can be regenerated later
 // with `supabase gen types typescript`.)
-export type UserRole = "super_admin" | "admin" | "team_leader";
+export type UserRole = "super_admin" | "admin" | "operations_manager" | "team_leader";
 export type UserStatus = "invite_sent" | "active" | "away" | "inactive";
 export type CleanerTier = "tier_1" | "tier_2" | "tier_3";
 export type CleanerStatus = "active" | "away" | "inactive";

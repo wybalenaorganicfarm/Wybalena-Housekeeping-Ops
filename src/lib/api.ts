@@ -225,6 +225,19 @@ export const provisionUser = (input: {
 export const removeUser = (userId: string) =>
   invokeFn<{ ok: boolean; emailed: boolean }>("remove-user", { userId });
 
+// Change a user's role (Users page) — routed through an Edge Function (audit log +
+// service-role write). The Operations Manager receives all system emails.
+export async function setUserRole(userId: string, role: string): Promise<string | null> {
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("set-user-role", { userId, role });
+  return error ?? data?.error ?? null;
+}
+
+// Edit a cleaner's contact details (phone/email) — Edge Function for the audit log.
+export async function updateCleaner(cleanerId: string, input: { phone: string; email: string | null }): Promise<string | null> {
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("update-cleaner", { cleanerId, ...input });
+  return error ?? data?.error ?? null;
+}
+
 export const activateSelf = () => invokeFn("activate-self", {});
 
 export async function setUserStatus(userId: string, status: string): Promise<string | null> {

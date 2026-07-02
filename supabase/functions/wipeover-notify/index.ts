@@ -7,6 +7,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { wipeoverEmail } from "../_shared/emailTemplates.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const DAY = 86400000;
@@ -53,7 +54,7 @@ Deno.serve(async (req) => {
 
     const gapWhole = Math.round(gapDays);
     const mail = wipeoverEmail(sorted[i - 1], sorted[i], gapWhole);
-    const sent = await sendEmail(mail.subject, mail.text, undefined, mail.html);
+    const sent = await sendEmail(mail.subject, mail.text, (await opsManager(sb)).email ?? undefined, mail.html);
 
     await writeAuditLog(sb, {
       event_type: "wipeover.notified",

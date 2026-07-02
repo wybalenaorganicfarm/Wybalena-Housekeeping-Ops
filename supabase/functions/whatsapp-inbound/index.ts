@@ -70,14 +70,6 @@ Deno.serve(async (req) => {
    try {
     if (!r.providerMessageId) continue;
 
-    // Only respond to a genuine offer reply: a tapped quick-reply button, or an
-    // explicit YES/NO/CANCEL keyword. Any other text is ignored silently so we
-    // never spam people who are just messaging the number (Spec §7.5).
-    if (r.action === "unknown" && !r.assignmentId) {
-      results.push({ id: r.providerMessageId, skipped: "not an offer reply" });
-      continue;
-    }
-
     // 4. Idempotency: skip a re-delivered message id.
     const { error: dupErr } = await sb
       .from("processed_messages")
@@ -140,25 +132,30 @@ Deno.serve(async (req) => {
         .order("offered_at", { ascending: false });
       if ((open ?? []).length === 1) assignmentId = open![0].id;
       else if ((open ?? []).length > 1) {
-        await sendMessage(cleaner.phone, "You have more than one open shift offer. Please tap the buttons on the specific shift message, or reply with its code (e.g. ACCEPT 4823).");
+        await sendMessage(cleaner.phone, "Please scroll to the specific shift and tap *Accept*, *Decline* or *Cancel* on that message — or reply with that shift's code, e.g. *ACCEPT 4823*.");
         results.push({ id: r.providerMessageId, skipped: "ambiguous, nudged" });
         continue;
       }
     }
 
     if (!assignmentId) {
-      await sendMessage(cleaner.phone, "Sorry, we couldn't find an open shift offer to apply that to. If you were offered a shift, please tap Accept, Decline or Cancel on the offer message.");
-      results.push({ id: r.providerMessageId, skipped: "no matching offer" });
-      await writeAuditLog(sb, {
-        event_type: "response.unknown",
-        event_label: "WhatsApp Reply Received",
-        status: "warning",
-        summary: `Unrecognised WhatsApp reply from ${cleaner.full_name}. Could not match to an open offer.`,
-        detail: { phone, text: r.rawText, action: r.action, assignment_id: r.assignmentId, offer_code: r.offerCode },
-        source: SOURCE,
-        cleaner_id: cleaner.id,
-        triggered_by: "webhook",
-      });
+      // A real command (accept/decline/cancel) with no offer to apply it to →
+      // tell them. Free-form chatter from a cleaner with no open offer → stay
+      // silent so we don't reply to every "thanks"/"ok".
+      if (r.action !== "unknown") {
+        await sendMessage(cleaner.phone, "Sorry, we couldn't find an open shift offer to apply that to. If you were offered a shift, please tap Accept, Decline or Cancel on the offer message.");
+        await writeAuditLog(sb, {
+          event_type: "response.unknown",
+          event_label: "WhatsApp Reply Received",
+          status: "warning",
+          summary: `Unrecognised WhatsApp reply from ${cleaner.full_name}. Could not match to an open offer.`,
+          detail: { phone, text: r.rawText, action: r.action, assignment_id: r.assignmentId, offer_code: r.offerCode },
+          source: SOURCE,
+          cleaner_id: cleaner.id,
+          triggered_by: "webhook",
+        });
+      }
+      results.push({ id: r.providerMessageId, skipped: r.action === "unknown" ? "ignored chatter" : "no matching offer" });
       continue;
     }
 
@@ -269,7 +266,7 @@ Deno.serve(async (req) => {
         break;
       }
       default: {
-        await sendMessage(cleaner.phone, "Sorry, I didn't catch that. Please tap Accept, Decline or Cancel on the shift offer — or reply ACCEPT, DECLINE or CANCEL with your offer code.");
+        await sendMessage(cleaner.phone, `Sorry, I can only understand the buttons. Please tap *Accept*, *Decline* or *Cancel* on the shift offer — or reply *ACCEPT ${code}*, *DECLINE ${code}* or *CANCEL ${code}*.`);
         results.push({ id: r.providerMessageId, action: "unknown, nudged" });
       }
     }

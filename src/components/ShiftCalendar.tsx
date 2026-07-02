@@ -49,20 +49,20 @@ export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: 
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))" }}>
         {WEEKDAYS.map((w) => (
           <div key={w} style={{ padding: "8px 10px", fontSize: 10.5, fontWeight: 700, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${c.border2}` }}>{w}</div>
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))" }}>
         {cells.map((d, i) => {
           const ds = ymd(d);
           const inMonth = d.getMonth() === cursor.getMonth();
           const dayShifts = byDay[ds] ?? [];
           const isToday = ds === todayStr;
           return (
-            <div key={i} style={{ minHeight: 108, borderRight: i % 7 !== 6 ? `1px solid ${c.border2}` : "none", borderBottom: i < 35 ? `1px solid ${c.border2}` : "none", padding: 7, background: inMonth ? "#fff" : "#faf9f5" }}>
+            <div key={i} style={{ minHeight: 108, minWidth: 0, overflow: "hidden", borderRight: i % 7 !== 6 ? `1px solid ${c.border2}` : "none", borderBottom: i < 35 ? `1px solid ${c.border2}` : "none", padding: 7, background: inMonth ? "#fff" : "#faf9f5" }}>
               <div style={{ marginBottom: 2 }}>
                 <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 21, height: 21, padding: "0 5px", borderRadius: 11, fontSize: 11.5, fontWeight: isToday ? 700 : 500, color: isToday ? "#fff" : inMonth ? c.body : c.faint, background: isToday ? c.green : "transparent" }}>{d.getDate()}</span>
               </div>
@@ -73,7 +73,7 @@ export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: 
                   <button key={s.id} onClick={() => onSelect(s)} title={`${s.start_time.slice(0, 5)} · ${name} · ${typeColumn(s)}`}
                     style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", textAlign: "left", border: "none", borderLeft: `2px solid ${st.dot}`, borderRadius: 4, padding: "3px 6px", marginTop: 4, background: st.bg, color: st.fg, fontSize: 10.5, fontWeight: 600, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                     <span style={{ flex: "none", color: st.fg, opacity: 0.85 }}>{s.start_time.slice(0, 5)}</span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
                   </button>
                 );
               })}

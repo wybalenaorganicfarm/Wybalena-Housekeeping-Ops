@@ -3,13 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
-import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Spinner } from "../components/ui";
+import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Spin, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
 import { CleanerNotesModal } from "../components/CleanerNotesModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
-import type { CountryCode } from "libphonenumber-js";
+import { parsePhoneNumber, type CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
-import { addCleaner, getCleaners, getReliability, removeCleaner, setCleanerStatus } from "../lib/api";
+import { addCleaner, getCleaners, getReliability, removeCleaner, setCleanerStatus, updateCleaner } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { acceptRate, monthYear } from "../lib/format";
 import type { Cleaner, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
@@ -100,6 +100,52 @@ function AddCleanerModal({ existing, onClose, onSaved }: { existing: Cleaner[]; 
   );
 }
 
+// Edit a cleaner's contact details (phone + email) — e.g. number changed, or the
+// email wasn't known at creation. Prefills phone by parsing the stored E.164.
+function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cleaner; existing: Cleaner[]; onClose: () => void; onSaved: () => void }) {
+  const parsed = (() => { try { return parsePhoneNumber(cleaner.phone); } catch { return null; } })();
+  const [country, setCountry] = useState<CountryCode>((parsed?.country as CountryCode) ?? "AU");
+  const [national, setNational] = useState(parsed?.nationalNumber ? String(parsed.nationalNumber) : "");
+  const [email, setEmail] = useState(cleaner.email ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    const e164 = toE164(country, national);
+    if (!e164) { setErr(`Enter a valid phone number for ${countryName(country)}`); return; }
+    const emailNorm = email.trim().toLowerCase();
+    if (emailNorm && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) { setErr("Enter a valid email address"); return; }
+
+    const phoneDigits = e164.replace(/\D/g, "");
+    const dupPhone = existing.find((x) => x.id !== cleaner.id && x.phone.replace(/\D/g, "") === phoneDigits);
+    if (dupPhone) { setErr(`That phone number is already used by ${dupPhone.full_name}`); return; }
+    if (emailNorm) {
+      const dupEmail = existing.find((x) => x.id !== cleaner.id && (x.email ?? "").trim().toLowerCase() === emailNorm);
+      if (dupEmail) { setErr(`That email is already used by ${dupEmail.full_name}`); return; }
+    }
+
+    setBusy(true);
+    const e = await updateCleaner(cleaner.id, { phone: e164, email: emailNorm || null });
+    setBusy(false);
+    if (e) { setErr(e); return; }
+    onSaved(); onClose();
+  }
+
+  return (
+    <Modal title={`Edit ${cleaner.full_name}`} onClose={onClose}>
+      <Field label={<>Phone <span style={{ color: c.danger }}>*</span></>}>
+        <PhoneInput country={country} national={national} onCountry={setCountry} onNational={setNational} />
+      </Field>
+      <Field label="Email"><Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="name@email.com" /></Field>
+      {err && <div style={{ color: c.danger, fontSize: 12.5, margin: "10px 0 0" }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save changes"}</Button>
+      </div>
+    </Modal>
+  );
+}
+
 const CLEANER_STATUS_META: Record<CleanerStatus, { label: string; color: string; dot: string }> = {
   active: { label: "Active", color: "#2c6446", dot: "#3D8B5F" },
   away: { label: "Away", color: "#21564b", dot: "#2f7068" },
@@ -121,6 +167,8 @@ export function Cleaners() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Cleaner | null>(null);
   const [notesFor, setNotesFor] = useState<Cleaner | null>(null);
+  const [editing, setEditing] = useState<Cleaner | null>(null);
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   async function load() {
     const [cs, r] = await Promise.all([getCleaners(), getReliability()]);
@@ -129,9 +177,16 @@ export function Cleaners() {
   useEffect(() => { load(); }, []);
 
   async function changeStatus(cl: Cleaner, status: CleanerStatus) {
-    const { error } = await setCleanerStatus(cl.id, status);
-    if (error) { toastError(error); return; }
+    const prevStatus = cl.status, prevActive = cl.is_active;
+    // Optimistic: reflect immediately, then persist; revert on failure.
     setCleaners((prev) => prev.map((x) => x.id === cl.id ? { ...x, status, is_active: status === "active" } : x));
+    setSaving((s) => ({ ...s, [cl.id]: true }));
+    const { error } = await setCleanerStatus(cl.id, status);
+    setSaving((s) => ({ ...s, [cl.id]: false }));
+    if (error) {
+      toastError(error);
+      setCleaners((prev) => prev.map((x) => x.id === cl.id ? { ...x, status: prevStatus, is_active: prevActive } : x));
+    }
   }
 
   async function remove(cl: Cleaner) {
@@ -228,13 +283,16 @@ export function Cleaners() {
                       </div>
                       <div style={{ flex: "none", width: COL.phone, fontSize: 12, color: "#5d665f" }}>{cl.phone}</div>
                       <div style={{ flex: "none", width: COL.email, fontSize: 12, color: "#5d665f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cl.email || "—"}</div>
-                      <div style={{ flex: "none", width: COL.status }}>
+                      <div style={{ flex: "none", width: COL.status, display: "flex", alignItems: "center", gap: 6 }}>
                         {canManage ? (
-                          <select value={cl.status} onChange={(e) => changeStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: "pointer", outline: "none" }}>
+                          <>
+                          <select value={cl.status} disabled={saving[cl.id]} onChange={(e) => changeStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[cl.id] ? "wait" : "pointer", outline: "none" }}>
                             <option value="active">Active</option>
                             <option value="away">Away</option>
                             <option value="inactive">Inactive</option>
                           </select>
+                          {saving[cl.id] && <Spin size={13} color={c.muted2} />}
+                          </>
                         ) : (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: CLEANER_STATUS_META[cl.status].color, fontWeight: 600 }}>
                             <span style={{ width: 6, height: 6, borderRadius: "50%", background: CLEANER_STATUS_META[cl.status].dot }} />{CLEANER_STATUS_META[cl.status].label}
@@ -251,8 +309,9 @@ export function Cleaners() {
                       {canManage && (
                         <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>
                           <KebabMenu disabled={removing === cl.id} items={[
+                            // Edit (contact details) + remove are admin-only; team leads get notes + status only.
+                            ...(canEdit ? [{ label: "Edit", icon: "pencil", onClick: () => setEditing(cl) }] : []),
                             { label: "Notes", icon: "book", onClick: () => setNotesFor(cl) },
-                            // Add/remove is admin-only; team leads get notes + status only.
                             ...(canEdit
                               ? [cl.is_team_leader
                                   ? { label: "Remove in User management", icon: "users", onClick: () => navigate("/users") }
@@ -272,6 +331,7 @@ export function Cleaners() {
       </div>
 
       {showAdd && <AddCleanerModal existing={cleaners} onClose={() => setShowAdd(false)} onSaved={load} />}
+      {editing && <EditCleanerModal cleaner={editing} existing={cleaners} onClose={() => setEditing(null)} onSaved={load} />}
       {notesFor && <CleanerNotesModal cleaner={notesFor} onClose={() => setNotesFor(null)} />}
       {toRemove && (
         <ConfirmDialog

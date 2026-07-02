@@ -9,7 +9,7 @@ import { requiredForType } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { confirmationEmail, type ConfirmShift } from "../_shared/emailTemplates.ts";
 import { signShift } from "../_shared/confirmToken.ts";
-import { resolveAdminName } from "../_shared/admin.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const DAY = 86400000;
@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
           "Wybalena: booking cancelled",
           `A booking was cancelled in the calendar (${ev.gcalEventId}). ` +
             `No shifts have been auto-cancelled — confirm in the app.`,
+          (await opsManager(sb)).email ?? undefined,
         );
         cancellations++;
         await writeAuditLog(sb, {
@@ -196,8 +197,9 @@ Deno.serve(async (req) => {
       editUrlFor: (id) => `${appUrl}/?edit=${id}`,
     });
 
-    const sent = await sendEmail(email.subject, email.text, undefined, email.html);
-    const who = await resolveAdminName(sb);
+    const ops = await opsManager(sb);
+    const sent = await sendEmail(email.subject, email.text, ops.email ?? undefined, email.html);
+    const who = ops.name;
     await writeAuditLog(sb, {
       event_type: "notification.confirmation_email",
       event_label: "Confirmation Email",

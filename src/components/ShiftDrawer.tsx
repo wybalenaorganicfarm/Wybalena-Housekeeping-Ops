@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { c, font, TIER_LABEL } from "../theme";
-import { Avatar } from "./ui";
+import { Avatar, ConfirmDialog, Spin } from "./ui";
 import { Icon } from "./Icon";
 import { EditShiftModal } from "./EditShiftModal";
 import { dateLabel, dateTimeLabel, statusOf, typeLabel } from "../lib/format";
@@ -77,6 +77,10 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
     : cleanerRows;
 
   const [confirming, setConfirming] = useState(false);
+  const [askCancel, setAskCancel] = useState(false);
+  const [askDelete, setAskDelete] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   async function confirmShift() {
     setConfirming(true);
     const { error } = await confirmShifts([shift.id]);
@@ -86,14 +90,19 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
   }
 
   async function cancelShift() {
-    if (!confirm("Cancel this shift?")) return;
-    await updateShift(shift.id, { status: "cancelled", cancelled_at: new Date().toISOString() });
+    setCancelling(true);
+    const err = await updateShift(shift.id, { status: "cancelled", cancelled_at: new Date().toISOString() });
+    setCancelling(false);
+    setAskCancel(false);
+    if (err) { toastError(err); return; }
     onChanged(); onClose();
   }
 
   async function removeShift() {
-    if (!confirm("Permanently delete this shift? This cannot be undone.")) return;
+    setDeleting(true);
     const err = await deleteShift(shift.id);
+    setDeleting(false);
+    setAskDelete(false);
     if (err) { toastError(err); return; }
     onChanged(); onClose();
   }
@@ -231,18 +240,34 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
           <div style={{ flex: "none", padding: "14px 22px", borderTop: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 9 }}>
             {s.status === "pending_confirmation" && (
               <button onClick={confirmShift} disabled={confirming} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: confirming ? "wait" : "pointer", opacity: confirming ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                <Icon name="check" size={15} strokeWidth={2.4} /> {confirming ? "Confirming…" : "Confirm shift"}
+                {confirming ? <Spin size={15} color="#fff" /> : <Icon name="check" size={15} strokeWidth={2.4} />} {confirming ? "Confirming…" : "Confirm shift"}
               </button>
             )}
             <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: s.status === "pending_confirmation" ? "#fff" : c.green, color: s.status === "pending_confirmation" ? c.body : "#fff", border: s.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit shift</button>
             <button onClick={() => onAssign(s)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Override</button>
-            <button onClick={cancelShift} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-            <button onClick={removeShift} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>
+            <button onClick={() => setAskCancel(true)} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button onClick={() => setAskDelete(true)} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>
           </div>
         )}
       </div>
 
       {showEdit && <EditShiftModal shift={s} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); onChanged(); }} />}
+      {askCancel && (
+        <ConfirmDialog
+          title="Cancel shift"
+          message="Cancel this shift? It will be marked cancelled and no longer offered to cleaners."
+          confirmLabel="Cancel shift" cancelLabel="Keep shift" danger busy={cancelling}
+          onConfirm={cancelShift} onCancel={() => setAskCancel(false)}
+        />
+      )}
+      {askDelete && (
+        <ConfirmDialog
+          title="Delete shift"
+          message="Permanently delete this shift? This cannot be undone."
+          confirmLabel="Delete" danger busy={deleting}
+          onConfirm={removeShift} onCancel={() => setAskDelete(false)}
+        />
+      )}
     </div>
   );
 }

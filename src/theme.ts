@@ -65,6 +65,7 @@ export const TIER_LABEL: Record<string, string> = {
 export const ROLE_LABEL: Record<string, string> = {
   super_admin: "Super Admin",
   admin: "Admin",
+  operations_manager: "Operations Manager",
   team_leader: "Team Lead",
 };
 
