@@ -1,5 +1,5 @@
 import { STATUS, SHIFT_TYPE_LABEL } from "../theme";
-import type { Shift, ShiftStaffing } from "./types";
+import type { Booking, Shift, ShiftStaffing } from "./types";
 
 export function timeParts(t: string): { hour: string; min: string } {
   // "10:00:00" -> 10:00 am/pm split
@@ -116,6 +116,12 @@ export function shortType(s: Shift): string {
 // Title line is now just the clean type, stated plainly: "Standard Clean".
 export function shiftTitle(s: Shift): string {
   return SHIFT_TYPE_LABEL[s.shift_type] ?? s.shift_type;
+}
+
+// Guest/booking name for a shift; falls back to the clean-type label when there
+// is no linked booking (e.g. manual shifts).
+export function shiftBookingName(s: Shift, bookings: Record<string, Booking>): string {
+  return (s.booking_id && bookings[s.booking_id]?.guest_name) || shiftTitle(s);
 }
 
 // Venue scope: "Full venue" or "Partial · The Barn, Studio".

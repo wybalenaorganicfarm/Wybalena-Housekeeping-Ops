@@ -155,7 +155,7 @@ export function Dashboard() {
           </div>
 
           {view === "calendar" ? (
-            <ShiftCalendar shifts={active} initialDate={byDay[0]?.[0]} onSelect={(s) => setDrawer(s)} />
+            <ShiftCalendar shifts={active} bookings={bookings} initialDate={byDay[0]?.[0]} onSelect={(s) => setDrawer(s)} />
           ) : byDay.length === 0 ? (
             <Card style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>No upcoming shifts.</Card>
           ) : byDay.map(([day, dayShifts]) => (

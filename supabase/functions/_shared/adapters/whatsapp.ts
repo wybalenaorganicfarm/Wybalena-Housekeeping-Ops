@@ -187,6 +187,10 @@ function quotedMessageId(m: Record<string, unknown>): string | null {
 function actionFromText(s: string): InboundReply["action"] {
   const u = s.toUpperCase();
   const first = u.trim().split(/\s+/)[0] ?? "";
+  // Decline-confirmation button titles FIRST — "Yes, decline" contains YES and
+  // "No, go back" contains NO, which would otherwise be read as accept/decline.
+  if (/GO\s*BACK/.test(u) || /\bKEEP\b/.test(u)) return "decline_cancel";
+  if (/\bDECLINE\b/.test(u) && /\bYES\b/.test(u)) return "decline_confirm";
   if (/\b(ACCEPT|YES)\b/.test(u) || first === "Y" || first === "1") return "accept";
   if (/\b(DECLINE|NO)\b/.test(u) || first === "N" || first === "2") return "decline";
   if (/\bCANCEL\b/.test(u) || first === "C" || first === "3") return "cancel";

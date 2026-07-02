@@ -5,15 +5,16 @@ import { Icon } from "../components/Icon";
 import { Button, Card, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
+import { BookingDrawer } from "../components/BookingDrawer";
 import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
-import { confirmShifts, getAlerts, getShifts, getStaffing } from "../lib/api";
+import { confirmShifts, getAlerts, getBookings, getShifts, getStaffing } from "../lib/api";
 import { useEscalationLabel } from "../lib/useEscalation";
 import {
-  countLabel, shiftTitle, staffingDots, statusOf, timeParts, typeColumn, weekKey, weekRangeLabel,
+  countLabel, shiftBookingName, shortType, staffingDots, statusOf, timeParts, typeColumn, weekKey, weekRangeLabel,
 } from "../lib/format";
-import type { Alert, Shift, ShiftStaffing } from "../lib/types";
+import type { Alert, Booking, Shift, ShiftStaffing } from "../lib/types";
 
 type View = "list" | "calendar";
 
@@ -24,18 +25,23 @@ export function Shifts() {
   const escLabel = useEscalationLabel();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [staffing, setStaffing] = useState<Record<string, ShiftStaffing>>({});
+  const [bookings, setBookings] = useState<Record<string, Booking>>({});
   const [urgentIds, setUrgentIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>("list");
   const [search, setSearch] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<Shift | null>(null);
+  const [bookingDrawer, setBookingDrawer] = useState<Booking | null>(null);
   const [assign, setAssign] = useState<Shift | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [confirming, setConfirming] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   async function load() {
-    const [s, st, a] = await Promise.all([getShifts(), getStaffing(), getAlerts()]);
+    const [s, st, a, b] = await Promise.all([getShifts(), getStaffing(), getAlerts(), getBookings()]);
     setShifts(s); setStaffing(st);
+    setBookings(Object.fromEntries(b.map((x) => [x.id, x])));
     setUrgentIds(new Set(a.filter((x: Alert) => x.status === "open" && x.alert_type === "understaffed_urgent" && x.shift_id).map((x) => x.shift_id!)));
     setSel(new Set(s.filter((x) => x.status === "pending_confirmation").map((x) => x.id)));
     setLoading(false);
@@ -53,8 +59,8 @@ export function Shifts() {
     const q = search.trim().toLowerCase();
     if (!q) return visible;
     return visible.filter((s) =>
-      (shiftTitle(s) + " " + dayDateMonth(s.shift_date) + " " + (s.source ?? "") + " " + typeColumn(s)).toLowerCase().includes(q));
-  }, [visible, search]);
+      (shiftBookingName(s, bookings) + " " + dayDateMonth(s.shift_date) + " " + (s.source ?? "") + " " + typeColumn(s)).toLowerCase().includes(q));
+  }, [visible, search, bookings]);
 
   const byWeek = useMemo(() => {
     const groups: Record<string, Shift[]> = {};
@@ -66,7 +72,14 @@ export function Shifts() {
     setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
   async function bulkConfirm() {
+    setBulkBusy(true);
     await confirmShifts([...sel]); await load();
+    setBulkBusy(false);
+  }
+  async function confirmOne(id: string) {
+    setConfirming((p) => new Set(p).add(id));
+    await confirmShifts([id]); await load();
+    setConfirming((p) => { const n = new Set(p); n.delete(id); return n; });
   }
 
   if (loading) return <Spinner />;
@@ -112,14 +125,14 @@ export function Shifts() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button onClick={() => setSel(new Set())} style={{ background: "none", border: "none", color: "#cfe0d6", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Clear</button>
-            <Button onClick={bulkConfirm} style={{ background: c.warn, padding: "7px 14px", fontSize: 12.5 }}>Confirm all {sel.size}</Button>
+            <Button onClick={bulkConfirm} disabled={bulkBusy} style={{ background: c.warn, padding: "7px 14px", fontSize: 12.5 }}>{bulkBusy ? "Confirming…" : `Confirm all ${sel.size}`}</Button>
           </div>
         </div>
       )}
 
       <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
         {view === "calendar" ? (
-          <ShiftCalendar shifts={visible} initialDate={visible[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
+          <ShiftCalendar shifts={visible} bookings={bookings} initialDate={visible[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
         ) : (
           <Card style={{ padding: 0, overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", padding: "11px 16px", borderBottom: `1px solid ${c.border2}`, fontSize: 10.5, fontWeight: 700, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.07em" }}>
@@ -159,7 +172,10 @@ export function Shifts() {
                         <div style={{ fontSize: 11, color: c.muted2, marginTop: 2 }}>{s.estimated_hours}h</div>
                       </div>
                       <div onClick={() => setDrawer(s)} style={{ cursor: "pointer", minWidth: 0, paddingRight: 12 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{shiftTitle(s)}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <span style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiftBookingName(s, bookings)}</span>
+                          <span style={{ flex: "none", fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", color: "#2c6446", background: "#eaf3ed", borderRadius: 3, padding: "1px 6px" }}>{shortType(s)}</span>
+                        </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", color: badgeFg }}>
                             {urgent ? <Icon name="alert" size={11} color={c.danger} strokeWidth={2.4} /> : <span style={{ width: 6, height: 6, borderRadius: "50%", background: badgeDot }} />}
@@ -180,7 +196,7 @@ export function Shifts() {
                       </div>
                       <div style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                         {canEdit && s.status === "pending_confirmation"
-                          ? <Button kind="secondary" onClick={() => confirmShifts([s.id]).then(load)} style={{ padding: "7px 13px", fontSize: 12 }}>Confirm</Button>
+                          ? <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => confirmOne(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : "Confirm"}</Button>
                           : canEdit && (s.status === "staffing" || urgent)
                             ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Assign</Button>
                             : null}
@@ -194,7 +210,24 @@ export function Shifts() {
         )}
       </div>
 
-      {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} />}
+      {drawer && (
+        <ShiftDrawer
+          shift={drawer}
+          booking={drawer.booking_id ? bookings[drawer.booking_id] : undefined}
+          onClose={() => setDrawer(null)}
+          onChanged={load}
+          onAssign={(s) => { setDrawer(null); setAssign(s); }}
+          onViewBooking={(b) => { setDrawer(null); setBookingDrawer(b); }}
+        />
+      )}
+      {bookingDrawer && (
+        <BookingDrawer
+          booking={bookingDrawer}
+          shift={shifts.find((s) => s.booking_id === bookingDrawer.id)}
+          onClose={() => setBookingDrawer(null)}
+          onViewShift={(s) => { setBookingDrawer(null); setDrawer(s); }}
+        />
+      )}
       {assign && <AssignModal shift={assign} onClose={() => setAssign(null)} onAssigned={load} />}
       {showNew && <NewShiftModal onClose={() => setShowNew(false)} onCreated={load} onManualAssign={(s) => { setShowNew(false); setAssign(s); }} />}
     </div>

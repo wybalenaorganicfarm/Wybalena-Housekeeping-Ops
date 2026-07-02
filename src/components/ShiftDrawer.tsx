@@ -3,10 +3,10 @@ import { c, font, TIER_LABEL } from "../theme";
 import { Avatar } from "./ui";
 import { Icon } from "./Icon";
 import { EditShiftModal } from "./EditShiftModal";
-import { dateLabel, statusOf, typeLabel } from "../lib/format";
+import { dateLabel, dateTimeLabel, statusOf, typeLabel } from "../lib/format";
 import { confirmShifts, deleteShift, getAssignmentsForShift, getCleaners, getProfileNames, getShift, getStaffing, getTeamLead, updateShift } from "../lib/api";
 import { toastError } from "../lib/toast";
-import type { Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "../lib/types";
+import type { Booking, Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "../lib/types";
 import { useAuth } from "../auth/AuthProvider";
 
 const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
@@ -18,8 +18,8 @@ const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
   no_response: { label: "No response", color: "#a39d91" },
 };
 
-export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
-  shift: Shift; onClose: () => void; onChanged: () => void; onAssign: (s: Shift) => void;
+export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onViewBooking }: {
+  shift: Shift; booking?: Booking; onClose: () => void; onChanged: () => void; onAssign: (s: Shift) => void; onViewBooking?: (b: Booking) => void;
 }) {
   const { canEdit } = useAuth();
   // Local, refreshable copy of the shift — the prop is a snapshot from the list
@@ -135,6 +135,29 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#e0dccf" }} />Open {open}</span>
             </div>
           </div>
+
+          {/* linked booking */}
+          {booking && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Booking</div>
+              <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: "14px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: onViewBooking ? 10 : 0 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{booking.guest_name || "Unnamed booking"}</div>
+                    <div style={{ fontSize: 12, color: c.muted2, marginTop: 2 }}>{dateTimeLabel(booking.check_in)} → {dateTimeLabel(booking.check_out)}</div>
+                  </div>
+                  <span style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: booking.is_cancelled ? "#a8392b" : "#2c6446" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: booking.is_cancelled ? c.danger : c.greenMid }} />{booking.is_cancelled ? "Cancelled" : "Confirmed"}
+                  </span>
+                </div>
+                {onViewBooking && (
+                  <button onClick={() => onViewBooking(booking)} style={{ width: "100%", background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: 9, fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                    View booking for this shift <Icon name="chevronRight" size={14} strokeWidth={2.2} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* special instructions */}
           {s.special_instructions && (

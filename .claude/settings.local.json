@@ -30,7 +30,9 @@
       "Bash(npm run *)",
       "WebSearch",
       "Bash(deno check *)",
-      "mcp__claude_ai_Supabase__list_migrations"
+      "mcp__claude_ai_Supabase__list_migrations",
+      "PowerShell(npx tsc --noEmit -p \"c:\\\\Clients\\\\Julian Mateer\\\\tsconfig.json\" 2>&1)",
+      "PowerShell($env:npm_config_loglevel=\"silent\"; & npx.cmd tsc --noEmit -p \"c:\\\\Clients\\\\Julian Mateer\\\\tsconfig.json\"; Write-Output \"EXIT: $LASTEXITCODE\")"
     ],
     "additionalDirectories": [
       "\\tmp"

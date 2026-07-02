@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { c, font } from "../theme";
 import { Icon } from "./Icon";
-import { statusOf, typeColumn } from "../lib/format";
-import type { Shift } from "../lib/types";
+import { shiftBookingName, statusOf, typeColumn } from "../lib/format";
+import type { Booking, Shift } from "../lib/types";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -12,8 +12,8 @@ function ymd(d: Date): string {
 
 const navBtn = { width: 30, height: 30, border: `1px solid ${c.border3}`, background: "#fff", borderRadius: 7, color: c.body, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } as const;
 
-export function ShiftCalendar({ shifts, initialDate, onSelect }: {
-  shifts: Shift[]; initialDate?: string; onSelect: (s: Shift) => void;
+export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: {
+  shifts: Shift[]; bookings?: Record<string, Booking>; initialDate?: string; onSelect: (s: Shift) => void;
 }) {
   const today = new Date();
   const init = initialDate ? new Date(initialDate + "T00:00:00") : today;
@@ -68,11 +68,12 @@ export function ShiftCalendar({ shifts, initialDate, onSelect }: {
               </div>
               {dayShifts.map((s) => {
                 const st = statusOf(s);
+                const name = shiftBookingName(s, bookings);
                 return (
-                  <button key={s.id} onClick={() => onSelect(s)} title={`${s.start_time.slice(0, 5)} · ${typeColumn(s)}`}
+                  <button key={s.id} onClick={() => onSelect(s)} title={`${s.start_time.slice(0, 5)} · ${name} · ${typeColumn(s)}`}
                     style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", textAlign: "left", border: "none", borderLeft: `2px solid ${st.dot}`, borderRadius: 4, padding: "3px 6px", marginTop: 4, background: st.bg, color: st.fg, fontSize: 10.5, fontWeight: 600, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                     <span style={{ flex: "none", color: st.fg, opacity: 0.85 }}>{s.start_time.slice(0, 5)}</span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{typeColumn(s)}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
                   </button>
                 );
               })}
