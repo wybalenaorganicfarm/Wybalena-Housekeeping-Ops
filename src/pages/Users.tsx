@@ -6,7 +6,7 @@ import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Select, Spinner } f
 import { KebabMenu } from "../components/KebabMenu";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { PageHeader } from "../components/PageHeader";
-import { getUsers, provisionUser, removeUser, setCleanerStatusByEmail, setUserStatus } from "../lib/api";
+import { getUsers, provisionUser, removeUser, setUserStatus } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { lastActiveLabel } from "../lib/format";
 import type { CountryCode } from "libphonenumber-js";
@@ -26,9 +26,8 @@ const STATUS_META: Record<UserStatus, { label: string; color: string; dot: strin
 };
 
 const ROLE_CARDS: { role: UserRole; desc: string }[] = [
-  { role: "super_admin", desc: "Full access plus user management. Hard-coded — the constant who provisions everyone." },
-  { role: "admin", desc: "Full operational edit — confirm, create, override, handle reviews. Receives all alerts." },
-  { role: "team_leader", desc: "Read-only operational view. Monitors shift status and assignments on-site." },
+  { role: "admin", desc: "Full access — all operations plus user management, schedule and system logs." },
+  { role: "team_leader", desc: "Read-only view. Can set cleaner status and add cleaner notes; no Users, Schedule or Logs." },
 ];
 
 function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
@@ -71,7 +70,7 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         </Field>
       )}
       <div style={{ fontSize: 11.5, color: c.faint, background: c.panel, border: `1px solid ${c.border}`, borderRadius: 7, padding: "10px 12px", lineHeight: 1.5 }}>
-        <strong style={{ color: c.body2 }}>Note:</strong> An invitation email is sent to this address. The user sets their own password and can only sign in after accepting. A team leader is also added to the cleaners roster (Tier 1). Super Admin is hard-coded and cannot be assigned here.
+        <strong style={{ color: c.body2 }}>Note:</strong> An invitation email is sent to this address. The user sets their own password and can only sign in after accepting.
       </div>
       {err && <div style={{ color: c.danger, fontSize: 12.5, marginTop: 10 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
@@ -108,14 +107,11 @@ export function Users() {
   async function changeStatus(u: Profile, status: UserStatus) {
     const err = await setUserStatus(u.id, status);
     if (err) { toastError(err); return; }
-    // Two-way sync: a team leader is also a cleaner — mirror the status.
-    if (u.role === "team_leader" && u.email) await setCleanerStatusByEmail(u.email, status);
     setUsers((prev) => prev.map((x) => x.id === u.id ? { ...x, status, is_active: status !== "inactive" } : x));
   }
 
   const counts = useMemo(() => ({
     all: users.length,
-    super_admin: users.filter((u) => u.role === "super_admin").length,
     admin: users.filter((u) => u.role === "admin").length,
     team_leader: users.filter((u) => u.role === "team_leader").length,
   }), [users]);
@@ -126,14 +122,14 @@ export function Users() {
   ), [users, roleFilter, q]);
 
   const chips: [string, string, string?][] = [
-    ["all", "All roles"], ["super_admin", "Super Admin", "#1F4D3A"], ["admin", "Admin", "#3D8B5F"], ["team_leader", "Team Leader", "#C8821A"],
+    ["all", "All roles"], ["admin", "Admin", "#3D8B5F"], ["team_leader", "Team Leader", "#C8821A"],
   ];
 
   if (loading) return <Spinner />;
 
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
-      <PageHeader title="User management" subtitle={`${users.length} users · Super Admin access`}
+      <PageHeader title="User management" subtitle={`${users.length} users`}
         right={<Button onClick={() => setShowAdd(true)}><Icon name="plus" size={14} strokeWidth={2.2} /> Add user</Button>} />
 
       <div style={{ flex: 1, overflowY: "auto", padding: "22px 24px 40px" }}>
@@ -157,7 +153,7 @@ export function Users() {
         </div>
 
         {/* role cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12, marginBottom: 24 }}>
           {ROLE_CARDS.map(({ role, desc }) => {
             const b = ROLE_BADGE[role];
             return (
@@ -185,7 +181,7 @@ export function Users() {
             const b = ROLE_BADGE[u.role];
             const isYou = u.id === profile?.id;
             const live = u.status === "active" || u.status === "away";
-            const avBg = u.role === "super_admin" ? c.green : u.role === "admin" ? c.greenMid : live ? c.warn : "#c4bdb0";
+            const avBg = u.role === "admin" ? c.greenMid : live ? c.warn : "#c4bdb0";
             return (
               <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: live ? 1 : 0.72 }}>
                 <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 11 }}>
@@ -201,7 +197,7 @@ export function Users() {
                   </span>
                 </div>
                 <div style={{ flex: "none", width: 120 }}>
-                  {u.status === "invite_sent" || u.role === "super_admin" || isYou ? (
+                  {u.status === "invite_sent" || isYou ? (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: STATUS_META[u.status].color, fontWeight: 600 }}>
                       <span style={{ width: 6, height: 6, borderRadius: "50%", background: STATUS_META[u.status].dot }} />{STATUS_META[u.status].label}
                     </span>
@@ -216,8 +212,7 @@ export function Users() {
                 <div style={{ flex: "none", width: 130, fontSize: 12, color: c.muted2 }}>{lastActiveLabel(u.updated_at)}</div>
                 <div style={{ flex: "none", width: 40, textAlign: "right", color: c.faint }}>
                   {isYou ? <span style={{ fontSize: 11, fontStyle: "italic", color: "#c4bdb0" }}>You</span>
-                    : u.role === "super_admin" ? null
-                      : <KebabMenu disabled={removing === u.id} items={[{ label: "Remove user", danger: true, onClick: () => setToRemove(u) }]} />}
+                    : <KebabMenu disabled={removing === u.id} items={[{ label: "Remove user", danger: true, onClick: () => setToRemove(u) }]} />}
                 </div>
               </div>
             );
@@ -225,9 +220,6 @@ export function Users() {
           {filtered.length === 0 && <div style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>No users.</div>}
         </div>
 
-        <div style={{ fontSize: 11.5, color: c.faint, marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
-          <Icon name="info" size={13} strokeWidth={1.8} /> The Super Admin role is hard-coded and cannot be reassigned or removed.
-        </div>
       </div>
 
       {showAdd && <AddUserModal onClose={() => setShowAdd(false)} onSaved={load} />}

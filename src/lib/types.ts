@@ -10,7 +10,7 @@ export type ShiftStatus =
 export type ShiftSource = "auto" | "manual";
 export type VenueScope = "full_venue" | "partial_venue";
 export type AssignmentStatus =
-  | "offered" | "accepted" | "declined" | "cancelled" | "no_response";
+  | "offered" | "accepted" | "declined" | "cancelled" | "no_response" | "team_lead";
 export type AlertType =
   | "venue_gap" | "unconfirmed_shifts" | "booking_cancelled" | "understaffed_urgent" | "cleaner_cancelled";
 export type AlertStatus = "open" | "actioned" | "dismissed";
@@ -65,9 +65,19 @@ export interface Shift {
   buildings: string[];
   is_modified: boolean;
   special_instructions: string | null;
+  special_instructions_by: string | null;
+  special_instructions_at: string | null;
   current_tier: CleanerTier | null;
   confirmed_at: string | null;
   cancelled_at: string | null;
+  created_at: string;
+}
+
+export interface CleanerNote {
+  id: string;
+  cleaner_id: string;
+  author_id: string | null;
+  body: string;
   created_at: string;
 }
 
@@ -125,6 +135,7 @@ export interface ShiftStaffing {
   required_cleaners: number;
   accepted_count: number;
   offered_count: number;
+  lead_count: number;
   open_count: number;
 }
 
@@ -146,6 +157,7 @@ export interface Database {
       bookings: { Row: Booking; Insert: Partial<Booking>; Update: Partial<Booking> };
       shifts: { Row: Shift; Insert: Partial<Shift>; Update: Partial<Shift> };
       shift_assignments: { Row: ShiftAssignment; Insert: Partial<ShiftAssignment>; Update: Partial<ShiftAssignment> };
+      cleaner_notes: { Row: CleanerNote; Insert: Partial<CleanerNote>; Update: Partial<CleanerNote> };
       alerts: { Row: Alert; Insert: Partial<Alert>; Update: Partial<Alert> };
       audit_logs: { Row: AuditLog; Insert: Partial<AuditLog>; Update: Partial<AuditLog> };
     };

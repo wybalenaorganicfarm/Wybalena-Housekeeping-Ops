@@ -7,6 +7,7 @@ import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
 const SOURCE = "escalate-tier-3";
 
@@ -20,15 +21,26 @@ Deno.serve(async (req) => {
   // when to escalate to Tier 3 purely through this job's schedule.
   const { data: shifts } = await sb
     .from("shifts")
-    .select("id, shift_date, shift_type")
+    .select("id, shift_date, shift_type, start_time")
     .eq("status", "staffing")
     .eq("current_tier", "tier_2");
 
   let escalated = 0;
+  let totalOffers = 0;
+  const summaries: ShiftOfferSummary[] = [];
   for (const s of shifts ?? []) {
     try {
       const res = await offerTier(sb, s.id, "tier_3");
       escalated++;
+      if (res.count > 0) {
+        totalOffers += res.count;
+        summaries.push({
+          shiftDate: res.shiftDate,
+          startTime: (s.start_time ?? "").slice(0, 5),
+          shiftType: s.shift_type,
+          names: res.offered.map((c) => c.full_name),
+        });
+      }
 
       // Raise urgent alert (dedupe one open per shift) + urgent email.
       const { data: dup } = await sb
@@ -87,6 +99,9 @@ Deno.serve(async (req) => {
       triggered_by: "cron",
     });
   }
+
+  // Per-shift summary to Zara (team leader).
+  await notifyManagerSummary(sb, "tier_3", summaries, totalOffers, SOURCE);
 
   return json({ ok: true, escalatedShifts: escalated });
 });

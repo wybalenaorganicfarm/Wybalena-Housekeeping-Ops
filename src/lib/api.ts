@@ -1,6 +1,6 @@
 import { supabase, invokeFn } from "./supabase";
 import type {
-  Alert, AuditLogResolved, Booking, Cleaner, CleanerReliability, Profile, Shift, ShiftAssignment, ShiftStaffing,
+  Alert, AuditLogResolved, Booking, Cleaner, CleanerNote, CleanerReliability, Profile, Shift, ShiftAssignment, ShiftStaffing,
 } from "./types";
 
 // ---- Reads (governed by RLS) -----------------------------------------------
@@ -9,6 +9,40 @@ export async function getShifts(): Promise<Shift[]> {
   const { data } = await supabase
     .from("shifts").select("*").order("shift_date", { ascending: true });
   return data ?? [];
+}
+
+export async function getShift(id: string): Promise<Shift | null> {
+  const { data } = await supabase.from("shifts").select("*").eq("id", id).maybeSingle();
+  return (data as Shift | null) ?? null;
+}
+
+// Resolve profile display names by id (RLS-safe via SECURITY DEFINER RPC). Used
+// for note authors and shift special-instruction authorship.
+export async function getProfileNames(ids: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return {};
+  const { data } = await (supabase as unknown as {
+    rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: { id: string; full_name: string }[] | null }>;
+  }).rpc("profile_names", { ids: unique });
+  const map: Record<string, string> = {};
+  for (const r of data ?? []) map[r.id] = r.full_name;
+  return map;
+}
+
+// ---- Cleaner notes ---------------------------------------------------------
+
+export async function getCleanerNotes(cleanerId: string): Promise<CleanerNote[]> {
+  const { data } = await supabase
+    .from("cleaner_notes").select("*").eq("cleaner_id", cleanerId)
+    .order("created_at", { ascending: false });
+  return (data as CleanerNote[] | null) ?? [];
+}
+
+// author_id defaults to auth.uid() in the DB, so we only send cleaner_id + body.
+export async function addCleanerNote(cleanerId: string, body: string): Promise<string | null> {
+  const { error } = await supabase
+    .from("cleaner_notes").insert({ cleaner_id: cleanerId, body } as never);
+  return error ? error.message : null;
 }
 
 export async function getStaffing(): Promise<Record<string, ShiftStaffing>> {
@@ -34,6 +68,19 @@ export async function getCleaners(): Promise<Cleaner[]> {
   const { data } = await supabase
     .from("cleaners").select("*").order("full_name", { ascending: true });
   return data ?? [];
+}
+
+// The single team leader lives in profiles (role = team_leader), not cleaners.
+// They're implicitly assigned to every shift, so the UI injects them into the
+// staffing meter and responder list.
+export async function getTeamLead(): Promise<{ id: string; full_name: string } | null> {
+  // RLS-safe RPC (SECURITY DEFINER) — profiles reads may be limited to super
+  // admins, but everyone who can view a shift should see the lead's name.
+  const { data } = await (supabase as unknown as {
+    rpc: (fn: string) => Promise<{ data: { id: string; full_name: string }[] | null }>;
+  }).rpc("get_team_lead");
+  const row = data?.[0];
+  return row ? { id: row.id, full_name: row.full_name ?? "Team Lead" } : null;
 }
 
 export async function getReliability(): Promise<Record<string, CleanerReliability>> {

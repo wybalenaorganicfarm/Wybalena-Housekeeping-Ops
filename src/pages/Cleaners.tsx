@@ -5,6 +5,7 @@ import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
 import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
+import { CleanerNotesModal } from "../components/CleanerNotesModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import type { CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
@@ -108,7 +109,8 @@ const CLEANER_STATUS_META: Record<CleanerStatus, { label: string; color: string;
 const COL = { phone: 120, email: 180, status: 116, rel: 168, rate: 84, action: 40 };
 
 export function Cleaners() {
-  const { canEdit } = useAuth();
+  const { canEdit, isTeamLead } = useAuth();
+  const canManage = canEdit || isTeamLead; // status + notes; add/remove stays admin-only
   const navigate = useNavigate();
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
@@ -118,6 +120,7 @@ export function Cleaners() {
 
   const [removing, setRemoving] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Cleaner | null>(null);
+  const [notesFor, setNotesFor] = useState<Cleaner | null>(null);
 
   async function load() {
     const [cs, r] = await Promise.all([getCleaners(), getReliability()]);
@@ -192,7 +195,7 @@ export function Cleaners() {
             <div style={{ flex: "none", width: COL.status }}>Status</div>
             <div style={{ flex: "none", width: COL.rel }}>Reliability</div>
             <div style={{ flex: "none", width: COL.rate, textAlign: "right" }}>Accept rate</div>
-            {canEdit && <div style={{ flex: "none", width: COL.action }} />}
+            {canManage && <div style={{ flex: "none", width: COL.action }} />}
           </div>
 
           {shown.map((t) => {
@@ -226,7 +229,7 @@ export function Cleaners() {
                       <div style={{ flex: "none", width: COL.phone, fontSize: 12, color: "#5d665f" }}>{cl.phone}</div>
                       <div style={{ flex: "none", width: COL.email, fontSize: 12, color: "#5d665f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cl.email || "—"}</div>
                       <div style={{ flex: "none", width: COL.status }}>
-                        {canEdit ? (
+                        {canManage ? (
                           <select value={cl.status} onChange={(e) => changeStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: "pointer", outline: "none" }}>
                             <option value="active">Active</option>
                             <option value="away">Away</option>
@@ -245,11 +248,17 @@ export function Cleaners() {
                         <span style={{ fontSize: 11, color: c.muted2, whiteSpace: "nowrap" }}>{acc}✓ {dec}✕</span>
                       </div>
                       <div style={{ flex: "none", width: COL.rate, textAlign: "right", fontSize: 13, fontWeight: 600, color: col }}>{rate === null ? "—" : `${rate}%`}</div>
-                      {canEdit && (
+                      {canManage && (
                         <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>
-                          {cl.is_team_leader
-                            ? <KebabMenu items={[{ label: "Remove in User management", icon: "users", onClick: () => navigate("/users") }]} />
-                            : <KebabMenu disabled={removing === cl.id} items={[{ label: "Remove cleaner", danger: true, onClick: () => setToRemove(cl) }]} />}
+                          <KebabMenu disabled={removing === cl.id} items={[
+                            { label: "Notes", icon: "book", onClick: () => setNotesFor(cl) },
+                            // Add/remove is admin-only; team leads get notes + status only.
+                            ...(canEdit
+                              ? [cl.is_team_leader
+                                  ? { label: "Remove in User management", icon: "users", onClick: () => navigate("/users") }
+                                  : { label: "Remove cleaner", danger: true, onClick: () => setToRemove(cl) }]
+                              : []),
+                          ]} />
                         </div>
                       )}
                     </div>
@@ -263,6 +272,7 @@ export function Cleaners() {
       </div>
 
       {showAdd && <AddCleanerModal existing={cleaners} onClose={() => setShowAdd(false)} onSaved={load} />}
+      {notesFor && <CleanerNotesModal cleaner={notesFor} onClose={() => setNotesFor(null)} />}
       {toRemove && (
         <ConfirmDialog
           title="Remove cleaner"

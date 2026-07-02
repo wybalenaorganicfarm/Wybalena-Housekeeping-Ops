@@ -26,6 +26,12 @@ Deno.serve(async (req) => {
   for (const k of EDITABLE) {
     if (k in patch) clean[k] = patch[k];
   }
+  // Record who set the special instructions (and when) so the UI can attribute them.
+  if ("special_instructions" in patch) {
+    const hasNote = typeof patch.special_instructions === "string" && patch.special_instructions.trim().length > 0;
+    clean["special_instructions_by"] = hasNote ? caller.userId : null;
+    clean["special_instructions_at"] = hasNote ? new Date().toISOString() : null;
+  }
 
   const { error } = await sb.from("shifts").update(clean).eq("id", shiftId);
   if (error) return json({ error: error.message }, 400);

@@ -4,12 +4,13 @@ import { Avatar } from "./ui";
 import { Icon } from "./Icon";
 import { EditShiftModal } from "./EditShiftModal";
 import { dateLabel, statusOf, typeLabel } from "../lib/format";
-import { confirmShifts, deleteShift, getAssignmentsForShift, getCleaners, getStaffing, updateShift } from "../lib/api";
+import { confirmShifts, deleteShift, getAssignmentsForShift, getCleaners, getProfileNames, getShift, getStaffing, getTeamLead, updateShift } from "../lib/api";
 import { toastError } from "../lib/toast";
 import type { Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "../lib/types";
 import { useAuth } from "../auth/AuthProvider";
 
 const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
+  team_lead: { label: "Team Lead", color: c.lead },
   accepted: { label: "Accepted", color: "#2c6446" },
   offered: { label: "Offered", color: "#9a7320" },
   declined: { label: "Declined", color: "#a8392b" },
@@ -21,40 +22,59 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
   shift: Shift; onClose: () => void; onChanged: () => void; onAssign: (s: Shift) => void;
 }) {
   const { canEdit } = useAuth();
+  // Local, refreshable copy of the shift — the prop is a snapshot from the list
+  // and would otherwise show stale data (e.g. edited special instructions) until
+  // the drawer is reopened.
+  const [s, setS] = useState<Shift>(shift);
   const [assignments, setAssignments] = useState<ShiftAssignment[]>([]);
   const [cleaners, setCleaners] = useState<Record<string, Cleaner>>({});
   const [st, setSt] = useState<ShiftStaffing | undefined>();
+  const [teamLead, setTeamLead] = useState<{ id: string; full_name: string } | null>(null);
+  const [instrAuthor, setInstrAuthor] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
 
   async function load() {
-    const [a, cs, staffing] = await Promise.all([
-      getAssignmentsForShift(shift.id), getCleaners(), getStaffing(),
+    const [fresh, a, cs, staffing, lead] = await Promise.all([
+      getShift(shift.id), getAssignmentsForShift(shift.id), getCleaners(), getStaffing(), getTeamLead(),
     ]);
+    if (fresh) setS(fresh);
     setAssignments(a);
     setCleaners(Object.fromEntries(cs.map((x) => [x.id, x])));
     setSt(staffing[shift.id]);
+    setTeamLead(lead);
+    const authorId = fresh?.special_instructions_by;
+    setInstrAuthor(authorId ? (await getProfileNames([authorId]))[authorId] ?? null : null);
   }
-  useEffect(() => { load(); /* eslint-disable-line */ }, [shift.id]);
+  useEffect(() => { setS(shift); load(); /* eslint-disable-line */ }, [shift.id]);
 
-  const status = statusOf(shift);
+  const status = statusOf(s);
+  const lead = st?.lead_count ?? 0;
   const accepted = st?.accepted_count ?? 0;
   const offered = st?.offered_count ?? 0;
-  const open = Math.max(shift.required_cleaners - accepted - offered, 0);
-  const time = shift.start_time.slice(0, 5);
-  const tierBadge = shift.status === "staffing" && shift.current_tier ? `${status.label} · ${TIER_LABEL[shift.current_tier]}` : status.label;
+  const open = Math.max(s.required_cleaners - accepted - offered, 0);
+  const time = s.start_time.slice(0, 5);
+  const tierBadge = s.status === "staffing" && s.current_tier ? `${status.label} · ${TIER_LABEL[s.current_tier]}` : status.label;
 
   const segments: string[] = [];
+  for (let i = 0; i < lead; i++) segments.push(c.lead);
   for (let i = 0; i < accepted; i++) segments.push("#3D8B5F");
   for (let i = 0; i < offered; i++) segments.push("#aacfb8");
   for (let i = 0; i < open; i++) segments.push("#e0dccf");
 
   const tiersWithOffers = new Set(assignments.map((a) => a.tier_at_offer));
   const order = ["tier_1", "tier_2", "tier_3"] as const;
-  const currentIdx = shift.current_tier ? order.indexOf(shift.current_tier) : -1;
+  const currentIdx = s.current_tier ? order.indexOf(s.current_tier) : -1;
 
-  const responders = assignments
+  type ResponderRow = { key: string; name: string; statusKey: string; tierLabel: string | null; isLead: boolean };
+  const cleanerRows: ResponderRow[] = assignments
     .map((a) => ({ a, cl: cleaners[a.cleaner_id] }))
-    .filter((r) => r.cl && r.a.status !== "no_response");
+    .filter((r) => r.cl && r.a.status !== "no_response")
+    .map(({ a, cl }) => ({ key: a.id, name: cl!.full_name, statusKey: a.status, tierLabel: TIER_LABEL[a.tier_at_offer], isLead: false }));
+  // The team lead (a profiles row, not a cleaner) is auto-assigned to every shift
+  // — inject them at the top with a "Team Lead" status.
+  const responders: ResponderRow[] = teamLead
+    ? [{ key: "team-lead", name: teamLead.full_name, statusKey: "team_lead", tierLabel: null, isLead: true }, ...cleanerRows]
+    : cleanerRows;
 
   const [confirming, setConfirming] = useState(false);
   async function confirmShift() {
@@ -89,10 +109,10 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: status.bg, color: status.fg, fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: status.dot }} />{tierBadge}
                 </span>
-                <span style={{ background: shift.source === "manual" ? "#e7f0ed" : "#f0eee9", color: shift.source === "manual" ? "#21564b" : "#6b665c", fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>{shift.source === "manual" ? "Manual" : "Auto"}</span>
+                <span style={{ background: s.source === "manual" ? "#e7f0ed" : "#f0eee9", color: s.source === "manual" ? "#21564b" : "#6b665c", fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>{s.source === "manual" ? "Manual" : "Auto"}</span>
               </div>
-              <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, margin: "0 0 2px" }}>{typeLabel(shift)}</h2>
-              <div style={{ fontSize: 12.5, color: c.muted2 }}>{typeLabel(shift)} · {dateLabel(shift.shift_date)}, {time} · {shift.estimated_hours} hrs</div>
+              <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, margin: "0 0 2px" }}>{typeLabel(s)}</h2>
+              <div style={{ fontSize: 12.5, color: c.muted2 }}>{typeLabel(s)} · {dateLabel(s.shift_date)}, {time} · {s.estimated_hours} hrs</div>
             </div>
             <button onClick={onClose} style={{ width: 30, height: 30, flex: "none", border: `1px solid ${c.border}`, background: "#fff", borderRadius: 6, color: c.muted2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="x" size={16} strokeWidth={1.8} /></button>
           </div>
@@ -103,17 +123,34 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
           <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: "15px 16px", marginBottom: 18 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 11 }}>
               <span style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>Required vs assigned</span>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{accepted} / {shift.required_cleaners} {offered > 0 && <span style={{ color: c.faint, fontWeight: 400 }}>· {offered} offered</span>}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{lead > 0 && <span style={{ color: c.lead }}>{lead} + </span>}{accepted} / {s.required_cleaners} {offered > 0 && <span style={{ color: c.faint, fontWeight: 400 }}>· {offered} offered</span>}</span>
             </div>
             <div style={{ display: "flex", gap: 3, marginBottom: 9 }}>
-              {segments.map((s, i) => <span key={i} style={{ height: 7, flex: 1, borderRadius: 3, background: s }} />)}
+              {segments.map((seg, i) => <span key={i} style={{ height: 7, flex: 1, borderRadius: 3, background: seg }} />)}
             </div>
-            <div style={{ display: "flex", gap: 16, fontSize: 11, color: c.muted2 }}>
+            <div style={{ display: "flex", gap: 16, fontSize: 11, color: c.muted2, flexWrap: "wrap" }}>
+              {lead > 0 && <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: c.lead }} />Team Lead {lead}</span>}
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#3D8B5F" }} />Accepted {accepted}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#aacfb8" }} />Offered {offered}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#e0dccf" }} />Open {open}</span>
             </div>
           </div>
+
+          {/* special instructions */}
+          {s.special_instructions && (
+            <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: "13px 16px", marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <Icon name="note" size={13} strokeWidth={2} color={c.muted2} />
+                <span style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>Special instructions</span>
+              </div>
+              <div style={{ fontSize: 13, color: c.body, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{s.special_instructions}</div>
+              {(instrAuthor || s.special_instructions_at) && (
+                <div style={{ fontSize: 11, color: c.faint, marginTop: 8 }}>
+                  {instrAuthor ? `Added by ${instrAuthor}` : "Added"}{s.special_instructions_at ? ` · ${new Date(s.special_instructions_at).toLocaleString("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* escalation timeline */}
           <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 12 }}>Escalation timeline</div>
@@ -143,21 +180,19 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
           {/* responders */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>Cleaner responses</span>
-            {canEdit && <button onClick={() => onAssign(shift)} style={{ background: "none", border: "none", fontSize: 12, fontWeight: 600, color: c.green, cursor: "pointer" }}>Override →</button>}
+            {canEdit && <button onClick={() => onAssign(s)} style={{ background: "none", border: "none", fontSize: 12, fontWeight: 600, color: c.green, cursor: "pointer" }}>Override →</button>}
           </div>
           <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
             {responders.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: c.faint, textAlign: "center" }}>No offers yet.</div>}
-            {responders.map(({ a, cl }, i) => {
-              const stat = ASSIGN_STATUS[a.status];
+            {responders.map((r, i) => {
+              const stat = ASSIGN_STATUS[r.statusKey] ?? ASSIGN_STATUS.offered;
               return (
-                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderBottom: i < responders.length - 1 ? `1px solid ${c.rowBd}` : "none" }}>
-                  <Avatar name={cl!.full_name} size={28} bg={cl!.is_team_leader ? c.green : c.greenMid} />
+                <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderBottom: i < responders.length - 1 ? `1px solid ${c.rowBd}` : "none" }}>
+                  <Avatar name={r.name} size={28} bg={r.isLead ? c.lead : c.greenMid} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500 }}>
-                      {cl!.full_name}
-                      {cl!.is_team_leader
-                        ? <span style={{ fontSize: 10, color: "#9a7320", background: "#FBF1DF", padding: "0 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>Team Lead</span>
-                        : <span style={{ fontSize: 10, color: c.muted2, marginLeft: 6 }}>{TIER_LABEL[a.tier_at_offer]}</span>}
+                      {r.name}
+                      {r.tierLabel && <span style={{ fontSize: 10, color: c.muted2, marginLeft: 6 }}>{r.tierLabel}</span>}
                     </div>
                   </div>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: stat.color, fontWeight: 600 }}>
@@ -169,22 +204,22 @@ export function ShiftDrawer({ shift, onClose, onChanged, onAssign }: {
           </div>
         </div>
 
-        {canEdit && shift.status !== "cancelled" && (
+        {canEdit && s.status !== "cancelled" && (
           <div style={{ flex: "none", padding: "14px 22px", borderTop: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 9 }}>
-            {shift.status === "pending_confirmation" && (
+            {s.status === "pending_confirmation" && (
               <button onClick={confirmShift} disabled={confirming} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: confirming ? "wait" : "pointer", opacity: confirming ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                 <Icon name="check" size={15} strokeWidth={2.4} /> {confirming ? "Confirming…" : "Confirm shift"}
               </button>
             )}
-            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: shift.status === "pending_confirmation" ? "#fff" : c.green, color: shift.status === "pending_confirmation" ? c.body : "#fff", border: shift.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit shift</button>
-            <button onClick={() => onAssign(shift)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Override</button>
+            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: s.status === "pending_confirmation" ? "#fff" : c.green, color: s.status === "pending_confirmation" ? c.body : "#fff", border: s.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit shift</button>
+            <button onClick={() => onAssign(s)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Override</button>
             <button onClick={cancelShift} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
             <button onClick={removeShift} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>
           </div>
         )}
       </div>
 
-      {showEdit && <EditShiftModal shift={shift} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); onChanged(); }} />}
+      {showEdit && <EditShiftModal shift={s} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); onChanged(); }} />}
     </div>
   );
 }

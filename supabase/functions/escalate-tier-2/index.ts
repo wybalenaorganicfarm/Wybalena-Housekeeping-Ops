@@ -5,6 +5,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
 const SOURCE = "escalate-tier-2";
 
@@ -18,16 +19,23 @@ Deno.serve(async (req) => {
   // when to escalate purely through this job's schedule.
   const { data: shifts } = await sb
     .from("shifts")
-    .select("id, shift_date")
+    .select("id, shift_date, shift_type, start_time")
     .eq("status", "staffing")
     .eq("current_tier", "tier_1");
 
   let escalated = 0;
+  const summaries: ShiftOfferSummary[] = [];
   for (const s of shifts ?? []) {
     try {
       const res = await offerTier(sb, s.id, "tier_2");
       if (res.count > 0) {
         escalated += res.count;
+        summaries.push({
+          shiftDate: res.shiftDate,
+          startTime: (s.start_time ?? "").slice(0, 5),
+          shiftType: s.shift_type,
+          names: res.offered.map((c) => c.full_name),
+        });
         const names = res.offered.map((c) => c.full_name).join(", ");
         await writeAuditLog(sb, {
           event_type: "escalation.tier2_triggered",
@@ -69,6 +77,9 @@ Deno.serve(async (req) => {
       triggered_by: "cron",
     });
   }
+
+  // Per-shift summary to Zara (team leader).
+  await notifyManagerSummary(sb, "tier_2", summaries, escalated, SOURCE);
 
   return json({ ok: true, escalatedOffers: escalated });
 });

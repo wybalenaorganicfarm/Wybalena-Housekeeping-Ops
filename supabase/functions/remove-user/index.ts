@@ -2,7 +2,7 @@
 // Notifies the user by email, then deletes the auth user (profiles cascades).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller } from "../_shared/authz.ts";
+import { getCaller, isWriter } from "../_shared/authz.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  if (!caller || caller.role !== "super_admin") return json({ error: "forbidden" }, 403);
+  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { userId } = await req.json().catch(() => ({}));
   if (!userId) return json({ error: "userId required" }, 400);

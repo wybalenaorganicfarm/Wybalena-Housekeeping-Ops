@@ -4,7 +4,7 @@
 // write directly under RLS — hence the service role here.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller, isWriter } from "../_shared/authz.ts";
+import { getCaller, canManageCleaners } from "../_shared/authz.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const VALID = ["active", "away", "inactive"];
@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
+  if (!caller || !canManageCleaners(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { cleanerId, status } = await req.json().catch(() => ({}));
   if (!cleanerId || !VALID.includes(status)) return json({ error: "cleanerId and a valid status are required" }, 400);

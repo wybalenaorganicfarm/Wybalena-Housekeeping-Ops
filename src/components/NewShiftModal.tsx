@@ -4,8 +4,16 @@ import { c, font } from "../theme";
 import { Icon } from "./Icon";
 import type { Shift, VenueScope } from "../lib/types";
 
-// TODO: replace with Wybalena's real building names.
-const BUILDINGS = ["Main House", "The Barn", "Studio", "Cabin 1", "Cabin 2", "Bunkhouse"];
+const BUILDINGS = [
+  "The Main House",
+  "The Yoga Studio",
+  "The Banksia Rooms",
+  "The Garden Rooms",
+  "Cabin 1",
+  "Cabin 2",
+  "Cabin 3",
+  "Cabin 4",
+];
 
 const CLEAN_TYPES: [string, string][] = [
   ["standard", "Standard Clean"],
@@ -40,7 +48,7 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
       id, booking_id: null, shift_type: type as Shift["shift_type"], shift_date: date,
       start_time: time, estimated_hours: hours, status: "staffing", source: "manual",
       required_cleaners: required, venue_scope: scope, buildings, is_modified: false,
-      special_instructions: notes || null, current_tier: null,
+      special_instructions: notes || null, special_instructions_by: null, special_instructions_at: null, current_tier: null,
       confirmed_at: null, cancelled_at: null, created_at: "",
     };
   }
@@ -91,7 +99,7 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             <span style={labelStyle}>Venue</span>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setScope("full_venue")} style={toggleBtn(scope === "full_venue")}>Full venue</button>
+              <button onClick={() => setScope("full_venue")} style={toggleBtn(scope === "full_venue")}>The Whole Venue</button>
               <button onClick={() => setScope("partial_venue")} style={toggleBtn(scope === "partial_venue")}>Individual buildings</button>
             </div>
             {scope === "partial_venue" && (

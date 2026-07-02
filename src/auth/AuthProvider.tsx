@@ -8,8 +8,9 @@ interface AuthState {
   userId: string | null;
   profile: Profile | null;
   role: UserRole | null;
-  canEdit: boolean; // admin + super_admin write; team_leader read-only
+  canEdit: boolean; // admin + super_admin: full access; team_leader read-only
   isSuperAdmin: boolean;
+  isTeamLead: boolean; // read-only, except cleaner status + notes
   needsPassword: boolean; // arrived via invite/recovery link, must set a password
   signIn: (email: string, password: string) => Promise<string | null>;
   setPassword: (password: string) => Promise<string | null>;
@@ -81,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     role,
     canEdit: role === "admin" || role === "super_admin",
     isSuperAdmin: role === "super_admin",
+    isTeamLead: role === "team_leader",
     needsPassword,
     signIn,
     setPassword,

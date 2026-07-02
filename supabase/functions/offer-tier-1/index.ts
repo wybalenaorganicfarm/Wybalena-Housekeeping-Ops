@@ -4,8 +4,8 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
-import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
 const SOURCE = "offer-tier-1";
 
@@ -16,15 +16,23 @@ Deno.serve(async (req) => {
   const sb = serviceClient();
   const { data: shifts } = await sb
     .from("shifts")
-    .select("id, shift_date, shift_type")
+    .select("id, shift_date, shift_type, start_time")
     .eq("status", "confirmed");
 
   let offered = 0;
+  // Per-shift breakdown for the manager summary (shift, date/time, tier, names).
+  const summaries: ShiftOfferSummary[] = [];
   for (const s of shifts ?? []) {
     try {
       const res = await offerTier(sb, s.id, "tier_1");
       if (res.count > 0) {
         offered += res.count;
+        summaries.push({
+          shiftDate: res.shiftDate,
+          startTime: (s.start_time ?? "").slice(0, 5),
+          shiftType: s.shift_type,
+          names: res.offered.map((c) => c.full_name),
+        });
         const names = res.offered.map((c) => c.full_name).join(", ");
         await writeAuditLog(sb, {
           event_type: "offer.tier1_sent",
@@ -84,23 +92,8 @@ Deno.serve(async (req) => {
     return json({ ok: true, offersSent: 0 });
   }
 
-  // Summary to Zara (team leader). Find her cleaner row.
-  const { data: zara } = await sb
-    .from("cleaners").select("phone").eq("is_team_leader", true).limit(1).maybeSingle();
-  if (zara?.phone) {
-    const sent = await sendMessage(zara.phone, `Tier 1 offers sent for today's confirmed shifts (${offered} offers).`);
-    await writeAuditLog(sb, {
-      event_type: "notification.zara_summary",
-      event_label: "Zara Shift Summary",
-      status: sent.ok ? "success" : "failed",
-      summary: sent.ok
-        ? "WhatsApp shift summary sent to Zara."
-        : "Failed to send WhatsApp shift summary to Zara.",
-      detail: { offers: offered },
-      source: SOURCE,
-      triggered_by: "cron",
-    });
-  }
+  // Per-shift summary to Zara (team leader).
+  await notifyManagerSummary(sb, "tier_1", summaries, offered, SOURCE);
 
   return json({ ok: true, offersSent: offered });
 });

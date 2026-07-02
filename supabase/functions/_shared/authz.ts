@@ -24,3 +24,8 @@ export async function getCaller(
 export function isWriter(role: Caller["role"]): boolean {
   return role === "admin" || role === "super_admin";
 }
+
+// Team leaders may manage cleaner status + notes (but not other admin actions).
+export function canManageCleaners(role: Caller["role"]): boolean {
+  return isWriter(role) || role === "team_leader";
+}

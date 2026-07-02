@@ -28,7 +28,9 @@
       "Bash(echo \"exit: $?\")",
       "Bash(node -e \"console.log\\(require\\('./node_modules/react-spinners/package.json'\\).version, require\\('./node_modules/react-hot-toast/package.json'\\).version\\)\")",
       "Bash(npm run *)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(deno check *)",
+      "mcp__claude_ai_Supabase__list_migrations"
     ],
     "additionalDirectories": [
       "\\tmp"

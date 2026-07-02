@@ -19,8 +19,11 @@ export function AssignModal({ shift, onClose, onAssigned }: {
     const [cs, a, staffing] = await Promise.all([
       getCleaners(), getAssignmentsForShift(shift.id), getStaffing(),
     ]);
-    setCleaners(cs.filter((x) => x.is_active));
-    setAssignedIds(new Set(a.filter((x) => x.status === "accepted").map((x) => x.cleaner_id)));
+    // Team lead is auto-assigned and never offered — keep her out of the list.
+    setCleaners(cs.filter((x) => x.is_active && !x.is_team_leader));
+    setAssignedIds(new Set(
+      a.filter((x) => x.status === "accepted" || x.status === "team_lead").map((x) => x.cleaner_id),
+    ));
     const st = staffing[shift.id];
     setOpenSlots(Math.max(shift.required_cleaners - (st?.accepted_count ?? 0), 0));
   }

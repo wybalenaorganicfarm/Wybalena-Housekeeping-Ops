@@ -28,6 +28,10 @@ export const c = {
   sectionBd: "#d9e4dc",
   rowBd: "#efece4",
   body2: "#5d665f",
+  // team-lead slot: distinct from accepted (green) / offered (amber) / open (grey)
+  lead: "#5E6AC4",
+  leadBg: "#ECEEFB",
+  leadFg: "#3B44A0",
 } as const;
 
 export const font = {
@@ -37,10 +41,11 @@ export const font = {
 
 // Status -> badge styling
 export const STATUS = {
+  // Pending → yellow · Scheduled/Accepted → green · Staffing → purple · Cancelled → grey
   pending_confirmation: { label: "Pending", dot: "#C8821A", bg: "#fdf4e3", fg: "#9a6512" },
-  confirmed: { label: "Confirmed", dot: "#2f7068", bg: "#e7f0ed", fg: "#21564b" },
-  staffing: { label: "Staffing", dot: "#2f7068", bg: "#e7f0ed", fg: "#21564b" },
-  fully_staffed: { label: "Staffed", dot: "#3D8B5F", bg: "#eaf4ee", fg: "#256b43" },
+  confirmed: { label: "Scheduled", dot: "#3D8B5F", bg: "#eaf4ee", fg: "#256b43" },
+  staffing: { label: "Staffing", dot: "#8257c5", bg: "#f2ecfb", fg: "#5b3fa0" },
+  fully_staffed: { label: "Accepted", dot: "#3D8B5F", bg: "#eaf4ee", fg: "#256b43" },
   cancelled: { label: "Cancelled", dot: "#a39d91", bg: "#f0eee9", fg: "#6b665c" },
 } as const;
 

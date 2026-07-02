@@ -104,8 +104,10 @@ export async function offerToCleaner(
   if (!shift || shift.status === "cancelled") return "error";
 
   const { data: cleaner } = await sb
-    .from("cleaners").select("id, phone, tier").eq("id", cleanerId).maybeSingle();
+    .from("cleaners").select("id, phone, tier, is_team_leader").eq("id", cleanerId).maybeSingle();
   if (!cleaner) return "error";
+  // The team lead is auto-assigned to every shift and is never offered/re-offered.
+  if (cleaner.is_team_leader) return "error";
 
   const code = gen4();
   const { data: row } = await sb
@@ -180,6 +182,7 @@ export async function offerTier(
     .from("cleaners")
     .select("id, full_name, phone")
     .eq("is_active", true)
+    .eq("is_team_leader", false)
     .eq("tier", tier)
     .order("full_name");
 
@@ -208,6 +211,78 @@ export async function offerTier(
   // Outbound offers: interactive Accept/Decline buttons whose payload carries the
   // assignment id, so the inbound webhook maps the tap straight to this row. The
   // offer_code keyword text is the fallback when buttons aren't available (§7.5).
+  const byId = new Map((inserted ?? []).map((r) => [r.cleaner_id, r]));
+  for (const c of candidates) {
+    const row = byId.get(c.id);
+    await sendAndRecordOffer(sb, c.phone, shift, row?.id, row?.offer_code ?? "");
+  }
+  return {
+    count: candidates.length,
+    offered: candidates.map((c) => ({ id: c.id, full_name: c.full_name })),
+    shiftDate: shift.shift_date,
+    openSpots,
+    fullyStaffed: false,
+  };
+}
+
+// Re-offer a freed spot to ALL remaining available cleaners, across every tier
+// (not just the shift's current tier) and without capping to open spots. Used
+// when a cleaner cancels: we blast the offer wide so the gap fills fast, and the
+// first accept that reaches the target auto-closes the rest via markFullyStaffed.
+export async function offerAllRemaining(
+  sb: SupabaseClient,
+  shiftId: string,
+): Promise<OfferResult> {
+  const shift = await loadShift(sb, shiftId);
+  if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") {
+    return {
+      count: 0, offered: [], shiftDate: shift?.shift_date ?? "", openSpots: 0,
+      fullyStaffed: shift?.status === "fully_staffed",
+    };
+  }
+
+  const accepted = await acceptedCount(sb, shiftId);
+  const openSpots = shift.required_cleaners - accepted;
+  if (openSpots <= 0) {
+    await markFullyStaffed(sb, shiftId);
+    return { count: 0, offered: [], shiftDate: shift.shift_date, openSpots: 0, fullyStaffed: true };
+  }
+
+  // Candidates: every active cleaner not already offered/assigned to this shift,
+  // regardless of tier. No slice — everyone available gets the offer.
+  const { data: existing } = await sb
+    .from("shift_assignments")
+    .select("cleaner_id")
+    .eq("shift_id", shiftId);
+  const taken = new Set((existing ?? []).map((r) => r.cleaner_id));
+
+  const { data: pool } = await sb
+    .from("cleaners")
+    .select("id, full_name, phone, tier")
+    .eq("is_active", true)
+    .eq("is_team_leader", false)
+    .order("tier")
+    .order("full_name");
+
+  const candidates = (pool ?? []).filter((c) => !taken.has(c.id));
+  if (candidates.length === 0) {
+    return { count: 0, offered: [], shiftDate: shift.shift_date, openSpots, fullyStaffed: false };
+  }
+
+  const rows = candidates.map((c) => ({
+    shift_id: shiftId,
+    cleaner_id: c.id,
+    tier_at_offer: c.tier,
+    status: "offered",
+    offer_code: gen4(),
+  }));
+  const { data: inserted } = await sb
+    .from("shift_assignments")
+    .insert(rows)
+    .select("id, cleaner_id, offer_code");
+
+  await sb.from("shifts").update({ status: "staffing" }).eq("id", shiftId);
+
   const byId = new Map((inserted ?? []).map((r) => [r.cleaner_id, r]));
   for (const c of candidates) {
     const row = byId.get(c.id);
@@ -254,6 +329,8 @@ export async function recomputeStaffing(sb: SupabaseClient, shiftId: string): Pr
   const shift = await loadShift(sb, shiftId);
   if (!shift || shift.status === "cancelled") return false;
   const accepted = await acceptedCount(sb, shiftId);
+  // Full once accepted cleaners fill every cleaner slot (the team lead is extra,
+  // not counted against required_cleaners).
   if (accepted >= shift.required_cleaners) {
     await markFullyStaffed(sb, shiftId);
     return true;
@@ -277,7 +354,7 @@ export async function acceptOffer(
   const shift = await loadShift(sb, a.shift_id);
   if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") return "closed";
 
-  // First-come wins: if already at target, this accept loses.
+  // First-come wins: if the cleaner slots are already full, this accept loses.
   if ((await acceptedCount(sb, a.shift_id)) >= shift.required_cleaners) {
     await sb.from("shift_assignments")
       .update({ status: "no_response", responded_at: new Date().toISOString() })
@@ -298,8 +375,9 @@ export async function declineOffer(sb: SupabaseClient, assignmentId: string): Pr
     .eq("id", assignmentId);
 }
 
-// Cancel an accepted/offered assignment and re-offer the freed spot in the
-// shift's current tier (escalation crons pick up further tiers if exhausted).
+// Cancel an accepted/offered assignment and re-offer the freed spot to ALL
+// remaining available cleaners (every tier). The first accept that hits the
+// target auto-closes the rest via markFullyStaffed.
 export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Promise<void> {
   const { data: a } = await sb
     .from("shift_assignments")
@@ -317,6 +395,5 @@ export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Pro
   if (shift.status === "fully_staffed") {
     await sb.from("shifts").update({ status: "staffing" }).eq("id", a.shift_id);
   }
-  const tier = (shift.current_tier ?? "tier_1") as Tier;
-  await offerTier(sb, a.shift_id, tier);
+  await offerAllRemaining(sb, a.shift_id);
 }

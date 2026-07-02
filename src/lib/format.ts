@@ -138,18 +138,26 @@ export function typeLabel(s: Shift): string {
   return SHIFT_TYPE_LABEL[s.shift_type] ?? s.shift_type;
 }
 
-// Build the colored staffing squares: accepted (green), offered (amber), open (grey).
+// Build the colored staffing squares: team lead (indigo), accepted (green),
+// offered (amber), open (grey).
 export function staffingDots(st: ShiftStaffing | undefined, required: number): string[] {
+  const lead = st?.lead_count ?? 0;
   const accepted = st?.accepted_count ?? 0;
   const offered = st?.offered_count ?? 0;
+  // required_cleaners counts cleaners only; the lead is an extra slot on top.
   const open = Math.max(required - accepted - offered, 0);
   const dots: string[] = [];
+  for (let i = 0; i < lead; i++) dots.push("#5E6AC4");
   for (let i = 0; i < accepted; i++) dots.push("#3D8B5F");
   for (let i = 0; i < offered; i++) dots.push("#C8821A");
   for (let i = 0; i < open; i++) dots.push("#e0dbd0");
-  return dots.slice(0, required);
+  return dots.slice(0, required + lead);
 }
 
+// "1 + n / required confirmed" — the lead is always the reserved first slot.
 export function countLabel(st: ShiftStaffing | undefined, required: number): string {
-  return `${st?.accepted_count ?? 0}/${required} confirmed`;
+  const lead = st?.lead_count ?? 0;
+  const accepted = st?.accepted_count ?? 0;
+  const assigned = lead > 0 ? `${lead} + ${accepted}` : `${accepted}`;
+  return `${assigned}/${required} confirmed`;
 }

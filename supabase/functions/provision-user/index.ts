@@ -4,7 +4,7 @@
 // user metadata; the handle_new_user trigger then creates the profile (Spec §7.3).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller } from "../_shared/authz.ts";
+import { getCaller, isWriter } from "../_shared/authz.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const VALID_ROLES = ["super_admin", "admin", "team_leader"];
@@ -16,13 +16,15 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  // User management is super_admin's alone (per the brief).
-  if (!caller || caller.role !== "super_admin") return json({ error: "forbidden" }, 403);
+  // Admin + super_admin have full user management.
+  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { email, full_name, role, phone, redirectTo } = await req.json().catch(() => ({}));
   if (!email || !role) return json({ error: "email, role required" }, 400);
   if (!VALID_ROLES.includes(role)) return json({ error: "invalid role" }, 400);
-  // A team leader is also a cleaner (gets shift offers), which needs a phone.
+  // Only a super_admin may mint another super_admin (the hard-coded owner role).
+  if (role === "super_admin" && caller.role !== "super_admin") return json({ error: "forbidden" }, 403);
+  // A team leader's phone is used for the manager WhatsApp summary.
   if (role === "team_leader" && !/^\+[1-9]\d{7,14}$/.test(String(phone ?? ""))) {
     return json({ error: "a valid phone with country code is required for a team leader" }, 400);
   }
@@ -37,19 +39,12 @@ Deno.serve(async (req) => {
 
   // New users start as 'invite_sent' until they accept (handle_new_user defaults
   // the profile to 'active'); keep is_active true so they can sign in on accept.
+  // A team leader is NOT a cleaner — their phone (for the manager WhatsApp
+  // summary) lives on the profile, not the cleaners roster.
   if (data.user) {
-    await sb.from("profiles").update({ status: "invite_sent" }).eq("id", data.user.id);
-  }
-
-  // A team leader is the "+1" — mirror them into the cleaners roster so they get
-  // shift offers. Match on email: tag the existing cleaner, or create a new one.
-  if (role === "team_leader") {
-    const lowerEmail = String(email).toLowerCase();
-    const { data: existing } = await sb.from("cleaners").select("id").eq("email", lowerEmail).maybeSingle();
-    const { error: clErr } = existing
-      ? await sb.from("cleaners").update({ is_team_leader: true, is_active: true, status: "active" }).eq("id", existing.id)
-      : await sb.from("cleaners").insert({ full_name: full_name ?? email, phone, email: lowerEmail, tier: "tier_1", is_team_leader: true, status: "active" });
-    if (clErr) console.error(`[provision-user] cleaner mirror failed: ${clErr.message}`);
+    const patch: Record<string, unknown> = { status: "invite_sent" };
+    if (role === "team_leader") patch.phone = phone;
+    await sb.from("profiles").update(patch).eq("id", data.user.id);
   }
 
   await writeAuditLog(sb, {

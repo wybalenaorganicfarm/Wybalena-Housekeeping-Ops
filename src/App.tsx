@@ -15,7 +15,7 @@ import { ShiftConfirmed } from "./pages/ShiftConfirmed";
 import { Spinner } from "./components/ui";
 
 export function App() {
-  const { loading, userId, isSuperAdmin, canEdit, needsPassword } = useAuth();
+  const { loading, userId, canEdit, needsPassword } = useAuth();
 
   // Public landing for the email "Confirm Shift" button — no auth, no waiting on
   // the session. Must come before every auth/loading gate below.
@@ -41,7 +41,7 @@ export function App() {
         <Route path="/cleaners" element={<Cleaners />} />
         <Route path="/schedule" element={canEdit ? <Schedule /> : <Navigate to="/" />} />
         <Route path="/logs" element={canEdit ? <Logs /> : <Navigate to="/" />} />
-        <Route path="/users" element={isSuperAdmin ? <Users /> : <Navigate to="/" />} />
+        <Route path="/users" element={canEdit ? <Users /> : <Navigate to="/" />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </Layout>

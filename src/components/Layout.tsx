@@ -6,6 +6,8 @@ import { Icon } from "./Icon";
 import { Avatar, ConfirmDialog } from "./ui";
 import { getAlerts } from "../lib/api";
 
+const SECTION_LABEL = { fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase" as const, color: "#5e7d6c", fontWeight: 600, padding: "2px 10px 6px" };
+
 function NavItem({ to, icon, label, badge }: { to: string; icon: string; label: string; badge?: number }) {
   return (
     <NavLink to={to} end={to === "/"} style={({ isActive }) => ({
@@ -41,7 +43,7 @@ function NavIcon({ to, icon, label, badge }: { to: string; icon: string; label: 
 }
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { profile, role, isSuperAdmin, canEdit, signOut } = useAuth();
+  const { profile, role, canEdit, signOut } = useAuth();
   const navigate = useNavigate();
   const [openAlerts, setOpenAlerts] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
@@ -65,9 +67,14 @@ export function Layout({ children }: { children: ReactNode }) {
             <NavIcon to="/bookings" icon="book" label="Bookings" />
             <NavIcon to="/shifts" icon="calendar" label="Shifts" />
             <NavIcon to="/cleaners" icon="users" label="Cleaners" />
-            {canEdit && <NavIcon to="/schedule" icon="clock" label="Schedule" />}
-            {canEdit && <NavIcon to="/logs" icon="activity" label="System Logs" />}
-            {isSuperAdmin && <NavIcon to="/users" icon="user" label="Users" />}
+            {canEdit && (
+              <>
+                <div style={{ height: 1, background: "rgba(255,255,255,.12)", margin: "8px 8px", alignSelf: "stretch" }} />
+                <NavIcon to="/schedule" icon="clock" label="Schedule" />
+                <NavIcon to="/logs" icon="activity" label="System Logs" />
+                <NavIcon to="/users" icon="user" label="Users" />
+              </>
+            )}
           </nav>
           <div style={{ flex: 1 }} />
           <Avatar name={profile?.full_name || profile?.email || "?"} />
@@ -90,17 +97,18 @@ export function Layout({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 24 }}>
+          <div style={SECTION_LABEL}>Operations</div>
           <NavItem to="/" icon="dashboard" label="Dashboard" />
           <NavItem to="/alerts" icon="alert" label="Alerts" badge={openAlerts || undefined} />
           <NavItem to="/bookings" icon="book" label="Bookings" />
           <NavItem to="/shifts" icon="calendar" label="Shifts" />
           <NavItem to="/cleaners" icon="users" label="Cleaners" />
-          {canEdit && <NavItem to="/schedule" icon="clock" label="Schedule" />}
-          {canEdit && <NavItem to="/logs" icon="activity" label="System Logs" />}
-          {isSuperAdmin && (
+          {canEdit && (
             <>
-              <div style={{ height: 1, background: "rgba(255,255,255,.1)", margin: "8px 10px" }} />
-              <div style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "#5e7d6c", fontWeight: 600, padding: "2px 10px 6px" }}>Super admin</div>
+              <div style={{ height: 1, background: "rgba(255,255,255,.1)", margin: "10px 10px 2px" }} />
+              <div style={SECTION_LABEL}>Administration</div>
+              <NavItem to="/schedule" icon="clock" label="Schedule" />
+              <NavItem to="/logs" icon="activity" label="System Logs" />
               <NavItem to="/users" icon="user" label="Users" />
             </>
           )}
