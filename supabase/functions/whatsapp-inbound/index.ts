@@ -124,9 +124,10 @@ Deno.serve(async (req) => {
 
     // (a) button-encoded assignment id.
     if (r.assignmentId) assignmentId = await ownedById("id", r.assignmentId);
-    // (b) the message this reply quotes → the offer's stored message id (reliable
-    //     even with several open offers, and for the Yes/No decline confirmation).
+    // (b) the message this reply quotes → the stored offer message id, or the
+    //     decline-confirmation message id (reliable even with several open offers).
     if (!assignmentId && r.quotedMessageId) assignmentId = await ownedById("offer_message_id", r.quotedMessageId);
+    if (!assignmentId && r.quotedMessageId) assignmentId = await ownedById("confirm_message_id", r.quotedMessageId);
     // (c) explicit offer code in the text.
     if (!assignmentId && r.offerCode) assignmentId = await ownedById("offer_code", r.offerCode);
     // (d) last resort: the cleaner's single open offer.
@@ -208,10 +209,17 @@ Deno.serve(async (req) => {
           results.push({ id: r.providerMessageId, action: "decline", result: "blocked_already_accepted" });
           break;
         }
-        // Re-verify before declining.
+        // Already declined — no confirmation loop, just say so.
+        if (assn?.status === "declined") {
+          await sendMessage(cleaner.phone, "You've already declined this shift. No further action needed.");
+          results.push({ id: r.providerMessageId, action: "decline", result: "already_declined" });
+          break;
+        }
+        // Re-verify before declining. Store the prompt's id separately so a later
+        // reply to the original offer still resolves.
         const res = await sendDeclineConfirm(cleaner.phone, dateLabel, assignmentId);
         if (res?.providerMessageId) {
-          await sb.from("shift_assignments").update({ offer_message_id: res.providerMessageId }).eq("id", assignmentId);
+          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
         }
         results.push({ id: r.providerMessageId, action: "decline", result: "confirm_requested" });
         break;
@@ -229,6 +237,17 @@ Deno.serve(async (req) => {
         break;
       }
       case "cancel": {
+        // Nothing to cancel if they already declined or cancelled this shift.
+        if (assn?.status === "declined") {
+          await sendMessage(cleaner.phone, "You've already declined this shift, so there's nothing to cancel.");
+          results.push({ id: r.providerMessageId, action: "cancel", result: "already_declined" });
+          break;
+        }
+        if (assn?.status === "cancelled" || assn?.status === "no_response") {
+          await sendMessage(cleaner.phone, "You're not currently on this shift, so there's nothing to cancel.");
+          results.push({ id: r.providerMessageId, action: "cancel", result: "not_active" });
+          break;
+        }
         await cancelOffer(sb, assignmentId);
         await sendMessage(cleaner.phone, "Your spot has been cancelled and the shift has been re-offered. Thanks for the heads up.");
         // Raise an alert so the admin sees it on the Dashboard + Alerts and can
