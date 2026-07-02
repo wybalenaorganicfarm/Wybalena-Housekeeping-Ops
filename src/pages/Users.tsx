@@ -177,7 +177,7 @@ export function Users() {
         </div>
 
         {/* role cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12, marginBottom: 24 }}>
           {ROLE_CARDS.map(({ role, desc }) => {
             const b = ROLE_BADGE[role];
             return (

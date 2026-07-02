@@ -51,20 +51,20 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))" }}>
         {WEEKDAYS.map((w) => (
           <div key={w} style={{ padding: "8px 10px", fontSize: 10.5, fontWeight: 700, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${c.border2}` }}>{w}</div>
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,minmax(0,1fr))" }}>
         {cells.map((d, i) => {
           const ds = ymd(d);
           const inMonth = d.getMonth() === cursor.getMonth();
           const dayBookings = byDay[ds] ?? [];
           const isToday = ds === todayStr;
           return (
-            <div key={i} style={{ minHeight: 108, borderRight: i % 7 !== 6 ? `1px solid ${c.border2}` : "none", borderBottom: i < 35 ? `1px solid ${c.border2}` : "none", padding: 7, background: inMonth ? "#fff" : "#faf9f5" }}>
+            <div key={i} style={{ minHeight: 108, minWidth: 0, overflow: "hidden", borderRight: i % 7 !== 6 ? `1px solid ${c.border2}` : "none", borderBottom: i < 35 ? `1px solid ${c.border2}` : "none", padding: 7, background: inMonth ? "#fff" : "#faf9f5" }}>
               <div style={{ marginBottom: 2 }}>
                 <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 21, height: 21, padding: "0 5px", borderRadius: 11, fontSize: 11.5, fontWeight: isToday ? 700 : 500, color: isToday ? "#fff" : inMonth ? c.body : c.faint, background: isToday ? c.green : "transparent" }}>{d.getDate()}</span>
               </div>
@@ -75,7 +75,7 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
                   <button key={b.id} onClick={() => onSelect(b)} title={`Check-in ${time} · ${b.guest_name || "Unnamed"}`}
                     style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", textAlign: "left", border: "none", borderLeft: `2px solid ${cancelled ? c.faint : c.greenMid}`, borderRadius: 4, padding: "3px 6px", marginTop: 4, background: cancelled ? "#f0eee9" : "#e7f0ed", color: cancelled ? "#6b665c" : "#21564b", fontSize: 10.5, fontWeight: 600, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", opacity: cancelled ? 0.75 : 1 }}>
                     <span style={{ flex: "none", opacity: 0.85 }}>{time}</span>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{b.guest_name || "Unnamed"}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{b.guest_name || "Unnamed"}</span>
                   </button>
                 );
               })}
