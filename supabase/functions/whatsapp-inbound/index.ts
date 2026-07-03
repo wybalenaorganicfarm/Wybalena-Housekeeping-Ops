@@ -79,21 +79,17 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // 2. Resolve cleaner by phone.
+    // 2. Resolve cleaner by phone. THE HARD GATE: the number must exist in the
+    //    cleaners table. This is a shared WhatsApp line that also receives normal
+    //    personal chats — anything from a non-cleaner is ignored SILENTLY. We do
+    //    not reply and do not log a warning (that just clutters System Logs with
+    //    every random message the line receives).
     const phone = normPhone(r.fromPhone);
     const { data: cleaners } = await sb.from("cleaners").select("id, full_name, phone");
     const cleaner = (cleaners ?? []).find((c) => normPhone(c.phone) === phone);
     if (!cleaner) {
-      results.push({ id: r.providerMessageId, skipped: "unknown number" });
-      await writeAuditLog(sb, {
-        event_type: "response.unknown",
-        event_label: "WhatsApp Reply Received",
-        status: "warning",
-        summary: `Unrecognised WhatsApp reply from ${phone}. Could not match to an open offer.`,
-        detail: { phone, text: r.rawText },
-        source: SOURCE,
-        triggered_by: "webhook",
-      });
+      console.log(`[whatsapp-inbound] ignoring message from non-cleaner ${phone}`);
+      results.push({ id: r.providerMessageId, skipped: "not a cleaner" });
       continue;
     }
 

@@ -34,7 +34,15 @@
       "PowerShell(npx tsc --noEmit -p \"c:\\\\Clients\\\\Julian Mateer\\\\tsconfig.json\" 2>&1)",
       "PowerShell($env:npm_config_loglevel=\"silent\"; & npx.cmd tsc --noEmit -p \"c:\\\\Clients\\\\Julian Mateer\\\\tsconfig.json\"; Write-Output \"EXIT: $LASTEXITCODE\")",
       "mcp__claude_ai_Supabase__get_logs",
-      "mcp__claude_ai_Supabase__get_edge_function"
+      "mcp__claude_ai_Supabase__get_edge_function",
+      "Bash(pandoc --version)",
+      "Bash(py --version)",
+      "Bash(python -c \"import docx; print\\('python-docx ok'\\)\")",
+      "Bash(where soffice *)",
+      "Bash(python -m pip install python-docx --quiet)",
+      "Bash(python -c \"import docx; print\\('python-docx', docx.__version__ if hasattr\\(docx,'__version__'\\) else 'ready'\\)\")",
+      "Bash(python \"C:/Users/Admin/AppData/Local/Temp/claude/c--Clients-Julian-Mateer/09526bb1-c8e7-482e-8693-11b31825edd2/scratchpad/build_doc.py\")",
+      "Bash(python -c ' *)"
     ],
     "additionalDirectories": [
       "\\tmp"
