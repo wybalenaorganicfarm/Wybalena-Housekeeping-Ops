@@ -42,7 +42,13 @@
       "Bash(python -m pip install python-docx --quiet)",
       "Bash(python -c \"import docx; print\\('python-docx', docx.__version__ if hasattr\\(docx,'__version__'\\) else 'ready'\\)\")",
       "Bash(python \"C:/Users/Admin/AppData/Local/Temp/claude/c--Clients-Julian-Mateer/09526bb1-c8e7-482e-8693-11b31825edd2/scratchpad/build_doc.py\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(node -e ' *)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts||{},null,1\\)\\)\")",
+      "Bash(npx supabase *)",
+      "Bash(cat index.html)",
+      "Bash(ls public *)",
+      "Bash(ls src/assets)"
     ],
     "additionalDirectories": [
       "\\tmp"

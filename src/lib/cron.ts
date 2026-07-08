@@ -1,17 +1,64 @@
 // Cron <-> friendly-schedule conversion for the Automation Schedule page.
 //
-// pg_cron fires in UTC only. The venue runs on a single fixed-offset timezone
-// (TESTING: Asia/Calcutta / IST, UTC+5:30, no DST — mirrors 20260625100100_cron.sql).
-// The UI always speaks LOCAL venue time; every cron expression stored in the DB is
-// UTC. All conversion happens here so the rest of the app never touches offsets.
+// pg_cron fires in UTC only. The venue runs on Australia/Sydney (NSW/VIC),
+// which observes daylight saving — AEST (UTC+10) in winter, AEDT (UTC+11) in
+// summer. There is no single fixed offset, so every conversion below resolves
+// the offset for the specific instant it concerns (DST-aware). The UI always
+// speaks LOCAL venue time; every cron expression stored in the DB is UTC.
 //
-// ⚠ GO-LIVE (Australia): set TZ_OFFSET_MIN / TZ_LABEL to the confirmed venue tz.
-//   A DST timezone (Melbourne/Sydney) can't be a single fixed offset — revisit
-//   this file and the cron migration together before production.
-export const TZ_OFFSET_MIN = 330; // IST = +5h30m
-export const TZ_LABEL = "IST";
+// ⚠ pg_cron LIMITATION: a stored expression is a fixed UTC time — it can't
+//   track DST on its own. A job set in one season fires 1h off after the next
+//   DST switch until it is re-saved. Display always shows the true next-run
+//   local time, so the drift is visible; re-open + Save to re-anchor.
+export const TZ = "Australia/Sydney";
 
-const WEEK = 7 * 1440;
+// Offset in minutes (local = UTC + offset) for a given UTC instant, DST-aware.
+function offsetMinAt(utc: Date): number {
+  const tzn = new Intl.DateTimeFormat("en-US", { timeZone: TZ, timeZoneName: "longOffset" })
+    .formatToParts(utc).find((p) => p.type === "timeZoneName")?.value ?? "GMT+00:00";
+  const m = tzn.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+  if (!m) return 0;
+  return (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0));
+}
+
+// Sydney-local calendar/clock parts for a UTC instant.
+function local(utc: Date) {
+  const p = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ, hour12: false, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", weekday: "short",
+  }).formatToParts(utc);
+  const g = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  const dow: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return { y: +g("year"), mo: +g("month") - 1, d: +g("day"), h: +g("hour") % 24, mi: +g("minute"), dow: dow[g("weekday")] };
+}
+
+// Sydney wall-clock (Y, 0-based mo, D, h, mi) -> the UTC instant it maps to.
+function wallToUtc(y: number, mo: number, d: number, h: number, mi: number): Date {
+  const guess = Date.UTC(y, mo, d, h, mi);
+  let off = offsetMinAt(new Date(guess));
+  const off2 = offsetMinAt(new Date(guess - off * 60000)); // refine across a transition
+  if (off2 !== off) off = off2;
+  return new Date(guess - off * 60000);
+}
+
+// Offset (minutes) at the NEXT occurrence of a form's local time — the offset
+// we anchor a freshly-saved cron to.
+function offsetForNext(form: ScheduleForm, now: Date): number {
+  const b = local(now);
+  for (let i = 0; i <= 14; i++) {
+    const cal = local(new Date(Date.UTC(b.y, b.mo, b.d + i)));
+    const utc = wallToUtc(cal.y, cal.mo, cal.d, form.hour, form.minute);
+    if (utc <= now) continue;
+    if (form.freq === "weekly" && form.weekdays.length && !form.weekdays.includes(local(utc).dow)) continue;
+    return offsetMinAt(utc);
+  }
+  return offsetMinAt(now);
+}
+
+// Current venue-time abbreviation (AEDT in summer, AEST in winter).
+export function tzLabel(at: Date = new Date()): string {
+  return offsetMinAt(at) === 660 ? "AEDT" : "AEST";
+}
 
 export type Freq = "daily" | "weekly";
 
@@ -40,10 +87,12 @@ export function parseCron(expr: string): ScheduleForm | null {
   if (!Number.isInteger(minute) || !Number.isInteger(hour)) return null;
   if (dom !== "*" || mon !== "*") return null;
 
-  // UTC minute-of-week for the fire time, shifted into local time.
+  // UTC minute-of-day for the fire time, shifted into local time using the
+  // offset at the next actual run (DST-aware).
   const utcMinOfDay = hour * 60 + minute;
-  const localMinOfDay = mod(utcMinOfDay + TZ_OFFSET_MIN, 1440);
-  const dayDelta = Math.floor((utcMinOfDay + TZ_OFFSET_MIN) / 1440); // 0 or +1
+  const off = offsetMinAt(nextCronRun(expr) ?? new Date());
+  const localMinOfDay = mod(utcMinOfDay + off, 1440);
+  const dayDelta = Math.floor((utcMinOfDay + off) / 1440); // 0 or +1
   const lHour = Math.floor(localMinOfDay / 60);
   const lMin = localMinOfDay % 60;
 
@@ -59,9 +108,10 @@ export function parseCron(expr: string): ScheduleForm | null {
 
 // Serialize a local-time form back to a UTC cron expression.
 export function toCron(form: ScheduleForm): string {
+  const off = offsetForNext(form, new Date());
   const localMinOfDay = form.hour * 60 + form.minute;
-  const utcMinOfDay = mod(localMinOfDay - TZ_OFFSET_MIN, 1440);
-  const dayDelta = Math.floor((localMinOfDay - TZ_OFFSET_MIN) / 1440); // 0 or -1
+  const utcMinOfDay = mod(localMinOfDay - off, 1440);
+  const dayDelta = Math.floor((localMinOfDay - off) / 1440); // 0 or -1
   const uHour = Math.floor(utcMinOfDay / 60);
   const uMin = utcMinOfDay % 60;
 
@@ -79,9 +129,9 @@ export function fmtTime(hour: number, minute: number): string {
   return `${h12}:${String(minute).padStart(2, "0")} ${ampm}`;
 }
 
-// Plain-English one-liner, e.g. "Every Tuesday at 1:30 PM (IST)".
+// Plain-English one-liner, e.g. "Every Tuesday at 1:30 PM AEDT".
 export function describe(form: ScheduleForm): string {
-  const t = `${fmtTime(form.hour, form.minute)} ${TZ_LABEL}`;
+  const t = `${fmtTime(form.hour, form.minute)} ${tzLabel()}`;
   if (form.freq === "daily" || form.weekdays.length === 0) return `Every day at ${t}`;
   if (form.weekdays.length === 7) return `Every day at ${t}`;
   const days = form.weekdays.map((d) => WEEKDAY_LONG[d]);
@@ -131,6 +181,6 @@ export function fmtRelative(target: Date, now: Date = new Date()): string {
   if (hours < 1) return "in <1h";
   if (hours < 48) return `in ~${Math.round(hours)}h`;
   return target.toLocaleString("en-AU", {
-    timeZone: "Asia/Calcutta", weekday: "short", hour: "numeric", minute: "2-digit",
+    timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit",
   });
 }

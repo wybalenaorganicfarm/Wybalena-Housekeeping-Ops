@@ -2,6 +2,7 @@
 // Mount <Toaster/> once (see main.tsx); call toastError / toastOk anywhere.
 import toast from "react-hot-toast";
 import { c, font } from "../theme";
+import { friendlyError } from "./errors";
 
 const base = {
   fontFamily: font.body,
@@ -23,7 +24,7 @@ export function toastOk(message: string) {
 }
 
 export function toastError(message: string) {
-  return toast.error(message, {
+  return toast.error(friendlyError(message), {
     style: base,
     iconTheme: { primary: c.danger, secondary: "#fff" },
   });

@@ -61,14 +61,14 @@ const STATUS_CHIPS: [string, string][] = [
   ["all", "All"], ["success", "Success"], ["failed", "Failed"], ["warning", "Warning"], ["skipped", "Skipped"],
 ];
 
-// "Mon 23 Jun · 3:30 PM" in IST (testing tz; swap to venue tz on go-live).
+// "Mon 23 Jun · 3:30 PM" in Australia/Sydney venue local time (DST-aware).
 function logTime(iso: string): string {
   const d = new Date(iso);
   const date = d.toLocaleDateString("en-GB", {
-    timeZone: "Asia/Calcutta", weekday: "short", day: "numeric", month: "short",
+    timeZone: "Australia/Sydney", weekday: "short", day: "numeric", month: "short",
   });
   const time = d.toLocaleTimeString("en-US", {
-    timeZone: "Asia/Calcutta", hour: "numeric", minute: "2-digit",
+    timeZone: "Australia/Sydney", hour: "numeric", minute: "2-digit",
   });
   return `${date} · ${time}`;
 }

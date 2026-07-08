@@ -1,4 +1,5 @@
 import { supabase, invokeFn } from "./supabase";
+import { friendlyError } from "./errors";
 import type {
   Alert, AuditLogResolved, Booking, Cleaner, CleanerNote, CleanerReliability, Profile, Shift, ShiftAssignment, ShiftStaffing,
 } from "./types";
@@ -42,7 +43,7 @@ export async function getCleanerNotes(cleanerId: string): Promise<CleanerNote[]>
 export async function addCleanerNote(cleanerId: string, body: string): Promise<string | null> {
   const { error } = await supabase
     .from("cleaner_notes").insert({ cleaner_id: cleanerId, body } as never);
-  return error ? error.message : null;
+  return error ? friendlyError(error.message) : null;
 }
 
 export async function getStaffing(): Promise<Record<string, ShiftStaffing>> {
@@ -173,13 +174,13 @@ export async function createShift(input: {
   const { data, error } = await supabase.from("shifts").insert({
     ...input, status: "pending_confirmation", source: "manual",
   } as never).select("id").single();
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyError(error.message) };
   return { id: (data as { id: string }).id };
 }
 
 export async function deleteShift(id: string): Promise<string | null> {
   const { error } = await supabase.from("shifts").delete().eq("id", id);
-  return error ? error.message : null;
+  return error ? friendlyError(error.message) : null;
 }
 
 // Routed through the update-shift Edge Function so the edit is recorded in the audit
@@ -243,7 +244,7 @@ export const activateSelf = () => invokeFn("activate-self", {});
 export async function setUserStatus(userId: string, status: string): Promise<string | null> {
   const { error } = await supabase
     .from("profiles").update({ status, is_active: status !== "inactive" } as never).eq("id", userId);
-  return error ? error.message : null;
+  return error ? friendlyError(error.message) : null;
 }
 
 // Keep a team leader's cleaner row in sync with their user status. away/inactive

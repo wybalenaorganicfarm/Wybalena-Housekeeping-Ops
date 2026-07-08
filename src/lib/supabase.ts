@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
+import { friendlyError } from "./errors";
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -29,6 +30,20 @@ export async function invokeFn<T = unknown>(
     body,
     ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
   });
-  if (error) return { data: null, error: error.message };
+  if (error) {
+    // A non-2xx puts the function's real message in the response body, not in
+    // error.message ("…non-2xx status code"). Dig it out, then sanitize.
+    let body: string | null = null;
+    try {
+      const ctx = (error as { context?: { json?: () => Promise<unknown> } }).context;
+      const parsed = ctx?.json ? await ctx.json() : null;
+      body = (parsed as { error?: string } | null)?.error ?? null;
+    } catch { /* body not JSON — fall back to error.message */ }
+    return { data: null, error: friendlyError(body ?? error.message) };
+  }
+  // Edge Functions return 200 with { error } to surface a real (often DB) error.
+  // Fold it into `error` (sanitized) so callers never show raw DB text.
+  const bodyErr = (data as { error?: string } | null)?.error;
+  if (bodyErr) return { data: data as T, error: friendlyError(bodyErr) };
   return { data: data as T, error: null };
 }

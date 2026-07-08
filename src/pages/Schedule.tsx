@@ -6,7 +6,7 @@ import { Button, Modal, Spinner } from "../components/ui";
 import { getCronSchedules, updateCronSchedule, type CronJob } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import {
-  describe, parseCron, toCron, toTimeInput, WEEKDAY_SHORT, TZ_LABEL,
+  describe, parseCron, toCron, toTimeInput, WEEKDAY_SHORT, tzLabel,
   type Freq, type ScheduleForm,
 } from "../lib/cron";
 
@@ -88,9 +88,10 @@ export function Schedule() {
           <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, color: c.body, borderRadius: 10, padding: "12px 14px", fontSize: 12.5, lineHeight: 1.5, marginBottom: 20 }}>
             <span style={{ color: c.green, flex: "none", marginTop: 1 }}><Icon name="info" size={16} /></span>
             <span>
-              All times are shown and set in <b>{TZ_LABEL}</b> (venue local time); the system stores them in UTC automatically.
-              The weekly jobs run as a sequence each week — keep them in order (sync → confirm → offer → remind → escalate)
-              so each step has the previous step's result to work with. Changes take effect from the next run.
+              All times are shown and set in <b>{tzLabel()}</b> (Sydney/Melbourne venue local time, adjusts for daylight saving);
+              the system stores them in UTC automatically. The weekly jobs run as a sequence each week — keep them in order
+              (sync → confirm → offer → remind → escalate) so each step has the previous step's result to work with.
+              Changes take effect from the next run.
             </span>
           </div>
 
@@ -238,7 +239,7 @@ function EditModal({ row, onClose, onSave }: {
             </>
           )}
 
-          <Label>Time ({TZ_LABEL})</Label>
+          <Label>Time ({tzLabel()})</Label>
           <input type="time" value={toTimeInput(form.hour, form.minute)}
             onChange={(e) => { const [h, m] = e.target.value.split(":").map(Number); set({ hour: h || 0, minute: m || 0 }); }}
             style={{ width: 140, border: `1.5px solid ${c.border3}`, borderRadius: 8, padding: "9px 11px", fontSize: 14, fontFamily: font.body, color: c.ink, outline: "none" }} />

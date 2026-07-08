@@ -7,11 +7,10 @@ import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "pre-shift-reminder";
 
-// "Tomorrow" in venue-local time. TESTING: Asia/Calcutta (IST). GO-LIVE: swap to
-// the confirmed Australian venue tz.
+// "Tomorrow" in venue-local time (Australia/Sydney, DST-aware).
 function localDateStr(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Calcutta",
+    timeZone: "Australia/Sydney",
     year: "numeric", month: "2-digit", day: "2-digit",
   }).format(d); // YYYY-MM-DD
 }
