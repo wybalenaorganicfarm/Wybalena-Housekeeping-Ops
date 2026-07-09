@@ -308,24 +308,3 @@ export async function startGoogleReconnect(): Promise<string> {
   if (error || data?.error || !data?.url) throw new Error(error ?? data?.error ?? "Could not start Google reconnect");
   return data.url;
 }
-
-// ---- WhatsApp (Whapi) channel reconnect — QR scan + poll --------------------
-
-export interface WhatsAppQr { ok: boolean; image: string | null; status: string; detail?: string }
-export interface WhatsAppStatus { configured: boolean; status: string; authorized: boolean; detail: string }
-
-export async function getWhatsAppQr(): Promise<WhatsAppQr> {
-  const { data, error } = await invokeFn<WhatsAppQr>("whatsapp-reconnect", { action: "qr" });
-  if (error || !data) throw new Error(error ?? "Could not load WhatsApp QR");
-  return data;
-}
-
-export async function getWhatsAppStatus(): Promise<WhatsAppStatus> {
-  const { data, error } = await invokeFn<WhatsAppStatus>("whatsapp-reconnect", { action: "status" });
-  if (error || !data) throw new Error(error ?? "Could not read WhatsApp status");
-  return data;
-}
-
-export async function confirmWhatsAppReconnected(): Promise<void> {
-  await invokeFn("whatsapp-reconnect", { action: "confirm" });
-}
