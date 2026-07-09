@@ -41,54 +41,55 @@ function gen4(): string {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-// Send the interactive Accept/Decline/Cancel offer to one cleaner. Button payloads
-// carry the assignment id ("accept:<id>") so the inbound webhook maps the tap back
-// to this exact row. Cancel lets a cleaner who accepted later drop the shift from
-// the same message. Keyword text is the fallback when buttons aren't available.
+// Send the interactive Accept/Decline offer to one cleaner. Button payloads carry
+// the assignment id ("accept:<id>") so the inbound webhook maps the tap back to
+// this exact row. Only Accept/Decline are offered up front — the Cancel button
+// appears later, on the "Shift Accepted" confirmation, for cleaners who accepted.
 async function sendOfferMessage(
   phone: string,
   shift: ShiftRow,
   assignmentId: string | undefined,
-  offerCode: string,
 ) {
   const time = shift.start_time.slice(0, 5);
   const body =
     `*SHIFT DETAILS*\n\n📅 Date: ${shift.shift_date}\n⏰ Time: ${time}\n\n` +
-    `Tap *Accept* to take this shift, or *Decline* to pass.\n` +
-    `If you accept and later can't make it, tap *Cancel*.`;
+    `Tap *Accept* to take this shift, or *Decline* to pass.`;
   return await sendButtons(
     phone,
     body,
     [
       { id: `accept:${assignmentId}`, title: "✅ Accept" },
       { id: `decline:${assignmentId}`, title: "❌ Decline" },
-      { id: `cancel:${assignmentId}`, title: "🚫 Cancel" },
     ],
     {
       header: "🧹 New Cleaning Shift Available",
       footer: "Wybalena Organic Farm",
-      fallbackText: `New cleaning shift on ${shift.shift_date} at ${time}.\n` +
-        `Reply: ACCEPT ${offerCode} to accept · DECLINE ${offerCode} to decline · CANCEL ${offerCode} to cancel.`,
+      fallbackText: `New cleaning shift on ${shift.shift_date} at ${time}. ` +
+        `Please open WhatsApp and tap Accept or Decline on the offer.`,
     },
   );
 }
 
 // Send the offer to one cleaner and record the outbound message id on the
 // assignment, so an inbound tap/reply can be matched back to this exact offer.
+// Returns true only when the offer actually reached the cleaner (or was stubbed
+// in dev). A false result means the WhatsApp channel rejected the send — the
+// caller rolls back the assignment so the cleaner can be re-offered next run.
 async function sendAndRecordOffer(
   sb: SupabaseClient,
   phone: string | null,
   shift: ShiftRow,
   assignmentId: string | undefined,
-  offerCode: string,
-): Promise<void> {
-  if (!phone || !assignmentId) return;
-  const res = await sendOfferMessage(phone, shift, assignmentId, offerCode);
-  if (res?.providerMessageId) {
+): Promise<boolean> {
+  if (!phone || !assignmentId) return false;
+  const res = await sendOfferMessage(phone, shift, assignmentId);
+  if (!res.ok) return false;
+  if (res.providerMessageId) {
     await sb.from("shift_assignments")
       .update({ offer_message_id: res.providerMessageId })
       .eq("id", assignmentId);
   }
+  return true;
 }
 
 // Manually offer a shift to one specific cleaner (admin override). Unlike the old
@@ -99,7 +100,7 @@ export async function offerToCleaner(
   sb: SupabaseClient,
   shiftId: string,
   cleanerId: string,
-): Promise<"offered" | "error"> {
+): Promise<"offered" | "error" | "send_failed"> {
   const shift = await loadShift(sb, shiftId);
   if (!shift || shift.status === "cancelled") return "error";
 
@@ -124,29 +125,74 @@ export async function offerToCleaner(
     .select("id, offer_code")
     .maybeSingle();
 
-  // Reflect that the shift is actively being staffed.
+  // If the WhatsApp channel rejects the send, roll the offer back so we don't
+  // report a phantom "offered" the cleaner never received, and don't flip the
+  // shift into staffing off the back of a message that never went out.
+  const ok = await sendAndRecordOffer(sb, cleaner.phone, shift, row?.id);
+  if (!ok) {
+    if (row?.id) await sb.from("shift_assignments").delete().eq("id", row.id);
+    return "send_failed";
+  }
+
+  // Reflect that the shift is actively being staffed (only once delivered).
   if (shift.status === "pending_confirmation" || shift.status === "confirmed") {
     await sb.from("shifts")
       .update({ status: "staffing", current_tier: shift.current_tier ?? cleaner.tier })
       .eq("id", shiftId);
   }
-
-  await sendAndRecordOffer(sb, cleaner.phone, shift, row?.id, row?.offer_code ?? code);
   return "offered";
 }
 
 // Result of an offerTier run — rich enough for plain-English audit logging.
-//   count        : fresh offers actually sent this run
-//   offered      : the cleaners offered (id + name) for the log summary
+//   count        : offers actually DELIVERED this run (send succeeded)
+//   offered      : the cleaners successfully offered (id + name) for the summary
 //   shiftDate    : the shift's date (for the log summary)
 //   openSpots    : spots still unfilled at the moment of the run
 //   fullyStaffed : true when the shift was already full (no offers needed)
+//   failed       : offers that could NOT be delivered (WhatsApp channel error)
+//   failedNames  : the cleaners we couldn't reach — for the failure alert
 export interface OfferResult {
   count: number;
   offered: { id: string; full_name: string }[];
   shiftDate: string;
   openSpots: number;
   fullyStaffed: boolean;
+  failed: number;
+  failedNames: string[];
+}
+
+function emptyOffer(shiftDate: string, openSpots: number, fullyStaffed: boolean): OfferResult {
+  return { count: 0, offered: [], shiftDate, openSpots, fullyStaffed, failed: 0, failedNames: [] };
+}
+
+// Send every pending offer, roll back the ones the WhatsApp channel rejected, and
+// report who was delivered vs who couldn't be reached. Shared by offerTier and
+// offerAllRemaining. `inserted` maps cleaner_id -> the assignment row just created.
+async function deliverOffers(
+  sb: SupabaseClient,
+  shift: ShiftRow,
+  candidates: { id: string; full_name: string; phone: string | null }[],
+  inserted: { id: string; cleaner_id: string }[],
+): Promise<{ offered: { id: string; full_name: string }[]; failedIds: string[]; failedNames: string[] }> {
+  const byId = new Map(inserted.map((r) => [r.cleaner_id, r]));
+  const offered: { id: string; full_name: string }[] = [];
+  const failedIds: string[] = [];
+  const failedNames: string[] = [];
+  for (const c of candidates) {
+    const row = byId.get(c.id);
+    const ok = await sendAndRecordOffer(sb, c.phone, shift, row?.id);
+    if (ok) offered.push({ id: c.id, full_name: c.full_name });
+    else {
+      if (row?.id) failedIds.push(row.id);
+      failedNames.push(c.full_name);
+    }
+  }
+  // Undeliverable offers must not linger as "offered" — they'd block the cleaner
+  // from being re-offered next run and hold the shift in a false "staffing" state.
+  if (failedIds.length) {
+    await sb.from("shift_assignments").delete().in("id", failedIds);
+  }
+  return { offered, failedIds, failedNames };
 }
 
 // Offer a shift to up to `openSpots` available cleaners in the given tier.
@@ -158,17 +204,14 @@ export async function offerTier(
 ): Promise<OfferResult> {
   const shift = await loadShift(sb, shiftId);
   if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") {
-    return {
-      count: 0, offered: [], shiftDate: shift?.shift_date ?? "", openSpots: 0,
-      fullyStaffed: shift?.status === "fully_staffed",
-    };
+    return emptyOffer(shift?.shift_date ?? "", 0, shift?.status === "fully_staffed");
   }
 
   const accepted = await acceptedCount(sb, shiftId);
   const openSpots = shift.required_cleaners - accepted;
   if (openSpots <= 0) {
     await markFullyStaffed(sb, shiftId);
-    return { count: 0, offered: [], shiftDate: shift.shift_date, openSpots: 0, fullyStaffed: true };
+    return emptyOffer(shift.shift_date, 0, true);
   }
 
   // Candidates: active, in tier, not already offered/assigned to this shift.
@@ -188,7 +231,7 @@ export async function offerTier(
 
   const candidates = (pool ?? []).filter((c) => !taken.has(c.id)).slice(0, openSpots);
   if (candidates.length === 0) {
-    return { count: 0, offered: [], shiftDate: shift.shift_date, openSpots, fullyStaffed: false };
+    return emptyOffer(shift.shift_date, openSpots, false);
   }
 
   const rows = candidates.map((c) => ({
@@ -201,27 +244,29 @@ export async function offerTier(
   const { data: inserted } = await sb
     .from("shift_assignments")
     .insert(rows)
-    .select("id, cleaner_id, offer_code");
-
-  await sb
-    .from("shifts")
-    .update({ status: "staffing", current_tier: tier })
-    .eq("id", shiftId);
+    .select("id, cleaner_id");
 
   // Outbound offers: interactive Accept/Decline buttons whose payload carries the
-  // assignment id, so the inbound webhook maps the tap straight to this row. The
-  // offer_code keyword text is the fallback when buttons aren't available (§7.5).
-  const byId = new Map((inserted ?? []).map((r) => [r.cleaner_id, r]));
-  for (const c of candidates) {
-    const row = byId.get(c.id);
-    await sendAndRecordOffer(sb, c.phone, shift, row?.id, row?.offer_code ?? "");
+  // assignment id, so the inbound webhook maps the tap straight to this row.
+  // Undeliverable offers are rolled back inside deliverOffers.
+  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, inserted ?? []);
+
+  // Only flag the shift as being staffed once at least one offer actually landed;
+  // if every send failed the shift stays put so the next run retries cleanly.
+  if (offered.length > 0) {
+    await sb
+      .from("shifts")
+      .update({ status: "staffing", current_tier: tier })
+      .eq("id", shiftId);
   }
   return {
-    count: candidates.length,
-    offered: candidates.map((c) => ({ id: c.id, full_name: c.full_name })),
+    count: offered.length,
+    offered,
     shiftDate: shift.shift_date,
     openSpots,
     fullyStaffed: false,
+    failed: failedNames.length,
+    failedNames,
   };
 }
 
@@ -235,17 +280,14 @@ export async function offerAllRemaining(
 ): Promise<OfferResult> {
   const shift = await loadShift(sb, shiftId);
   if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") {
-    return {
-      count: 0, offered: [], shiftDate: shift?.shift_date ?? "", openSpots: 0,
-      fullyStaffed: shift?.status === "fully_staffed",
-    };
+    return emptyOffer(shift?.shift_date ?? "", 0, shift?.status === "fully_staffed");
   }
 
   const accepted = await acceptedCount(sb, shiftId);
   const openSpots = shift.required_cleaners - accepted;
   if (openSpots <= 0) {
     await markFullyStaffed(sb, shiftId);
-    return { count: 0, offered: [], shiftDate: shift.shift_date, openSpots: 0, fullyStaffed: true };
+    return emptyOffer(shift.shift_date, 0, true);
   }
 
   // Candidates: every active cleaner not already offered/assigned to this shift,
@@ -266,7 +308,7 @@ export async function offerAllRemaining(
 
   const candidates = (pool ?? []).filter((c) => !taken.has(c.id));
   if (candidates.length === 0) {
-    return { count: 0, offered: [], shiftDate: shift.shift_date, openSpots, fullyStaffed: false };
+    return emptyOffer(shift.shift_date, openSpots, false);
   }
 
   const rows = candidates.map((c) => ({
@@ -279,21 +321,21 @@ export async function offerAllRemaining(
   const { data: inserted } = await sb
     .from("shift_assignments")
     .insert(rows)
-    .select("id, cleaner_id, offer_code");
+    .select("id, cleaner_id");
 
-  await sb.from("shifts").update({ status: "staffing" }).eq("id", shiftId);
+  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, inserted ?? []);
 
-  const byId = new Map((inserted ?? []).map((r) => [r.cleaner_id, r]));
-  for (const c of candidates) {
-    const row = byId.get(c.id);
-    await sendAndRecordOffer(sb, c.phone, shift, row?.id, row?.offer_code ?? "");
+  if (offered.length > 0) {
+    await sb.from("shifts").update({ status: "staffing" }).eq("id", shiftId);
   }
   return {
-    count: candidates.length,
-    offered: candidates.map((c) => ({ id: c.id, full_name: c.full_name })),
+    count: offered.length,
+    offered,
     shiftDate: shift.shift_date,
     openSpots,
     fullyStaffed: false,
+    failed: failedNames.length,
+    failedNames,
   };
 }
 

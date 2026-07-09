@@ -30,6 +30,10 @@ verify_jwt = false
 # HMAC token (CONFIRM_LINK_SECRET), so no user JWT.
 [functions.confirm-shift-email]
 verify_jwt = false
+# Public Google OAuth redirect target — Google sends the browser here with no
+# Supabase JWT; secured by the signed `state` param (CONFIRM_LINK_SECRET).
+[functions.google-oauth-callback]
+verify_jwt = false
 
 # App-facing functions are called by the frontend WITH the user's JWT; they
 # verify the caller's role internally. Keep verify_jwt = true.
@@ -46,4 +50,8 @@ verify_jwt = true
 [functions.set-user-role]
 verify_jwt = true
 [functions.update-cleaner]
+verify_jwt = true
+[functions.google-oauth-start]
+verify_jwt = true
+[functions.get-connection-status]
 verify_jwt = true

@@ -66,12 +66,19 @@ Deno.serve(async (req) => {
         (await opsManager(sb)).email ?? undefined,
       );
 
+      // Report what actually reached cleaners — a failed WhatsApp send must not be
+      // logged as "offers sent". Ashley is already emailed urgently above either way.
+      const deliveryNote = res.failed > 0
+        ? `Tier 3 offers to ${res.failedNames.join(", ")} could NOT be sent — the WhatsApp channel needs reconnecting.`
+        : res.count > 0
+          ? `Tier 3 offers sent to ${res.offered.map((c) => c.full_name).join(", ")}.`
+          : "No Tier 3 cleaner was available to offer.";
       await writeAuditLog(sb, {
         event_type: "escalation.tier3_triggered",
         event_label: "Tier 3 Escalation",
-        status: "warning",
-        summary: `Tier 3 escalation triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled after Tier 2. Tier 3 offers sent. Ashley notified urgently.`,
-        detail: { shift_id: s.id, open_spots: res.openSpots, count: res.count, cleaners: res.offered },
+        status: res.failed > 0 ? "failed" : "warning",
+        summary: `Tier 3 escalation triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled after Tier 2. ${deliveryNote} Ashley notified urgently.`,
+        detail: { shift_id: s.id, open_spots: res.openSpots, count: res.count, cleaners: res.offered, failed: res.failed, failed_cleaners: res.failedNames },
         source: SOURCE,
         shift_id: s.id,
         triggered_by: "cron",

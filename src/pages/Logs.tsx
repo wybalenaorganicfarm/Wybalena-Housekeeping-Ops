@@ -3,9 +3,21 @@ import { c, font, SHIFT_TYPE_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
 import { Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
+import { Button } from "../components/ui";
 import { AUDIT_PAGE_SIZE, getAuditLogs, getRecentFailureCount } from "../lib/api";
 import { describe, parseCron } from "../lib/cron";
+import { useGoogleReconnect } from "../lib/useGoogleReconnect";
 import type { AuditLogResolved, AuditStatus } from "../lib/types";
+
+// A log row is a Google-connection failure the admin can fix with one click when
+// it's a failed/warning entry that names Gmail or Calendar (or a Google token
+// error). Health-check rows carry the broken services in detail.not_working.
+function isGoogleFailure(log: AuditLogResolved): boolean {
+  if (log.status !== "failed" && log.status !== "warning") return false;
+  const notWorking = (log.detail?.not_working as unknown[] | undefined)?.map(String).join(" ") ?? "";
+  const hay = `${log.summary} ${log.error_message ?? ""} ${notWorking}`.toLowerCase();
+  return /gmail|google calendar|\bcalendar\b|google|refresh.?token/.test(hay);
+}
 
 // Cron expression → plain-English local time, e.g. "2 8 * * 3" → "Every Wednesday
 // at 1:32 PM (IST)". Falls back to the raw expression if it isn't parseable.
@@ -34,6 +46,9 @@ const SOURCE_LABEL: Record<string, string> = {
   "pre-shift-reminder": "Pre-Shift Reminders",
   "cancellation-followup": "Cancellation Follow-up",
   "whatsapp-inbound": "WhatsApp Reply Received",
+  "health-check": "Connection Health Check",
+  "wipeover-notify": "Wipeover Cleaning",
+  "google-oauth-callback": "Google Reconnected",
   // Manual / admin actions
   "manual-assign": "Manual Assignment",
   "confirm-shifts": "Shift Confirmation",
@@ -138,6 +153,9 @@ export function Logs() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [failures24h, setFailures24h] = useState(0);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const { reconnect, busy: reconnecting } = useGoogleReconnect(() => setReloadKey((k) => k + 1));
 
   // Reset to first page whenever a filter changes.
   useEffect(() => { setPage(0); }, [status, source, from, to, search]);
@@ -155,7 +173,7 @@ export function Logs() {
       setRows(res.rows); setTotal(res.total); setLoading(false);
     });
     return () => { live = false; };
-  }, [status, source, from, to, search, page]);
+  }, [status, source, from, to, search, page, reloadKey]);
 
   useEffect(() => { getRecentFailureCount().then(setFailures24h); }, []);
 
@@ -250,6 +268,16 @@ export function Logs() {
                       {!log.error_message && (log.status === "skipped" || log.status === "warning") && (
                         <div style={{ background: "#f4f2ec", border: `1px solid ${c.border}`, borderRadius: 6, padding: "9px 11px", fontSize: 12.5, color: c.body }}>
                           <span style={{ fontWeight: 700 }}>Reason it was {log.status === "warning" ? "flagged" : "skipped"}: </span>{humanizeSummary(log.summary, log.source)}
+                        </div>
+                      )}
+                      {isGoogleFailure(log) && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#f4f2ec", border: `1px solid ${c.border}`, borderRadius: 6, padding: "10px 12px" }}>
+                          <div style={{ flex: 1, fontSize: 12.5, color: c.body, lineHeight: 1.45 }}>
+                            The Google login (Gmail + Calendar) needs re-authorising. Reconnect in one click — no console or client IDs needed.
+                          </div>
+                          <Button kind="danger" onClick={reconnect} loading={reconnecting} style={{ borderRadius: 8, whiteSpace: "nowrap" }}>
+                            <Icon name="refresh" size={13} strokeWidth={2.2} /> Reconnect Google
+                          </Button>
                         </div>
                       )}
                       {entity && (

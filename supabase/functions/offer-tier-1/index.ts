@@ -5,7 +5,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
-import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
+import { notifyManagerSummary, notifyOfferFailure, type OfferFailure, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
 const SOURCE = "offer-tier-1";
 
@@ -22,6 +22,8 @@ Deno.serve(async (req) => {
   let offered = 0;
   // Per-shift breakdown for the manager summary (shift, date/time, tier, names).
   const summaries: ShiftOfferSummary[] = [];
+  // Shifts whose offers WhatsApp refused to deliver — emailed to Ashleigh below.
+  const failures: OfferFailure[] = [];
   for (const s of shifts ?? []) {
     try {
       const res = await offerTier(sb, s.id, "tier_1");
@@ -45,6 +47,27 @@ Deno.serve(async (req) => {
           triggered_by: "cron",
         });
       }
+      // Some (or all) sends bounced — the offer was rolled back, so log it as a
+      // failure and queue Ashleigh's notification rather than reporting success.
+      if (res.failed > 0) {
+        failures.push({
+          shiftDate: res.shiftDate,
+          startTime: (s.start_time ?? "").slice(0, 5),
+          shiftType: s.shift_type,
+          names: res.failedNames,
+        });
+        await writeAuditLog(sb, {
+          event_type: "offer.tier1_sent",
+          event_label: "Tier 1 Offers",
+          status: "failed",
+          summary: `Tier 1 offers for shift on ${res.shiftDate} could NOT be sent to ${res.failedNames.join(", ")} — the WhatsApp channel needs reconnecting. No offer delivered.`,
+          error_message: "whatsapp send failed",
+          detail: { shift_id: s.id, failed: res.failed, cleaners: res.failedNames },
+          source: SOURCE,
+          shift_id: s.id,
+          triggered_by: "cron",
+        });
+      }
     } catch (e) {
       await writeAuditLog(sb, {
         event_type: "offer.tier1_sent",
@@ -59,7 +82,10 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (offered === 0) {
+  // Surface any delivery failures to Ashleigh in one consolidated email.
+  await notifyOfferFailure(sb, "tier_1", failures, SOURCE);
+
+  if (offered === 0 && failures.length === 0) {
     // Explain WHY nothing was sent, accurately:
     //   • shifts already offered to Tier 1 (now "staffing"), or
     //   • confirmed shifts exist but no Tier 1 cleaner was available, or

@@ -48,7 +48,8 @@
       "Bash(npx supabase *)",
       "Bash(cat index.html)",
       "Bash(ls public *)",
-      "Bash(ls src/assets)"
+      "Bash(ls src/assets)",
+      "WebFetch(domain:whapi.readme.io)"
     ],
     "additionalDirectories": [
       "\\tmp"

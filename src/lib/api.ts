@@ -278,3 +278,33 @@ export async function updateCronSchedule(fn: string, schedule: string, active: b
   if (data?.error) return data.error;
   return null;
 }
+
+// ---- Connections / integration health (admin) ------------------------------
+
+export interface ConnectionResult {
+  name: string;         // supabase | whapi | gmail | google_calendar
+  label: string;        // human-readable
+  provider: string;     // "google" for gmail/calendar — drives the reconnect button
+  configured: boolean;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ConnectionStatus {
+  results: ConnectionResult[];
+  google: { email: string | null; connectedAt: string | null } | null;
+}
+
+export async function getConnectionStatus(): Promise<ConnectionStatus> {
+  const { data, error } = await invokeFn<ConnectionStatus>("get-connection-status", {});
+  if (error || !data) throw new Error(error ?? "Failed to load connection status");
+  return data;
+}
+
+// Kick off the Google reconnect: returns the consent URL the portal opens in a
+// popup. The one-time redirect-URI setup in Google Cloud makes this a true 1-click.
+export async function startGoogleReconnect(): Promise<string> {
+  const { data, error } = await invokeFn<{ url?: string; error?: string }>("google-oauth-start", {});
+  if (error || data?.error || !data?.url) throw new Error(error ?? data?.error ?? "Could not start Google reconnect");
+  return data.url;
+}

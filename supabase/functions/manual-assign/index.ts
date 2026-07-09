@@ -21,6 +21,22 @@ Deno.serve(async (req) => {
   if (!shiftId || !cleanerId) return json({ error: "shiftId and cleanerId required" }, 400);
 
   const result = await offerToCleaner(sb, shiftId, cleanerId);
+  if (result === "send_failed") {
+    const { data: cl } = await sb.from("cleaners").select("full_name").eq("id", cleanerId).maybeSingle();
+    await writeAuditLog(sb, {
+      event_type: "assignment.manual",
+      event_label: "Manual Assignment",
+      status: "failed",
+      summary: `Manual offer to ${cl?.full_name ?? "a cleaner"} could not be sent — the WhatsApp channel needs re-authorisation. No offer went out.`,
+      error_message: "whatsapp send failed",
+      detail: { shift_id: shiftId, cleaner_id: cleanerId, by: caller.userId },
+      source: "manual-assign",
+      shift_id: shiftId,
+      cleaner_id: cleanerId,
+      triggered_by: "manual",
+    });
+    return json({ error: "whatsapp send failed — the messaging channel needs reconnecting" }, 502);
+  }
   if (result === "error") {
     await writeAuditLog(sb, {
       event_type: "assignment.manual",

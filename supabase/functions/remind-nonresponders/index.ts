@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
       await sendMessage(
         cleaner.phone,
         `Reminder: please respond to the cleaning shift offer on ${sh?.shift_date ?? ""}.\n` +
-          `Tap Accept or Decline on the offer, or reply ACCEPT ${a.offer_code} / DECLINE ${a.offer_code}.`,
+          `Tap Accept or Decline on the offer.`,
       );
     }
     await sb.from("shift_assignments")

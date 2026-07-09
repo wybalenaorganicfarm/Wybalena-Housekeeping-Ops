@@ -6,6 +6,7 @@ import { Icon } from "../components/Icon";
 import { Badge, Button, Card, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
+import { ConnectionsCard } from "../components/ConnectionsCard";
 import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
@@ -217,6 +218,8 @@ export function Dashboard() {
 
         {/* right rail */}
         <div style={{ flex: "none", width: 296, background: c.rail, borderLeft: `1px solid ${c.border2}`, overflowY: "auto", padding: "22px 18px 40px" }}>
+          {canEdit && <ConnectionsCard />}
+
           {canEdit && pendingShifts.length > 0 && (
             <div style={{ marginBottom: 22 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>

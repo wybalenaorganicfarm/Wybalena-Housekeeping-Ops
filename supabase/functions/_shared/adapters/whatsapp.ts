@@ -5,10 +5,11 @@
 // Stubbed: logs instead of calling Whapi until WHAPI_TOKEN is set. To go live,
 // set env WHAPI_TOKEN (+ optionally WHAPI_BASE_URL) and the fetch below runs.
 //
-// Baseline = keyword/text replies ("YES <code>" / "NO <code>" / "CANCEL <code>")
-// because the Whapi plan may not support native interactive buttons. Each
-// outbound offer carries a short offer_code so the inbound reply maps back to
-// the exact shift_assignments row (see correlation in whatsapp-inbound).
+// Interactive buttons only — offers carry the assignment id in the button payload
+// ("accept:<id>") so the inbound webhook maps a tap back to the exact
+// shift_assignments row (see correlation in whatsapp-inbound). Free-typed keyword
+// replies ("accept"/"decline") are still parsed as a fallback, but we never send
+// short codes to cleaners.
 
 const WHAPI_BASE = Deno.env.get("WHAPI_BASE_URL") ?? "https://gate.whapi.cloud";
 
@@ -103,16 +104,49 @@ export async function sendButtons(
 // store it for quoted-id matching of the Yes/No tap.
 export function sendDeclineConfirm(
   toPhone: string,
-  dateLabel: string,
   assignmentId: string,
 ): Promise<SendResult> {
   return sendButtons(
     toPhone,
-    `Are you sure you want to decline the cleaning shift on ${dateLabel}?`,
+    `Are you sure you want to decline?`,
     [
-      { id: `declineyes:${assignmentId}`, title: "✅ Yes, decline" },
-      { id: `declineno:${assignmentId}`, title: "↩️ No, go back" },
+      { id: `declineyes:${assignmentId}`, title: "✅ Yes" },
+      { id: `declineno:${assignmentId}`, title: "↩️ No" },
     ],
+    { footer: "Wybalena Organic Farm" },
+  );
+}
+
+// Send the "Are you sure you want to cancel?" confirmation with Yes/No buttons
+// whose payloads carry the assignment id. Returns the message id so the caller can
+// store it for quoted-id matching of the Yes/No tap.
+export function sendCancelConfirm(
+  toPhone: string,
+  assignmentId: string,
+): Promise<SendResult> {
+  return sendButtons(
+    toPhone,
+    `Are you sure you want to cancel?`,
+    [
+      { id: `cancelyes:${assignmentId}`, title: "✅ Yes" },
+      { id: `cancelno:${assignmentId}`, title: "↩️ No" },
+    ],
+    { footer: "Wybalena Organic Farm" },
+  );
+}
+
+// Send the "Shift Accepted" confirmation with a single Cancel button, so a cleaner
+// who accepted can later drop the shift from this message. The button payload
+// carries the assignment id ("cancel:<id>"). Returns the message id so the caller
+// can store it for quoted-id matching of the Cancel tap.
+export function sendAcceptConfirm(
+  toPhone: string,
+  assignmentId: string,
+): Promise<SendResult> {
+  return sendButtons(
+    toPhone,
+    `Shift Accepted ✅`,
+    [{ id: `cancel:${assignmentId}`, title: "🚫 Cancel" }],
     { footer: "Wybalena Organic Farm" },
   );
 }
@@ -122,7 +156,8 @@ export function sendDeclineConfirm(
 // If the Whapi plan supports interactive buttons, map the button payload here.
 export type InboundAction =
   | "accept" | "decline" | "cancel"
-  | "decline_confirm" | "decline_cancel"  // from the "Are you sure?" Yes/No buttons
+  | "decline_confirm" | "decline_cancel"  // from the decline "Are you sure?" Yes/No buttons
+  | "cancel_confirm" | "cancel_cancel"    // from the cancel "Are you sure?" Yes/No buttons
   | "unknown";
 
 export interface InboundReply {
@@ -146,6 +181,7 @@ export interface InboundReply {
 const TAG_ACTION: Record<string, InboundAction> = {
   accept: "accept", decline: "decline", cancel: "cancel",
   declineyes: "decline_confirm", declineno: "decline_cancel",
+  cancelyes: "cancel_confirm", cancelno: "cancel_cancel",
 };
 
 // Pull a button payload id out of the several shapes Whapi/WhatsApp may use.

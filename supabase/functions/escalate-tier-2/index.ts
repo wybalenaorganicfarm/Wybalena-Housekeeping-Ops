@@ -5,7 +5,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
-import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
+import { notifyManagerSummary, notifyOfferFailure, type OfferFailure, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
 const SOURCE = "escalate-tier-2";
 
@@ -25,6 +25,7 @@ Deno.serve(async (req) => {
 
   let escalated = 0;
   const summaries: ShiftOfferSummary[] = [];
+  const failures: OfferFailure[] = [];
   for (const s of shifts ?? []) {
     try {
       const res = await offerTier(sb, s.id, "tier_2");
@@ -48,6 +49,25 @@ Deno.serve(async (req) => {
           triggered_by: "cron",
         });
       }
+      if (res.failed > 0) {
+        failures.push({
+          shiftDate: res.shiftDate,
+          startTime: (s.start_time ?? "").slice(0, 5),
+          shiftType: s.shift_type,
+          names: res.failedNames,
+        });
+        await writeAuditLog(sb, {
+          event_type: "escalation.tier2_triggered",
+          event_label: "Tier 2 Escalation",
+          status: "failed",
+          summary: `Tier 2 offers for shift on ${s.shift_date} could NOT be sent to ${res.failedNames.join(", ")} — the WhatsApp channel needs reconnecting. No offer delivered.`,
+          error_message: "whatsapp send failed",
+          detail: { shift_id: s.id, failed: res.failed, cleaners: res.failedNames },
+          source: SOURCE,
+          shift_id: s.id,
+          triggered_by: "cron",
+        });
+      }
     } catch (e) {
       await writeAuditLog(sb, {
         event_type: "escalation.tier2_triggered",
@@ -62,7 +82,9 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (escalated === 0) {
+  await notifyOfferFailure(sb, "tier_2", failures, SOURCE);
+
+  if (escalated === 0 && failures.length === 0) {
     const tier1Count = shifts?.length ?? 0;
     const summary = tier1Count === 0
       ? "No shifts are in Tier 1 staffing. All confirmed shifts are staffed or not yet offered — no Tier 2 escalation needed."

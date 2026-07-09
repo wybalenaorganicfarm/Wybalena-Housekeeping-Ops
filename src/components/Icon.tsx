@@ -30,6 +30,7 @@ const PATHS: Record<string, string> = {
   pencil: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
   eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
   eyeOff: "M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.16 3.19M6.6 6.6A17.6 17.6 0 0 0 2 12s3.5 7 10 7a9.1 9.1 0 0 0 3.1-.54M9.9 9.9a3 3 0 0 0 4.2 4.2M2 2l20 20",
+  refresh: "M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15",
 };
 
 export function Icon({ name, size = 16, color = "currentColor", strokeWidth = 1.7 }: {
