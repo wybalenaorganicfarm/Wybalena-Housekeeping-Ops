@@ -2,9 +2,11 @@
 //
 // google-oauth-start is admin-gated, but google-oauth-callback is public (Google
 // redirects the browser there with no Supabase JWT). The `state` param is our
-// proof that the callback belongs to a flow WE initiated: start signs a nonce +
-// timestamp with CONFIRM_LINK_SECRET, callback recomputes and rejects mismatches
-// or anything older than TTL. This blocks CSRF / replayed callbacks.
+// proof that the callback belongs to a flow WE initiated: start signs a payload
+// (timestamp + nonce + the app's origin) with CONFIRM_LINK_SECRET, callback
+// recomputes and rejects mismatches or anything older than TTL. This blocks CSRF /
+// replayed callbacks. The origin is carried so the callback can postMessage the
+// result back to the exact app window that opened it.
 
 const enc = new TextEncoder();
 const TTL_MS = 15 * 60_000; // a consent flow should complete well within 15 min
@@ -32,10 +34,12 @@ async function hmacHex(message: string): Promise<string> {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// state = base64url(JSON{ts,nonce}) + "." + hmacHex(payload)
-export async function signState(): Promise<string> {
+export interface StatePayload { ts: number; nonce: string; origin?: string }
+
+// state = base64url(JSON{ts,nonce,origin}) + "." + hmacHex(payload)
+export async function signState(extra: { origin?: string } = {}): Promise<string> {
   const nonce = b64url(crypto.getRandomValues(new Uint8Array(16)));
-  const payload = b64url(enc.encode(JSON.stringify({ ts: Date.now(), nonce })));
+  const payload = b64url(enc.encode(JSON.stringify({ ts: Date.now(), nonce, ...extra })));
   const sig = await hmacHex(payload);
   return `${payload}.${sig}`;
 }
@@ -48,14 +52,16 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function verifyState(state: string | null): Promise<boolean> {
-  if (!state || !state.includes(".")) return false;
+// Verify the signature + TTL and return the decoded payload, or null if invalid.
+export async function readState(state: string | null): Promise<StatePayload | null> {
+  if (!state || !state.includes(".")) return null;
   const [payload, sig] = state.split(".");
-  if (!timingSafeEqual(sig, await hmacHex(payload))) return false;
+  if (!timingSafeEqual(sig, await hmacHex(payload))) return null;
   try {
-    const { ts } = JSON.parse(b64urlToStr(payload)) as { ts: number };
-    return typeof ts === "number" && Date.now() - ts < TTL_MS;
+    const parsed = JSON.parse(b64urlToStr(payload)) as StatePayload;
+    if (typeof parsed.ts !== "number" || Date.now() - parsed.ts >= TTL_MS) return null;
+    return parsed;
   } catch {
-    return false;
+    return null;
   }
 }

@@ -7,6 +7,11 @@ import { handleOptions, json } from "../_shared/http.ts";
 import { signState } from "../_shared/oauthState.ts";
 import { GOOGLE_SCOPES, redirectUri } from "../_shared/googleOauth.ts";
 
+// Only allow the callback to postMessage back to an http(s) origin (the app).
+function safeOrigin(o: unknown): string | undefined {
+  return typeof o === "string" && /^https?:\/\/[^ ]+$/.test(o) ? o : undefined;
+}
+
 Deno.serve(async (req) => {
   const pre = handleOptions(req);
   if (pre) return pre;
@@ -20,6 +25,10 @@ Deno.serve(async (req) => {
     return json({ error: "Google OAuth client is not configured (GOOGLE_CLIENT_ID missing)." }, 400);
   }
 
+  // The app passes its origin so the callback can postMessage the result back.
+  const body = await req.json().catch(() => ({}));
+  const origin = safeOrigin(body?.origin);
+
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri());
@@ -30,7 +39,7 @@ Deno.serve(async (req) => {
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
   url.searchParams.set("include_granted_scopes", "true");
-  url.searchParams.set("state", await signState());
+  url.searchParams.set("state", await signState({ origin }));
 
   return json({ url: url.toString() });
 });

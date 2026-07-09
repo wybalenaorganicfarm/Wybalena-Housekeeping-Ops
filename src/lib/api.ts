@@ -312,7 +312,7 @@ export async function getConnectionStatus(): Promise<ConnectionStatus> {
 // Kick off the Google reconnect: returns the consent URL the portal opens in a
 // popup. The one-time redirect-URI setup in Google Cloud makes this a true 1-click.
 export async function startGoogleReconnect(): Promise<string> {
-  const { data, error } = await invokeFn<{ url?: string; error?: string }>("google-oauth-start", {});
+  const { data, error } = await invokeFn<{ url?: string; error?: string }>("google-oauth-start", { origin: window.location.origin });
   if (error || data?.error || !data?.url) throw new Error(error ?? data?.error ?? "Could not start Google reconnect");
   return data.url;
 }

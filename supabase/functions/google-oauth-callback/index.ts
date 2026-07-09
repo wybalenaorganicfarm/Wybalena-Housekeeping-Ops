@@ -4,14 +4,17 @@
 // show a small self-closing success page. The popup closing is what tells the
 // portal to refresh its connection status.
 import { serviceClient } from "../_shared/client.ts";
-import { verifyState } from "../_shared/oauthState.ts";
+import { readState } from "../_shared/oauthState.ts";
 import { redirectUri } from "../_shared/googleOauth.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "google-oauth-callback";
 
-function page(title: string, message: string, ok: boolean): Response {
+// Render the result page AND postMessage {source,ok} to the app window that opened
+// this popup, so the portal knows the TRUE outcome (not just "the popup closed").
+function page(title: string, message: string, ok: boolean, origin?: string): Response {
   const color = ok ? "#256b43" : "#a8392b";
+  const target = origin ? JSON.stringify(origin) : '"*"';
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title></head>
@@ -22,7 +25,10 @@ function page(title: string, message: string, ok: boolean): Response {
     <div style="font-size:13.5px;color:#5d665f;line-height:1.55;">${message}</div>
     <button onclick="window.close()" style="margin-top:20px;background:#1f5c46;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:13.5px;font-weight:600;cursor:pointer;">Close this window</button>
   </div>
-  <script>setTimeout(function(){ try { window.close(); } catch(e){} }, ${ok ? 2500 : 8000});</script>
+  <script>
+    try { if (window.opener) window.opener.postMessage({ source: "google-oauth", ok: ${ok} }, ${target}); } catch (e) {}
+    setTimeout(function(){ try { window.close(); } catch(e){} }, ${ok ? 1500 : 6000});
+  </script>
 </body></html>`;
   return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
@@ -31,22 +37,25 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const params = url.searchParams;
 
+  // Read state early so we can message the correct app origin even on failure.
+  const st = await readState(params.get("state"));
+  const origin = st?.origin;
+
   // The user denied consent, or Google returned an error.
   const oauthErr = params.get("error");
   if (oauthErr) {
-    return page("Couldn't connect", `Google reported: ${oauthErr}. You can close this window and try again.`, false);
+    return page("Couldn't connect", `Google reported: ${oauthErr}. You can close this window and try again.`, false, origin);
   }
 
   const code = params.get("code");
-  const state = params.get("state");
-  if (!code || !(await verifyState(state))) {
-    return page("Link expired", "This reconnect link is invalid or has expired. Please start again from the portal.", false);
+  if (!code || !st) {
+    return page("Link expired", "This reconnect link is invalid or has expired. Please start again from the portal.", false, origin);
   }
 
   const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
   const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
-    return page("Not configured", "The Google OAuth client isn't set up on the server. Contact your administrator.", false);
+    return page("Not configured", "The Google OAuth client isn't set up on the server. Contact your administrator.", false, origin);
   }
 
   // Exchange the auth code for tokens. redirect_uri MUST match the one used to
@@ -64,7 +73,7 @@ Deno.serve(async (req) => {
   });
   if (!tokenRes.ok) {
     console.error(`[google-oauth-callback] token exchange failed ${tokenRes.status}: ${await tokenRes.text()}`);
-    return page("Couldn't connect", "Google refused the sign-in (the code may have expired). Please try again.", false);
+    return page("Couldn't connect", "Google refused the sign-in (the code may have expired). Please try again.", false, origin);
   }
   const tokens = await tokenRes.json();
   const refreshToken: string | undefined = tokens.refresh_token;
@@ -75,6 +84,7 @@ Deno.serve(async (req) => {
       "Almost there",
       "Google didn't return a long-lived token. Please remove this app's access at myaccount.google.com/permissions, then reconnect.",
       false,
+      origin,
     );
   }
 
@@ -98,7 +108,7 @@ Deno.serve(async (req) => {
 
   if (error) {
     console.error(`[google-oauth-callback] failed to store token: ${error.message}`);
-    return page("Couldn't save", "The connection succeeded but we couldn't save it. Please try again.", false);
+    return page("Couldn't save", "The connection succeeded but we couldn't save it. Please try again.", false, origin);
   }
 
   await writeAuditLog(sb, {
@@ -111,5 +121,5 @@ Deno.serve(async (req) => {
     triggered_by: "manual",
   });
 
-  return page("Google connected", `${email ? `${email} is` : "Your Google account is"} now linked. You can close this window — the portal will update automatically.`, true);
+  return page("Google connected", `${email ? `${email} is` : "Your Google account is"} now linked. You can close this window — the portal will update automatically.`, true, origin);
 });
