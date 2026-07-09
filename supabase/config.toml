@@ -55,3 +55,5 @@ verify_jwt = true
 verify_jwt = true
 [functions.get-connection-status]
 verify_jwt = true
+[functions.whatsapp-reconnect]
+verify_jwt = true

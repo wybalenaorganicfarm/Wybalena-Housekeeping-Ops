@@ -249,14 +249,95 @@ export async function checkHealth(): Promise<HealthResult> {
     const res = await fetch(`${WHAPI_BASE}/health`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (!res.ok) {
+      return { name: "whapi", configured: true, ok: false, detail: `HTTP ${res.status}: ${(await res.text()).slice(0, 160)}` };
+    }
+    // /health can return 200 while the channel is unauthorised (status "QR"), which
+    // is exactly when sends fail with 401. Treat only AUTH as healthy so the portal
+    // surfaces a "Reconnect WhatsApp" prompt instead of a false "Connected".
+    const data = await res.json().catch(() => ({} as Record<string, unknown>));
+    const st = data?.status;
+    const text = String((typeof st === "object" && st ? (st as { text?: string }).text : st) ?? "").toUpperCase();
+    if (!text) return { name: "whapi", configured: true, ok: true, detail: "channel reachable" };
     return {
       name: "whapi",
       configured: true,
-      ok: res.ok,
-      detail: res.ok ? "channel reachable" : `HTTP ${res.status}: ${await res.text()}`,
+      ok: text === "AUTH",
+      detail: text === "AUTH" ? "channel authorised" : `channel needs authorisation (status: ${text})`,
     };
   } catch (e) {
     return { name: "whapi", configured: true, ok: false, detail: String(e) };
+  }
+}
+
+// ── Channel reconnect (QR login) ─────────────────────────────────────────────
+// Whapi pairs a WhatsApp number to the channel by QR scan (like WhatsApp Web).
+// When the linked-device session is invalidated the channel drops to status "QR"
+// and sends start failing with 401 "need channel authorization". These helpers let
+// the portal show a fresh QR and poll until the channel is authorised again.
+
+export interface ChannelStatus {
+  configured: boolean;
+  status: string;    // AUTH | QR | LAUNCH | INIT | STOP | SYNC_ERROR | ...
+  authorized: boolean;
+  detail: string;
+}
+
+// Read the live channel status via GET /health. AUTH = connected & able to send.
+export async function getChannelStatus(): Promise<ChannelStatus> {
+  const token = Deno.env.get("WHAPI_TOKEN");
+  if (!token) return { configured: false, status: "UNCONFIGURED", authorized: false, detail: "WHAPI_TOKEN not set" };
+  try {
+    const res = await fetch(`${WHAPI_BASE}/health`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return { configured: true, status: "ERROR", authorized: false, detail: `HTTP ${res.status}` };
+    const data = await res.json().catch(() => ({} as Record<string, unknown>));
+    const text = String(
+      (data as { status?: { text?: string } | string })?.status &&
+        typeof (data as { status?: unknown }).status === "object"
+        ? ((data as { status: { text?: string } }).status.text ?? "")
+        : ((data as { status?: string }).status ?? ""),
+    ).toUpperCase();
+    return { configured: true, status: text || "UNKNOWN", authorized: text === "AUTH", detail: text || "unknown" };
+  } catch (e) {
+    return { configured: true, status: "ERROR", authorized: false, detail: String(e) };
+  }
+}
+
+export interface QrResult {
+  ok: boolean;
+  image: string | null; // data: URL for an <img>, or null when already connected
+  status: string;       // "QR" | "AUTH" | "ERROR"
+  detail?: string;
+}
+
+// Fetch a fresh login QR via GET /users/login. Returns a data: URL for the portal
+// to render. If the channel is already authorised, returns status "AUTH" (no image).
+export async function getLoginQr(): Promise<QrResult> {
+  const token = Deno.env.get("WHAPI_TOKEN");
+  if (!token) return { ok: false, image: null, status: "UNCONFIGURED", detail: "WHAPI_TOKEN not set" };
+  try {
+    const res = await fetch(`${WHAPI_BASE}/users/login?wakeup=true&size=300`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    const raw = await res.text();
+    if (!res.ok) return { ok: false, image: null, status: "ERROR", detail: `HTTP ${res.status}: ${raw.slice(0, 200)}` };
+    // Whapi may return JSON { base64 } or a bare base64 string.
+    let base64: string | null = null;
+    try {
+      const j = JSON.parse(raw) as Record<string, string> & { status?: unknown };
+      base64 = j.base64 ?? j.qr ?? j.image ?? j.data ?? null;
+      if (!base64) {
+        const st = String((j.status as { text?: string })?.text ?? (j.status as string) ?? "").toUpperCase();
+        if (st) return { ok: true, image: null, status: st }; // e.g. already AUTH
+      }
+    } catch {
+      base64 = raw.trim();
+    }
+    if (!base64) return { ok: false, image: null, status: "ERROR", detail: "no QR in response" };
+    const image = base64.startsWith("data:") ? base64 : `data:image/png;base64,${base64}`;
+    return { ok: true, image, status: "QR" };
+  } catch (e) {
+    return { ok: false, image: null, status: "ERROR", detail: String(e) };
   }
 }
 

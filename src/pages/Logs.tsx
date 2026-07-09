@@ -7,16 +7,27 @@ import { Button } from "../components/ui";
 import { AUDIT_PAGE_SIZE, getAuditLogs, getRecentFailureCount } from "../lib/api";
 import { describe, parseCron } from "../lib/cron";
 import { useGoogleReconnect } from "../lib/useGoogleReconnect";
+import { WhatsAppReconnectModal } from "../components/WhatsAppReconnectModal";
 import type { AuditLogResolved, AuditStatus } from "../lib/types";
+
+function failureHaystack(log: AuditLogResolved): string {
+  const notWorking = (log.detail?.not_working as unknown[] | undefined)?.map(String).join(" ") ?? "";
+  return `${log.summary} ${log.error_message ?? ""} ${notWorking}`.toLowerCase();
+}
 
 // A log row is a Google-connection failure the admin can fix with one click when
 // it's a failed/warning entry that names Gmail or Calendar (or a Google token
 // error). Health-check rows carry the broken services in detail.not_working.
 function isGoogleFailure(log: AuditLogResolved): boolean {
   if (log.status !== "failed" && log.status !== "warning") return false;
-  const notWorking = (log.detail?.not_working as unknown[] | undefined)?.map(String).join(" ") ?? "";
-  const hay = `${log.summary} ${log.error_message ?? ""} ${notWorking}`.toLowerCase();
-  return /gmail|google calendar|\bcalendar\b|google|refresh.?token/.test(hay);
+  return /gmail|google calendar|\bcalendar\b|google|refresh.?token/.test(failureHaystack(log));
+}
+
+// A WhatsApp-channel failure — offer/reminder sends bounced, or health-check
+// flagged the messaging channel. Fixed by re-scanning the Whapi QR.
+function isWhatsAppFailure(log: AuditLogResolved): boolean {
+  if (log.status !== "failed" && log.status !== "warning") return false;
+  return /whatsapp|whapi|messaging channel|channel needs reconnect|channel authorization/.test(failureHaystack(log));
 }
 
 // Cron expression → plain-English local time, e.g. "2 8 * * 3" → "Every Wednesday
@@ -154,6 +165,7 @@ export function Logs() {
   const [failures24h, setFailures24h] = useState(0);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [waModal, setWaModal] = useState(false);
 
   const { reconnect, busy: reconnecting } = useGoogleReconnect(() => setReloadKey((k) => k + 1));
 
@@ -280,6 +292,16 @@ export function Logs() {
                           </Button>
                         </div>
                       )}
+                      {isWhatsAppFailure(log) && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#f4f2ec", border: `1px solid ${c.border}`, borderRadius: 6, padding: "10px 12px" }}>
+                          <div style={{ flex: 1, fontSize: 12.5, color: c.body, lineHeight: 1.45 }}>
+                            The WhatsApp messaging channel needs re-authorising. Scan a QR with the business WhatsApp to reconnect.
+                          </div>
+                          <Button kind="danger" onClick={() => setWaModal(true)} style={{ borderRadius: 8, whiteSpace: "nowrap" }}>
+                            <Icon name="refresh" size={13} strokeWidth={2.2} /> Reconnect WhatsApp
+                          </Button>
+                        </div>
+                      )}
                       {entity && (
                         <div style={{ fontSize: 12.5, color: c.body }}>
                           <span style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.05em", color: c.muted2, fontWeight: 700, marginRight: 8 }}>Linked</span>
@@ -318,6 +340,8 @@ export function Logs() {
           </div>
         )}
       </div>
+
+      {waModal && <WhatsAppReconnectModal onClose={() => setWaModal(false)} onConnected={() => setReloadKey((k) => k + 1)} />}
     </div>
   );
 }

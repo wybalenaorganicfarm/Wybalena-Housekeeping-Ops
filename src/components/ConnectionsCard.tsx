@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 import { Button } from "./ui";
 import { getConnectionStatus, type ConnectionStatus } from "../lib/api";
 import { useGoogleReconnect } from "../lib/useGoogleReconnect";
+import { WhatsAppReconnectModal } from "./WhatsAppReconnectModal";
 
 // Right-rail "Connections" widget for the Dashboard. Shows each integration's live
 // status and, whenever a Google connection (Gmail/Calendar) is broken, a one-click
@@ -17,6 +18,7 @@ function statusMeta(configured: boolean, ok: boolean): { label: string; dot: str
 export function ConnectionsCard() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [waModal, setWaModal] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -32,6 +34,10 @@ export function ConnectionsCard() {
   // Google is "broken" if either Gmail or Calendar is configured but not ok.
   const googleBroken = (status?.results ?? []).some(
     (r) => r.provider === "google" && r.configured && !r.ok,
+  );
+  // WhatsApp (Whapi) broken → offer the QR reconnect.
+  const whatsappBroken = (status?.results ?? []).some(
+    (r) => r.name === "whapi" && r.configured && !r.ok,
   );
 
   return (
@@ -65,6 +71,17 @@ export function ConnectionsCard() {
         )}
       </div>
 
+      {whatsappBroken && (
+        <div style={{ marginTop: 10 }}>
+          <Button kind="danger" onClick={() => setWaModal(true)} style={{ width: "100%", borderRadius: 9 }}>
+            <Icon name="refresh" size={14} strokeWidth={2.2} /> Reconnect WhatsApp
+          </Button>
+          <div style={{ fontSize: 11, color: c.faint, marginTop: 6, lineHeight: 1.45 }}>
+            Scan a QR with the business WhatsApp to re-authorise the messaging channel.
+          </div>
+        </div>
+      )}
+
       {googleBroken && (
         <div style={{ marginTop: 10 }}>
           <Button kind="danger" onClick={reconnect} loading={busy} style={{ width: "100%", borderRadius: 9 }}>
@@ -75,6 +92,8 @@ export function ConnectionsCard() {
           </div>
         </div>
       )}
+
+      {waModal && <WhatsAppReconnectModal onClose={() => setWaModal(false)} onConnected={load} />}
       {!googleBroken && status?.google?.email && (
         <div style={{ fontSize: 11, color: c.faint, marginTop: 8 }}>
           Google linked as {status.google.email}.{" "}
