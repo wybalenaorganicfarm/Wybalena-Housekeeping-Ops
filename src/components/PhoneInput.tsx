@@ -22,6 +22,17 @@ export function toE164(country: CountryCode, national: string): string | null {
   }
 }
 
+// Split a stored E.164 number back into country + national parts, for prefilling
+// the editor. Returns null if it can't be parsed.
+export function fromE164(e164: string): { country: CountryCode; national: string } | null {
+  try {
+    const pn = parsePhoneNumber(e164);
+    return pn && pn.country ? { country: pn.country, national: pn.nationalNumber } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function PhoneInput({ country, national, onCountry, onNational }: {
   country: CountryCode; national: string;
   onCountry: (c: CountryCode) => void; onNational: (v: string) => void;

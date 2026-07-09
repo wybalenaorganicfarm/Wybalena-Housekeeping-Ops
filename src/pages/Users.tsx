@@ -4,9 +4,9 @@ import { c, ROLE_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
 import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Select, Spin, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
-import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
+import { PhoneInput, countryName, fromE164, toE164 } from "../components/PhoneInput";
 import { PageHeader } from "../components/PageHeader";
-import { getUsers, provisionUser, removeUser, setUserRole, setUserStatus } from "../lib/api";
+import { getUsers, provisionUser, removeUser, setUserPhone, setUserRole, setUserStatus } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { lastActiveLabel } from "../lib/format";
 import type { CountryCode } from "libphonenumber-js";
@@ -49,11 +49,18 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
 
   async function save() {
     if (!email.trim()) { setErr("Email is required"); return; }
+    // Phone is required for a team leader (manager summary) and optional for other
+    // roles — but if entered, it must be valid. It's used for WhatsApp system alerts.
     let phone: string | undefined;
-    if (role === "team_leader") {
-      // A team leader is also added to the cleaners roster, which needs a phone.
+    const hasNumber = national.trim().length > 0;
+    if (role === "team_leader" || hasNumber) {
       const e164 = toE164(country, national);
-      if (!e164) { setErr(`Enter a valid phone number for ${countryName(country)} (required for a team leader)`); return; }
+      if (!e164) {
+        setErr(role === "team_leader"
+          ? `Enter a valid phone number for ${countryName(country)} (required for a team leader)`
+          : `Enter a valid phone number for ${countryName(country)}`);
+        return;
+      }
       phone = e164;
     }
     setBusy(true);
@@ -73,11 +80,11 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
           <option value="team_leader">Team Leader</option>
         </Select>
       </Field>
-      {role === "team_leader" && (
-        <Field label={<>Phone <span style={{ color: c.danger }}>*</span></>}>
-          <PhoneInput country={country} national={national} onCountry={setCountry} onNational={setNational} />
-        </Field>
-      )}
+      <Field label={role === "team_leader"
+        ? <>Phone <span style={{ color: c.danger }}>*</span></>
+        : <>Phone <span style={{ color: c.faint, fontWeight: 400 }}>(optional — for WhatsApp alerts)</span></>}>
+        <PhoneInput country={country} national={national} onCountry={setCountry} onNational={setNational} />
+      </Field>
       <div style={{ fontSize: 11.5, color: c.faint, background: c.panel, border: `1px solid ${c.border}`, borderRadius: 7, padding: "10px 12px", lineHeight: 1.5 }}>
         <strong style={{ color: c.body2 }}>Note:</strong> An invitation email is sent to this address. The user sets their own password and can only sign in after accepting.
       </div>
@@ -85,6 +92,48 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <Button kind="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={save} disabled={busy}>{busy ? "Sending…" : "Send invite"}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditPhoneModal({ user, onClose, onSaved }: { user: Profile; onClose: () => void; onSaved: () => void }) {
+  const parsed = user.phone ? fromE164(user.phone) : null;
+  const [country, setCountry] = useState<CountryCode>(parsed?.country ?? "AU");
+  const [national, setNational] = useState(parsed?.national ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    let phone: string | null = null;
+    if (national.trim()) {
+      const e164 = toE164(country, national);
+      if (!e164) { setErr(`Enter a valid phone number for ${countryName(country)}`); return; }
+      phone = e164;
+    } else if (user.role === "team_leader") {
+      setErr("A team leader must have a phone number."); return;
+    }
+    setBusy(true);
+    const error = await setUserPhone(user.id, phone);
+    setBusy(false);
+    if (error) { setErr(error); return; }
+    toastOk(`Phone ${phone ? "updated" : "removed"} for ${user.full_name || user.email}.`);
+    onSaved(); onClose();
+  }
+
+  return (
+    <Modal title="Edit phone number" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: c.muted, marginBottom: 14 }}>{user.full_name || user.email}</div>
+      <Field label={user.role === "team_leader" ? <>Phone <span style={{ color: c.danger }}>*</span></> : "Phone"}>
+        <PhoneInput country={country} national={national} onCountry={setCountry} onNational={setNational} />
+      </Field>
+      <div style={{ fontSize: 11.5, color: c.faint, background: c.panel, border: `1px solid ${c.border}`, borderRadius: 7, padding: "10px 12px", lineHeight: 1.5 }}>
+        Used for WhatsApp system alerts (e.g. when email is unavailable).{user.role !== "team_leader" && " Leave blank to remove."}
+      </div>
+      {err && <div style={{ color: c.danger, fontSize: 12.5, marginTop: 10 }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
       </div>
     </Modal>
   );
@@ -100,6 +149,7 @@ export function Users() {
   const [showAdd, setShowAdd] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Profile | null>(null);
+  const [editPhone, setEditPhone] = useState<Profile | null>(null);
 
   async function load() { setUsers(await getUsers()); setLoading(false); }
   useEffect(() => { load(); }, []);
@@ -213,6 +263,7 @@ export function Users() {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 500 }}>{u.full_name || "—"}</div>
                     <div style={{ fontSize: 11.5, color: c.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</div>
+                    <div style={{ fontSize: 11, color: u.phone ? c.muted2 : "#c4bdb0" }}>{u.phone || "No phone"}</div>
                   </div>
                 </div>
                 <div style={{ flex: "none", width: 180, display: "flex", alignItems: "center", gap: 6 }}>
@@ -244,8 +295,10 @@ export function Users() {
                 </div>
                 <div style={{ flex: "none", width: 130, fontSize: 12, color: c.muted2 }}>{lastActiveLabel(u.updated_at)}</div>
                 <div style={{ flex: "none", width: 40, textAlign: "right", color: c.faint }}>
-                  {isYou ? <span style={{ fontSize: 11, fontStyle: "italic", color: "#c4bdb0" }}>You</span>
-                    : <KebabMenu disabled={removing === u.id} items={[{ label: "Remove user", danger: true, onClick: () => setToRemove(u) }]} />}
+                  <KebabMenu disabled={removing === u.id} items={[
+                    { label: "Edit phone", onClick: () => setEditPhone(u) },
+                    ...(isYou ? [] : [{ label: "Remove user", danger: true, onClick: () => setToRemove(u) }]),
+                  ]} />
                 </div>
               </div>
             );
@@ -256,6 +309,7 @@ export function Users() {
       </div>
 
       {showAdd && <AddUserModal onClose={() => setShowAdd(false)} onSaved={load} />}
+      {editPhone && <EditPhoneModal user={editPhone} onClose={() => setEditPhone(null)} onSaved={load} />}
       {toRemove && (
         <ConfirmDialog
           title="Remove user"

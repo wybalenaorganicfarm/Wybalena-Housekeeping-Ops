@@ -247,6 +247,14 @@ export async function setUserStatus(userId: string, status: string): Promise<str
   return error ? friendlyError(error.message) : null;
 }
 
+// Set/clear a user's phone (used for WhatsApp system alerts). Direct RLS update —
+// admin/ops-manager/super_admin all have profiles write access.
+export async function setUserPhone(userId: string, phone: string | null): Promise<string | null> {
+  const { error } = await supabase
+    .from("profiles").update({ phone } as never).eq("id", userId);
+  return error ? friendlyError(error.message) : null;
+}
+
 // Keep a team leader's cleaner row in sync with their user status. away/inactive
 // stop offers (is_active only true when active).
 export async function setCleanerStatusByEmail(email: string, status: string): Promise<void> {

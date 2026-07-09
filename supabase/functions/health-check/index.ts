@@ -22,7 +22,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
-import { checkHealth as checkWhapi } from "../_shared/adapters/whatsapp.ts";
+import { checkHealth as checkWhapi, sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { checkHealth as checkGmail } from "../_shared/adapters/email.ts";
 import { checkHealth as checkCalendar } from "../_shared/adapters/calendar.ts";
 
@@ -165,21 +165,60 @@ Deno.serve(async (req) => {
       }).join("\n\n") +
       (unconfigured.length ? `\n\nNot set up yet (skipped): ${unconfigured.join(", ")}` : "");
 
-    const sent = await sendEmail(
-      `Wybalena: ${broken.length} connection(s) need attention`,
-      text,
-      Deno.env.get("HEALTHCHECK_ALERT_TO") ?? undefined,
-      html,
-    );
+    const brokenLabels = broken.map((b) => SERVICE[b.name]?.label ?? b.name).join(", ");
+
+    // Notify over a channel that actually WORKS. Prefer email; but if Gmail itself
+    // is one of the failures, email won't send — fall back to WhatsApp to the
+    // admins/ops managers who have a phone. (If both email and WhatsApp are down we
+    // can't reach anyone — the failure is still logged + console.error'd above.)
+    const gmailBroken = broken.some((b) => b.name === "gmail");
+    const whatsappBroken = broken.some((b) => b.name === "whapi");
+
+    let emailed = false;
+    if (!gmailBroken) {
+      const sent = await sendEmail(
+        `Wybalena: ${broken.length} connection(s) need attention`,
+        text,
+        Deno.env.get("HEALTHCHECK_ALERT_TO") ?? undefined,
+        html,
+      );
+      emailed = sent.ok;
+    }
+
+    let whatsapped = 0;
+    if (!emailed && !whatsappBroken) {
+      const { data: admins } = await sb
+        .from("profiles")
+        .select("full_name, phone")
+        .in("role", ["admin", "super_admin", "operations_manager"])
+        .eq("is_active", true)
+        .not("phone", "is", null);
+      const waText =
+        `⚠️ *Wybalena system alert*\n\n${broken.length} connection(s) are not working: ${brokenLabels}.\n\n` +
+        `Email alerts couldn't be sent${gmailBroken ? " (Gmail is one of the failures)" : ""}, ` +
+        `so you're getting this on WhatsApp. Please open the app to review.`;
+      for (const a of admins ?? []) {
+        if (a.phone) { const r = await sendMessage(a.phone, waText); if (r.ok) whatsapped++; }
+      }
+    }
+
+    const channelNote = emailed
+      ? " An email with next steps was sent to the admin."
+      : whatsapped > 0
+        ? ` Email was unavailable, so ${whatsapped} admin(s) were notified on WhatsApp instead.`
+        : " Neither email nor WhatsApp could be used to notify the admins.";
 
     await writeAuditLog(sb, {
       event_type: "health.check",
       event_label: "Connection Health Check",
       status: "warning",
-      summary: `Daily connection check found ${broken.length} connection(s) not working: ` +
-        `${broken.map((b) => SERVICE[b.name]?.label ?? b.name).join(", ")}.` +
-        (sent.ok ? " An email with next steps was sent to the admin." : ""),
-      detail: { not_working: broken.map((b) => SERVICE[b.name]?.label ?? b.name), not_configured: unconfigured },
+      summary: `Daily connection check found ${broken.length} connection(s) not working: ${brokenLabels}.${channelNote}`,
+      detail: {
+        not_working: broken.map((b) => SERVICE[b.name]?.label ?? b.name),
+        not_configured: unconfigured,
+        notified_by: emailed ? "email" : whatsapped > 0 ? "whatsapp" : "none",
+        admins_whatsapped: whatsapped,
+      },
       source: "health-check",
       triggered_by: "cron",
     });

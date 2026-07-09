@@ -39,11 +39,12 @@ Deno.serve(async (req) => {
 
   // New users start as 'invite_sent' until they accept (handle_new_user defaults
   // the profile to 'active'); keep is_active true so they can sign in on accept.
-  // A team leader is NOT a cleaner — their phone (for the manager WhatsApp
-  // summary) lives on the profile, not the cleaners roster.
+  // Store the phone for ANY role when provided — it's used for WhatsApp system
+  // alerts (and the manager summary for team leaders). A team leader is NOT a
+  // cleaner; their phone lives on the profile, not the cleaners roster.
   if (data.user) {
     const patch: Record<string, unknown> = { status: "invite_sent" };
-    if (role === "team_leader") patch.phone = phone;
+    if (phone) patch.phone = phone;
     await sb.from("profiles").update(patch).eq("id", data.user.id);
   }
 

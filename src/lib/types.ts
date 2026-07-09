@@ -20,6 +20,7 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: UserRole;
+  phone: string | null;
   is_active: boolean;
   status: UserStatus;
   created_at: string;
