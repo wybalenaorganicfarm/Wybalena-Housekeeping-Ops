@@ -1,23 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startGoogleReconnect } from "./api";
+import { getConnectionStatus, startGoogleReconnect } from "./api";
 import { toast, toastError, toastOk } from "./toast";
 
 // The callback 302-redirects the popup to /google-oauth-result.html on OUR origin
 // (Supabase serves function HTML as text/plain, so its script can't run). That page
-// posts the result back — so the authoritative message now comes from same-origin.
+// posts the result back — BUT Google's consent pages send Cross-Origin-Opener-Policy,
+// which severs window.opener as the popup navigates through Google. So the postMessage
+// often never arrives even on success. We therefore treat the DATABASE as the source
+// of truth: when the popup closes, we re-check connection status and compare the
+// Google "connected_at" against a baseline. A changed timestamp = a real connection,
+// no matter whether the postMessage survived. postMessage stays as a fast path.
 const RESULT_ORIGIN = (() => {
   try { return window.location.origin; } catch { return ""; }
 })();
 
-// Drives the one-click Google reconnect from anywhere in the portal:
-//   1. ask the edge fn for the signed consent URL (passing our origin)
-//   2. open it in a popup
-//   3. the callback page postMessages {source:"google-oauth", ok} back to us —
-//      that is the AUTHORITATIVE result. Only ok:true is success.
-//   4. if the popup is closed WITHOUT a message, the user cancelled — we do NOT
-//      claim success; we just quietly re-check status.
-// We can't read the popup cross-origin, so the postMessage (not popup.closed) is
-// what tells us whether auth actually completed.
 export function useGoogleReconnect(onDone?: () => void): { reconnect: () => void; busy: boolean } {
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
@@ -44,26 +40,47 @@ export function useGoogleReconnect(onDone?: () => void): { reconnect: () => void
       const popup = window.open(url, "google-oauth", "width=520,height=680");
       if (!popup) window.open(url, "_blank"); // popup blocked — still receives the message
 
+      // Baseline the current connection timestamp WITHOUT blocking the popup open.
+      // A fresh connect sets connected_at = now(), so a changed value = success.
+      const baselineP = getConnectionStatus()
+        .then((s) => s.google?.connectedAt ?? null)
+        .catch(() => null);
+
+      // Authoritative outcome from the DB (survives a severed window.opener).
+      const connectedFresh = async (): Promise<boolean> => {
+        const [baseline, now] = await Promise.all([
+          baselineP,
+          getConnectionStatus().then((s) => s.google?.connectedAt ?? null).catch(() => null),
+        ]);
+        return !!now && now !== baseline;
+      };
+
+      const finish = (ok: boolean) => {
+        if (ok) toastOk("Google reconnected.");
+        else toast("Reconnect cancelled — Google was not connected.");
+        onDoneRef.current?.();
+      };
+
+      // Fast path: if opener survived, the result page tells us directly.
       const handler = (e: MessageEvent) => {
         if (RESULT_ORIGIN && e.origin !== RESULT_ORIGIN) return;
         const data = e.data as { source?: string; ok?: boolean } | null;
         if (!data || data.source !== "google-oauth") return;
         settled.current = true;
         cleanup();
-        if (data.ok) toastOk("Google reconnected.");
-        else toastError("Google wasn't reconnected — the sign-in didn't complete. Please try again.");
-        onDoneRef.current?.();
+        if (data.ok) { toastOk("Google reconnected."); onDoneRef.current?.(); }
+        else { toastError("Google wasn't reconnected — the sign-in didn't complete. Please try again."); onDoneRef.current?.(); }
       };
       handlerRef.current = handler;
       window.addEventListener("message", handler);
 
-      // The window closing without ever sending a result = the user cancelled.
+      // The window closed without a message. Don't assume "cancelled" — Google's COOP
+      // usually severs the postMessage even on success. Ask the DB what really happened.
       timer.current = window.setInterval(() => {
         if (popup && popup.closed && !settled.current) {
           settled.current = true;
           cleanup();
-          toast("Reconnect cancelled — Google was not connected.");
-          onDoneRef.current?.(); // status unchanged, but refresh to be sure
+          connectedFresh().then(finish);
         }
       }, 700);
     } catch (e) {
