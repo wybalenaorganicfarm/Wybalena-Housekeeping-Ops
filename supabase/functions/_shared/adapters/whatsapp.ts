@@ -195,10 +195,11 @@ function buttonPayload(m: Record<string, unknown>): string | null {
   const b = m.button as Record<string, unknown> | undefined;
   const a = m.action as Record<string, unknown> | undefined;
   return (
-    (r?.buttons_reply?.id as string) ??
-    (i?.button_reply?.id as string) ??
+    (r?.buttons_reply?.id as string) ?? (r?.list_reply?.id as string) ?? (r?.id as unknown as string) ??
+    (i?.button_reply?.id as string) ?? (i?.list_reply?.id as string) ??
     (b?.id as string) ?? (b?.payload as string) ??
-    (a?.id as string) ?? null
+    (a?.id as string) ?? ((a?.reply as Record<string, unknown>)?.id as string) ??
+    (m.payload as string) ?? null
   ) || null;
 }
 
@@ -218,7 +219,8 @@ function buttonTitle(m: Record<string, unknown>): string {
 // `context` object (shapes vary by plan); we check the common fields.
 function quotedMessageId(m: Record<string, unknown>): string | null {
   const ctx = m.context as Record<string, unknown> | undefined;
-  const id = (ctx?.quoted_id ?? ctx?.id ?? ctx?.message_id ??
+  const id = (ctx?.quoted_id ?? ctx?.id ?? ctx?.message_id ?? ctx?.quoted_message_id ??
+    (ctx?.quoted as Record<string, unknown> | undefined)?.id ??
     m.quoted_id ?? m.reply_to ?? (m.quoted as Record<string, unknown> | undefined)?.id) as string | undefined;
   return id ? String(id) : null;
 }

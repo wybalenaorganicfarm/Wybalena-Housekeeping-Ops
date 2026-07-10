@@ -129,6 +129,20 @@ Deno.serve(async (req) => {
       if ((open ?? []).length === 1) assignmentId = open![0].id;
       else if ((open ?? []).length > 1) {
         await sendMessage(cleaner.phone, "Please scroll to the specific shift and tap *Accept* or *Decline* on that message.");
+        // DIAGNOSTIC: the tap didn't carry a button payload or a matchable quoted id,
+        // so we couldn't pin it to one of several open offers. Capture the raw webhook
+        // shape + what we parsed, so the correlation fields can be fixed precisely.
+        await writeAuditLog(sb, {
+          event_type: "response.unresolved",
+          event_label: "WhatsApp Reply Received",
+          status: "warning",
+          summary: `Couldn't match ${cleaner.full_name}'s reply to a specific offer (${(open ?? []).length} open). Diagnostics captured.`,
+          detail: {
+            parsed: { action: r.action, assignment_id: r.assignmentId, quoted_message_id: r.quotedMessageId, offer_code: r.offerCode, raw_text: r.rawText },
+            raw_payload: JSON.stringify(payload).slice(0, 4000),
+          },
+          source: SOURCE, cleaner_id: cleaner.id, triggered_by: "webhook",
+        });
         results.push({ id: r.providerMessageId, skipped: "ambiguous, nudged" });
         continue;
       }
@@ -145,7 +159,7 @@ Deno.serve(async (req) => {
           event_label: "WhatsApp Reply Received",
           status: "warning",
           summary: `Unrecognised WhatsApp reply from ${cleaner.full_name}. Could not match to an open offer.`,
-          detail: { phone, text: r.rawText, action: r.action, assignment_id: r.assignmentId, offer_code: r.offerCode },
+          detail: { phone, text: r.rawText, action: r.action, assignment_id: r.assignmentId, quoted_message_id: r.quotedMessageId, offer_code: r.offerCode, raw_payload: JSON.stringify(payload).slice(0, 4000) },
           source: SOURCE,
           cleaner_id: cleaner.id,
           triggered_by: "webhook",

@@ -12,6 +12,9 @@ export function AssignModal({ shift, onClose, onAssigned }: {
 }) {
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
+  // Cleaners already sent an offer (status "offered") for this shift — keep them
+  // visible but with a disabled "Offered" button so they can't be re-offered.
+  const [offeredIds, setOfferedIds] = useState<Set<string>>(new Set());
   const [openSlots, setOpenSlots] = useState(shift.required_cleaners);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -24,6 +27,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
     setAssignedIds(new Set(
       a.filter((x) => x.status === "accepted" || x.status === "team_lead").map((x) => x.cleaner_id),
     ));
+    setOfferedIds(new Set(a.filter((x) => x.status === "offered").map((x) => x.cleaner_id)));
     const st = staffing[shift.id];
     setOpenSlots(Math.max(shift.required_cleaners - (st?.accepted_count ?? 0), 0));
   }
@@ -34,6 +38,8 @@ export function AssignModal({ shift, onClose, onAssigned }: {
     const { error } = await manualAssign(shift.id, cleanerId);
     setBusyId(null);
     if (error) { toastError(error); return; }
+    // Reflect the sent offer immediately so the button locks even before reload.
+    setOfferedIds((prev) => new Set(prev).add(cleanerId));
     await load();
     onAssigned();
   }
@@ -84,7 +90,26 @@ export function AssignModal({ shift, onClose, onAssigned }: {
                         <div style={{ fontSize: 13.5, fontWeight: 500 }}>{cl.full_name}</div>
                         <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 1 }}>{TIER_LABEL[cl.tier]} · {cl.phone}</div>
                       </div>
-                      <button onClick={() => assign(cl.id)} disabled={busyId === cl.id} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: busyId === cl.id ? 0.6 : 1 }}>{busyId === cl.id ? "…" : "Assign"}</button>
+                      {(() => {
+                        const offered = offeredIds.has(cl.id);
+                        const busy = busyId === cl.id;
+                        return (
+                          <button
+                            onClick={() => assign(cl.id)}
+                            disabled={busy || offered}
+                            style={{
+                              background: offered ? "#eef2ee" : c.green,
+                              color: offered ? c.muted2 : "#fff",
+                              border: offered ? `1px solid ${c.border}` : "none",
+                              borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                              cursor: busy || offered ? "default" : "pointer",
+                              opacity: busy ? 0.6 : 1,
+                            }}
+                          >
+                            {busy ? "…" : offered ? "Offered ✓" : "Assign"}
+                          </button>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
