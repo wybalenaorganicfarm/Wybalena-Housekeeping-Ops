@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Google connection</title>
+</head>
+<body style="margin:0;font-family:Helvetica,Arial,sans-serif;background:#eef0ee;display:flex;align-items:center;justify-content:center;min-height:100vh;">
+  <div id="card" style="background:#fff;border:1px solid #e4e7e3;border-radius:14px;padding:34px 30px;max-width:400px;text-align:center;box-shadow:0 12px 32px -12px rgba(20,30,25,.35);">
+    <div id="emoji" style="font-size:40px;line-height:1;margin-bottom:12px;"></div>
+    <div id="title" style="font-size:18px;font-weight:700;margin-bottom:8px;"></div>
+    <div id="msg" style="font-size:13.5px;color:#5d665f;line-height:1.55;"></div>
+    <button onclick="window.close()" style="margin-top:20px;background:#1f5c46;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:13.5px;font-weight:600;cursor:pointer;">Close this window</button>
+  </div>
+  <script>
+    // Served as real HTML from the app origin (Vercel), so — unlike the Supabase
+    // function page — this script actually executes. It relays the OAuth outcome to
+    // the portal window that opened this popup, then closes.
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var ok = q.get("ok") === "1";
+      var email = q.get("email") || "";
+      var reason = q.get("reason") || "";
+
+      var FAIL = {
+        denied: "Google reported the sign-in was denied. You can close this and try again.",
+        expired: "This reconnect link is invalid or has expired. Please start again from the portal.",
+        config: "The Google OAuth client isn't set up on the server. Contact your administrator.",
+        exchange: "Google refused the sign-in (the code may have expired). Please try again.",
+        norefresh: "Google didn't return a long-lived token. Remove this app at myaccount.google.com/permissions, then reconnect.",
+        save: "The connection succeeded but we couldn't save it. Please try again.",
+      };
+
+      document.getElementById("emoji").textContent = ok ? "✅" : "⚠️";
+      var titleEl = document.getElementById("title");
+      titleEl.textContent = ok ? "Google connected" : "Couldn't connect";
+      titleEl.style.color = ok ? "#256b43" : "#a8392b";
+      document.getElementById("msg").textContent = ok
+        ? (email ? email + " is now linked. " : "Your Google account is now linked. ") +
+          "You can close this window — the portal will update automatically."
+        : (FAIL[reason] || "The sign-in didn't complete. Please try again.");
+
+      // Authoritative signal to the portal. Same-origin (opener is the app), so we
+      // can target our own origin exactly.
+      try {
+        if (window.opener) window.opener.postMessage({ source: "google-oauth", ok: ok }, location.origin);
+      } catch (e) {}
+      setTimeout(function () { try { window.close(); } catch (e) {} }, ok ? 1500 : 6000);
+    })();
+  </script>
+</body>
+</html>

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { startGoogleReconnect } from "./api";
 import { toast, toastError, toastOk } from "./toast";
 
-// Origin the callback popup posts its result from (the Supabase functions host).
-const FUNCTIONS_ORIGIN = (() => {
-  try { return new URL(import.meta.env.VITE_SUPABASE_URL as string).origin; } catch { return ""; }
+// The callback 302-redirects the popup to /google-oauth-result.html on OUR origin
+// (Supabase serves function HTML as text/plain, so its script can't run). That page
+// posts the result back — so the authoritative message now comes from same-origin.
+const RESULT_ORIGIN = (() => {
+  try { return window.location.origin; } catch { return ""; }
 })();
 
 // Drives the one-click Google reconnect from anywhere in the portal:
@@ -43,7 +45,7 @@ export function useGoogleReconnect(onDone?: () => void): { reconnect: () => void
       if (!popup) window.open(url, "_blank"); // popup blocked — still receives the message
 
       const handler = (e: MessageEvent) => {
-        if (FUNCTIONS_ORIGIN && e.origin !== FUNCTIONS_ORIGIN) return;
+        if (RESULT_ORIGIN && e.origin !== RESULT_ORIGIN) return;
         const data = e.data as { source?: string; ok?: boolean } | null;
         if (!data || data.source !== "google-oauth") return;
         settled.current = true;
