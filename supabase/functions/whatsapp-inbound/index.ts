@@ -279,8 +279,8 @@ Deno.serve(async (req) => {
         results.push({ id: r.providerMessageId, action: "cancel_confirm" });
         break;
       }
-      case "cancel_cancel": { // tapped "No"
-        await sendMessage(cleaner.phone, "Not cancelled, shift is still scheduled accepted.");
+      case "cancel_cancel": { // tapped "No" on the cancel confirmation
+        await sendMessage(cleaner.phone, "No problem — nothing was cancelled. You're still on this shift.");
         results.push({ id: r.providerMessageId, action: "cancel_cancel" });
         break;
       }

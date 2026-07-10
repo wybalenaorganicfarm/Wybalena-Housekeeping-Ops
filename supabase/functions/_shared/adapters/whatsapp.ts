@@ -110,8 +110,10 @@ export function sendDeclineConfirm(
     toPhone,
     `Are you sure you want to decline?`,
     [
-      { id: `declineyes:${assignmentId}`, title: "✅ Yes" },
-      { id: `declineno:${assignmentId}`, title: "↩️ No" },
+      // Titles carry the verb so a text-echoed tap (no interactive payload) is still
+      // unambiguous vs the cancel confirmation's Yes/No. Keep ≤20 chars (WA limit).
+      { id: `declineyes:${assignmentId}`, title: "✅ Yes, decline" },
+      { id: `declineno:${assignmentId}`, title: "↩️ No, keep offer" },
     ],
     { footer: "Wybalena Organic Farm" },
   );
@@ -128,8 +130,10 @@ export function sendCancelConfirm(
     toPhone,
     `Are you sure you want to cancel?`,
     [
-      { id: `cancelyes:${assignmentId}`, title: "✅ Yes" },
-      { id: `cancelno:${assignmentId}`, title: "↩️ No" },
+      // Distinct verbs from the decline confirmation so a text-echoed tap resolves
+      // to cancel_confirm/cancel_cancel, not decline. Keep ≤20 chars (WA limit).
+      { id: `cancelyes:${assignmentId}`, title: "✅ Yes, cancel" },
+      { id: `cancelno:${assignmentId}`, title: "↩️ No, keep shift" },
     ],
     { footer: "Wybalena Organic Farm" },
   );
@@ -219,17 +223,25 @@ function quotedMessageId(m: Record<string, unknown>): string | null {
   return id ? String(id) : null;
 }
 
-// Map any free text/title to an action (handles "✅ Accept", "YES 4823", "N", "1").
+// Map any free text/title to an action (handles "✅ Yes, cancel", "YES 4823", "N", "1").
+// Confirmation button titles are classified FIRST and by their verb, so a "No" tap
+// on the CANCEL prompt ("No, keep shift") is never mistaken for a decline, and a "No"
+// on the DECLINE prompt ("No, keep offer") is never mistaken for a cancel.
 function actionFromText(s: string): InboundReply["action"] {
   const u = s.toUpperCase();
   const first = u.trim().split(/\s+/)[0] ?? "";
-  // Decline-confirmation button titles FIRST — "Yes, decline" contains YES and
-  // "No, go back" contains NO, which would otherwise be read as accept/decline.
-  if (/GO\s*BACK/.test(u) || /\bKEEP\b/.test(u)) return "decline_cancel";
-  if (/\bDECLINE\b/.test(u) && /\bYES\b/.test(u)) return "decline_confirm";
-  if (/\b(ACCEPT|YES)\b/.test(u) || first === "Y" || first === "1") return "accept";
-  if (/\b(DECLINE|NO)\b/.test(u) || first === "N" || first === "2") return "decline";
+  // "Are you sure?" answers — verb-tagged, so both Yes and No are unambiguous.
+  if (/\bYES\b/.test(u) && /\bCANCEL\b/.test(u)) return "cancel_confirm";
+  if (/\bYES\b/.test(u) && /\bDECLINE\b/.test(u)) return "decline_confirm";
+  if (/KEEP\s*SHIFT/.test(u) || (/\bNO\b/.test(u) && /\bSHIFT\b/.test(u))) return "cancel_cancel";
+  if (/KEEP\s*OFFER/.test(u) || /GO\s*BACK/.test(u) || (/\bNO\b/.test(u) && /\bOFFER\b/.test(u))) return "decline_cancel";
+  // Bare offer actions / legacy keyword replies.
+  if (/\bACCEPT\b/.test(u) || first === "Y" || first === "1") return "accept";
   if (/\bCANCEL\b/.test(u) || first === "C" || first === "3") return "cancel";
+  if (/\bDECLINE\b/.test(u) || first === "N" || first === "2") return "decline";
+  // Bare YES/NO with no verb (keyword replies) — best-effort.
+  if (/\bYES\b/.test(u)) return "accept";
+  if (/\bNO\b/.test(u)) return "decline";
   return "unknown";
 }
 
