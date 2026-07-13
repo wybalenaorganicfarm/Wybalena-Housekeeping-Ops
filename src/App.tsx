@@ -11,6 +11,7 @@ import { Cleaners } from "./pages/Cleaners";
 import { Users } from "./pages/Users";
 import { Logs } from "./pages/Logs";
 import { Schedule } from "./pages/Schedule";
+import { Connections } from "./pages/Connections";
 import { ShiftConfirmed } from "./pages/ShiftConfirmed";
 import { Spinner } from "./components/ui";
 
@@ -41,6 +42,7 @@ export function App() {
         <Route path="/cleaners" element={<Cleaners />} />
         <Route path="/schedule" element={canEdit ? <Schedule /> : <Navigate to="/" />} />
         <Route path="/logs" element={canEdit ? <Logs /> : <Navigate to="/" />} />
+        <Route path="/connections" element={canEdit ? <Connections /> : <Navigate to="/" />} />
         <Route path="/users" element={canEdit ? <Users /> : <Navigate to="/" />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

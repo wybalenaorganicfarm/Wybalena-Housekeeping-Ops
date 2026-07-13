@@ -89,38 +89,60 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    if (existing) continue; // already in system -> skip (idempotent)
+    // --- Store booking on first sight (independent of the shift window) ------
+    // The booking belongs to whichever week it appears in the calendar; the
+    // clean/shift is a separate concern, gated on check-out below.
+    let bookingId: string;
+    if (existing) {
+      bookingId = existing.id;
+    } else {
+      const { data: booking } = await sb
+        .from("bookings")
+        .insert({
+          gcal_event_id: ev.gcalEventId,
+          guest_name: ev.guestName,
+          check_in: ev.checkIn,
+          check_out: ev.checkOut,
+          nights: ev.nights,
+          guest_count: ev.guestCount,
+          raw_payload: ev.raw,
+        })
+        .select("id")
+        .single();
+      bookingId = booking!.id;
+      createdBookings++;
+      await writeAuditLog(sb, {
+        event_type: "booking.created",
+        event_label: "Booking Created",
+        status: "success",
+        summary: `New booking detected: ${ev.guestName ?? "Guest booking"}, ${ev.checkIn.slice(0, 10)} → ${ev.checkOut.slice(0, 10)}.`,
+        detail: { booking_id: bookingId, nights: ev.nights },
+        source: SOURCE,
+        booking_id: bookingId,
+        triggered_by: "cron",
+      });
+    }
 
-    // --- Store booking ------------------------------------------------------
-    const { data: booking } = await sb
-      .from("bookings")
-      .insert({
-        gcal_event_id: ev.gcalEventId,
-        guest_name: ev.guestName,
-        check_in: ev.checkIn,
-        check_out: ev.checkOut,
-        nights: ev.nights,
-        guest_count: ev.guestCount,
-        raw_payload: ev.raw,
-      })
+    // --- Gate the clean on CHECK-OUT falling inside the target week ----------
+    // Google returns events that merely OVERLAP the window, so a stay that
+    // starts this week but checks out later (e.g. 19 Aug → 23 Aug) is stored as
+    // a booking now, but its clean is created by the run whose window contains
+    // the check-out date (next week).
+    const checkOut = new Date(ev.checkOut);
+    if (checkOut < timeMin || checkOut >= timeMax) continue;
+
+    // Idempotent per booking: a later run must not duplicate a shift an earlier
+    // run already created for this booking.
+    const { data: existingShifts } = await sb
+      .from("shifts")
       .select("id")
-      .single();
-    createdBookings++;
-    await writeAuditLog(sb, {
-      event_type: "booking.created",
-      event_label: "Booking Created",
-      status: "success",
-      summary: `New booking detected: ${ev.guestName ?? "Guest booking"}, ${ev.checkIn.slice(0, 10)} → ${ev.checkOut.slice(0, 10)}.`,
-      detail: { booking_id: booking!.id, nights: ev.nights },
-      source: SOURCE,
-      booking_id: booking!.id,
-      triggered_by: "cron",
-    });
+      .eq("booking_id", bookingId);
+    if (existingShifts && existingShifts.length) continue;
 
     // --- Create shift(s): >=7 nights -> standard + mid_retreat, else standard
     const shiftRows = [
       {
-        booking_id: booking!.id,
+        booking_id: bookingId,
         shift_type: "standard",
         shift_date: ev.checkOut.slice(0, 10),
         start_time: "10:00",
@@ -132,7 +154,7 @@ Deno.serve(async (req) => {
     if (ev.nights >= 7) {
       const mid = new Date(new Date(ev.checkIn).getTime() + Math.floor(ev.nights / 2) * DAY);
       shiftRows.push({
-        booking_id: booking!.id,
+        booking_id: bookingId,
         shift_type: "mid_retreat",
         shift_date: mid.toISOString().slice(0, 10),
         start_time: "10:00",
@@ -163,10 +185,10 @@ Deno.serve(async (req) => {
         event_label: "Shift Created",
         status: "success",
         summary,
-        detail: { shift_id: sh.id, booking_id: booking!.id, shift_type: sh.shift_type },
+        detail: { shift_id: sh.id, booking_id: bookingId, shift_type: sh.shift_type },
         source: SOURCE,
         shift_id: sh.id,
-        booking_id: booking!.id,
+        booking_id: bookingId,
         triggered_by: "cron",
       });
     }

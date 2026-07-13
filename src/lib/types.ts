@@ -12,7 +12,8 @@ export type VenueScope = "full_venue" | "partial_venue";
 export type AssignmentStatus =
   | "offered" | "accepted" | "declined" | "cancelled" | "no_response" | "team_lead";
 export type AlertType =
-  | "venue_gap" | "unconfirmed_shifts" | "booking_cancelled" | "understaffed_urgent" | "cleaner_cancelled";
+  | "venue_gap" | "unconfirmed_shifts" | "booking_cancelled" | "understaffed_urgent" | "cleaner_cancelled"
+  | "connection_down";
 export type AlertStatus = "open" | "actioned" | "dismissed";
 
 export interface Profile {

@@ -167,6 +167,26 @@ Deno.serve(async (req) => {
 
     const brokenLabels = broken.map((b) => SERVICE[b.name]?.label ?? b.name).join(", ");
 
+    // Surface in the in-app Alerts queue too, so a disconnect is visible in the
+    // portal (not only by email/WhatsApp). Keep a single open alert at a time:
+    // refresh the existing one if present, otherwise insert.
+    const alertTitle = `${broken.length} connection${broken.length === 1 ? "" : "s"} need attention`;
+    const alertBody = `Not working: ${brokenLabels}. Open Connections (Administration) to reconnect.`;
+    const { data: openConn } = await sb
+      .from("alerts")
+      .select("id")
+      .eq("alert_type", "connection_down")
+      .eq("status", "open");
+    if (openConn && openConn.length) {
+      await sb.from("alerts")
+        .update({ title: alertTitle, body: alertBody })
+        .eq("alert_type", "connection_down")
+        .eq("status", "open");
+    } else {
+      await sb.from("alerts")
+        .insert({ alert_type: "connection_down", title: alertTitle, body: alertBody });
+    }
+
     // Notify over a channel that actually WORKS. Prefer email; but if Gmail itself
     // is one of the failures, email won't send — fall back to WhatsApp to the
     // admins/ops managers who have a phone. (If both email and WhatsApp are down we
@@ -223,6 +243,12 @@ Deno.serve(async (req) => {
       triggered_by: "cron",
     });
   } else {
+    // Everything healthy → auto-resolve any open connection alert from a prior run.
+    await sb.from("alerts")
+      .update({ status: "actioned", actioned_at: new Date().toISOString() })
+      .eq("alert_type", "connection_down")
+      .eq("status", "open");
+
     // Always log the run, so a healthy day is visible in System Logs too.
     const working = results.filter((r) => r.configured && r.ok).map((r) => SERVICE[r.name]?.label ?? r.name);
     await writeAuditLog(sb, {

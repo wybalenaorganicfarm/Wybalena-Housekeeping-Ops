@@ -6,7 +6,6 @@ import { Icon } from "../components/Icon";
 import { Badge, Button, Card, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
-import { ConnectionsCard } from "../components/ConnectionsCard";
 import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
@@ -48,6 +47,7 @@ const ALERT_ICON: Record<string, string> = {
   venue_gap: "cloud",
   unconfirmed_shifts: "clock",
   cleaner_cancelled: "user",
+  connection_down: "cloud",
 };
 const ALERT_COLOR: Record<string, string> = {
   understaffed_urgent: c.danger,
@@ -55,6 +55,7 @@ const ALERT_COLOR: Record<string, string> = {
   venue_gap: c.muted2,
   unconfirmed_shifts: c.warn,
   cleaner_cancelled: c.danger,
+  connection_down: c.danger,
 };
 
 export function Dashboard() {
@@ -218,8 +219,6 @@ export function Dashboard() {
 
         {/* right rail */}
         <div style={{ flex: "none", width: 296, background: c.rail, borderLeft: `1px solid ${c.border2}`, overflowY: "auto", padding: "22px 18px 40px" }}>
-          {canEdit && <ConnectionsCard />}
-
           {canEdit && pendingShifts.length > 0 && (
             <div style={{ marginBottom: 22 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>

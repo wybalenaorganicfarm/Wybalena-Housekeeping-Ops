@@ -72,6 +72,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 <div style={{ height: 1, background: "rgba(255,255,255,.12)", margin: "8px 8px", alignSelf: "stretch" }} />
                 <NavIcon to="/schedule" icon="clock" label="Schedule" />
                 <NavIcon to="/logs" icon="activity" label="System Logs" />
+                <NavIcon to="/connections" icon="cloud" label="Connections" />
                 <NavIcon to="/users" icon="user" label="Users" />
               </>
             )}
@@ -109,6 +110,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <div style={SECTION_LABEL}>Administration</div>
               <NavItem to="/schedule" icon="clock" label="Schedule" />
               <NavItem to="/logs" icon="activity" label="System Logs" />
+              <NavItem to="/connections" icon="cloud" label="Connections" />
               <NavItem to="/users" icon="user" label="Users" />
             </>
           )}

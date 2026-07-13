@@ -17,6 +17,7 @@ const META: Record<AlertType, { icon: string; accent: string; iconBg: string; ba
   venue_gap: { icon: "sunrise", accent: c.warn, iconBg: "#FBF1DF", badge: "Plan ahead", badgeBg: "#FBF1DF", badgeFg: "#9a7320" },
   unconfirmed_shifts: { icon: "clock", accent: c.warn, iconBg: "#FBF1DF", badge: "Reminder", badgeBg: "#FBF1DF", badgeFg: "#9a7320" },
   cleaner_cancelled: { icon: "user", accent: c.danger, iconBg: "#F8E5E1", badge: "Urgent", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
+  connection_down: { icon: "cloud", accent: c.danger, iconBg: "#F8E5E1", badge: "Connection", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
 };
 
 export function Alerts() {
@@ -125,6 +126,11 @@ export function Alerts() {
                         <>
                           <button onClick={() => shift ? setAssign(shift) : navigate("/shifts")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Assign manually</button>
                           {shift && <button onClick={() => setDrawer(shift)} style={{ background: "none", border: "none", color: c.green, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift →</button>}
+                          <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+                        </>
+                      ) : a.alert_type === "connection_down" ? (
+                        <>
+                          <button onClick={() => navigate("/connections")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Reconnect</button>
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
                         </>
                       ) : (
