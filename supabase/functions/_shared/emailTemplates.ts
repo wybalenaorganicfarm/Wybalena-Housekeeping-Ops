@@ -189,6 +189,110 @@ export function wipeoverEmail(prev: GapBooking, next: GapBooking, gapDays: numbe
   return { subject, text, html };
 }
 
+// ── Auth emails (sent by the send-auth-email hook, NOT by Supabase) ──────────
+// Supabase's default auth templates are replaced by the Send Email hook; these
+// builders produce the branded invite / password-reset emails instead.
+
+function authShell(headerTitle: string, inner: string): string {
+  return `<!DOCTYPE html><html><body style="margin:0;background:#eef0ee;font-family:Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0ee;padding:24px 0;"><tr><td align="center">
+    <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
+      <tr><td style="background:${GREEN};padding:22px 24px;text-align:center;">
+        <div style="color:#ffffff;font-size:20px;font-weight:700;">${esc(headerTitle)}</div>
+        <div style="color:#7fa491;font-size:10px;letter-spacing:0.18em;text-transform:uppercase;font-weight:600;margin-top:4px;">Housekeeping Operations</div>
+      </td></tr>
+      ${inner}
+      <tr><td style="background:#f6f7f6;padding:16px 24px;text-align:center;color:${MUTED};font-size:12px;">
+        Wybalena Organic Farm · Byron Bay Hinterland<br/>
+        <span style="color:#9aa39d;">This is an automated message — please do not reply.</span>
+      </td></tr>
+    </table>
+  </td></tr></table>
+  </body></html>`;
+}
+
+// Invitation for a newly-provisioned app user. `acceptUrl` is the Supabase
+// /auth/v1/verify link, which lands the user back on the app with a session so
+// they can set their password (the #type=invite gate in AuthProvider).
+export function inviteEmail(opts: { name?: string | null; acceptUrl: string }): { subject: string; text: string; html: string } {
+  const subject = "You've been invited to Wybalena Housekeeping Operations";
+  const hi = opts.name ? `Hi ${esc(opts.name)},` : "Hi there,";
+  const inner = `
+    <tr><td style="padding:26px 28px 8px;color:${INK};font-size:14px;line-height:1.6;">
+      ${hi}<br/><br/>
+      You've been invited to the <strong>Wybalena Housekeeping Operations</strong> portal — the cockpit for scheduling and confirming every clean between guests.
+      Click below to accept your invitation and set a password.
+    </td></tr>
+    <tr><td style="padding:18px 28px 6px;text-align:center;">
+      ${button(opts.acceptUrl, "Accept invitation & set password", GREEN)}
+    </td></tr>
+    <tr><td style="padding:14px 28px 24px;color:${MUTED};font-size:12.5px;line-height:1.6;">
+      If the button doesn't work, copy and paste this link into your browser:<br/>
+      <span style="color:${GREEN};word-break:break-all;">${esc(opts.acceptUrl)}</span><br/><br/>
+      If you weren't expecting this invitation, you can safely ignore this email.
+    </td></tr>`;
+  const text = `${opts.name ? `Hi ${opts.name},` : "Hi there,"}\n\n` +
+    `You've been invited to the Wybalena Housekeeping Operations portal. ` +
+    `Accept your invitation and set a password using the link below:\n\n${opts.acceptUrl}\n\n` +
+    `If you weren't expecting this invitation, you can safely ignore this email.`;
+  return { subject, text, html: authShell("Welcome to Wybalena", inner) };
+}
+
+// Password reset for an existing user. `resetUrl` is the Supabase recovery
+// /auth/v1/verify link (#type=recovery → SetPassword gate).
+export function passwordResetEmail(opts: { name?: string | null; resetUrl: string }): { subject: string; text: string; html: string } {
+  const subject = "Reset your Wybalena Housekeeping Operations password";
+  const hi = opts.name ? `Hi ${esc(opts.name)},` : "Hi there,";
+  const inner = `
+    <tr><td style="padding:26px 28px 8px;color:${INK};font-size:14px;line-height:1.6;">
+      ${hi}<br/><br/>
+      We received a request to reset the password for your <strong>Wybalena Housekeeping Operations</strong> account.
+      Click below to choose a new password.
+    </td></tr>
+    <tr><td style="padding:18px 28px 6px;text-align:center;">
+      ${button(opts.resetUrl, "Reset password", GREEN)}
+    </td></tr>
+    <tr><td style="padding:14px 28px 24px;color:${MUTED};font-size:12.5px;line-height:1.6;">
+      If the button doesn't work, copy and paste this link into your browser:<br/>
+      <span style="color:${GREEN};word-break:break-all;">${esc(opts.resetUrl)}</span><br/><br/>
+      If you didn't request a password reset, you can safely ignore this email — your password won't change.
+    </td></tr>`;
+  const text = `${opts.name ? `Hi ${opts.name},` : "Hi there,"}\n\n` +
+    `We received a request to reset your Wybalena Housekeeping Operations password. ` +
+    `Choose a new password using the link below:\n\n${opts.resetUrl}\n\n` +
+    `If you didn't request this, you can safely ignore this email.`;
+  return { subject, text, html: authShell("Password Reset", inner) };
+}
+
+// Generic fallback for any other auth email type (magic link, email change,
+// reauthentication) so the hook never crashes on an unhandled action.
+export function genericAuthEmail(opts: { name?: string | null; actionUrl: string; token?: string }): { subject: string; text: string; html: string } {
+  const subject = "Your Wybalena Housekeeping Operations sign-in link";
+  const hi = opts.name ? `Hi ${esc(opts.name)},` : "Hi there,";
+  const codeLine = opts.token
+    ? `<tr><td style="padding:4px 28px 8px;text-align:center;color:${MUTED};font-size:12.5px;">Or use this code: <strong style="color:${INK};letter-spacing:2px;">${esc(opts.token)}</strong></td></tr>`
+    : "";
+  const inner = `
+    <tr><td style="padding:26px 28px 8px;color:${INK};font-size:14px;line-height:1.6;">
+      ${hi}<br/><br/>
+      Use the link below to continue signing in to <strong>Wybalena Housekeeping Operations</strong>.
+    </td></tr>
+    <tr><td style="padding:18px 28px 6px;text-align:center;">
+      ${button(opts.actionUrl, "Continue", GREEN)}
+    </td></tr>
+    ${codeLine}
+    <tr><td style="padding:14px 28px 24px;color:${MUTED};font-size:12.5px;line-height:1.6;">
+      If the button doesn't work, copy and paste this link into your browser:<br/>
+      <span style="color:${GREEN};word-break:break-all;">${esc(opts.actionUrl)}</span><br/><br/>
+      If you didn't request this, you can safely ignore this email.
+    </td></tr>`;
+  const text = `${opts.name ? `Hi ${opts.name},` : "Hi there,"}\n\n` +
+    `Use the link below to continue signing in to Wybalena Housekeeping Operations:\n\n${opts.actionUrl}\n\n` +
+    (opts.token ? `Or use this code: ${opts.token}\n\n` : "") +
+    `If you didn't request this, you can safely ignore this email.`;
+  return { subject, text, html: authShell("Sign in to Wybalena", inner) };
+}
+
 export function reminderEmail(opts: { count: number; shiftsUrl: string }): { subject: string; text: string; html: string } {
   const subject = `Wybalena: ${opts.count} shift(s) still need confirming`;
   const html = `<!DOCTYPE html><html><body style="margin:0;background:#eef0ee;font-family:Helvetica,Arial,sans-serif;">

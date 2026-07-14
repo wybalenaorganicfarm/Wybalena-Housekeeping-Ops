@@ -53,7 +53,8 @@
       "WebFetch(domain:support.whapi.cloud)",
       "Bash(curl -s -D - -o /dev/null \"https://wctunwynyugdncbiwwhs.supabase.co/functions/v1/google-oauth-callback\")",
       "Bash(curl -s \"https://wctunwynyugdncbiwwhs.supabase.co/functions/v1/google-oauth-callback\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code} %{content_type}\\\\n\" \"https://wybalena-housekeeping-ops.vercel.app/google-oauth-result.html\")"
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{content_type}\\\\n\" \"https://wybalena-housekeeping-ops.vercel.app/google-oauth-result.html\")",
+      "WebFetch(domain:supabase.com)"
     ],
     "additionalDirectories": [
       "\\tmp"

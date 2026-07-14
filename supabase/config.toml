@@ -34,6 +34,10 @@ verify_jwt = false
 # Supabase JWT; secured by the signed `state` param (CONFIRM_LINK_SECRET).
 [functions.google-oauth-callback]
 verify_jwt = false
+# Auth "Send Email" hook — called server-side by Supabase Auth with no user JWT;
+# secured by its Standard Webhooks signature (SEND_EMAIL_HOOK_SECRET).
+[functions.send-auth-email]
+verify_jwt = false
 
 # App-facing functions are called by the frontend WITH the user's JWT; they
 # verify the caller's role internally. Keep verify_jwt = true.
