@@ -1,4 +1,6 @@
-// sync-bookings — cron: Mon 09:00 IST testing (Mon 03:30 UTC); go-live tz TBD.
+// sync-bookings — cron: schedule is admin-editable from /schedule; go-live tz TBD.
+// The target week is anchored to whichever weekday the job runs on (run day 00:00
+// UTC + 35d, for 7 days), so changing the schedule shifts the week with it.
 // Fetches the target booking week (~5 weeks out), dedupes on gcal_event_id,
 // stores bookings, creates shift(s) by the >=7-night rule, raises venue-gap
 // alerts for >3-day gaps, and detects calendar cancellations (Spec §2, §7.1, §7.2).
@@ -16,6 +18,25 @@ const DAY = 86400000;
 const SOURCE = "sync-bookings";
 const SHIFT_LABEL: Record<string, string> = { standard: "Standard Clean", mid_retreat: "Mid-Retreat Clean" };
 
+// The venue's calendar day (Australia/Sydney, DST-aware) — the only day boundary
+// that matters here. Supabase runs UTC regardless of project region, and Sydney is
+// +10/+11, so a 09:00 local check-out is the PREVIOUS day in UTC. Comparing on
+// absolute instants would file that clean into the wrong week; comparing on the
+// local date string can't. Same idiom as pre-shift-reminder.
+function localDateStr(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(d); // YYYY-MM-DD
+}
+
+// Human label for the email header, from a YYYY-MM-DD venue-local date.
+function fmtWeek(ymd: string): string {
+  return new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-AU", {
+    day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+  });
+}
+
 Deno.serve(async (req) => {
   const pre = handleOptions(req);
   if (pre) return pre;
@@ -23,13 +44,22 @@ Deno.serve(async (req) => {
   const sb = serviceClient();
 
   // Target week: ~5 weeks out (after a 4-week buffer, excluding current week).
+  // A true 7-day block on VENUE-LOCAL dates, anchored on whichever weekday the
+  // job is scheduled for: `fromDate` is included, `toDate` (day+7) is excluded.
+  // Run it on a Wednesday and it covers Wed→Tue, excluding the next Wednesday.
   const now = new Date();
-  const timeMin = new Date(now.getTime() + 35 * DAY);
-  const timeMax = new Date(timeMin.getTime() + 7 * DAY);
+  const fromDate = localDateStr(new Date(now.getTime() + 35 * DAY)); // inclusive
+  const toDate = localDateStr(new Date(now.getTime() + 42 * DAY));   // EXCLUSIVE
+  const lastDate = localDateStr(new Date(now.getTime() + 41 * DAY)); // last day covered
+
+  // The Google query is only a coarse prefilter — padded a day either side so no
+  // local-date edge case is dropped before the authoritative check below.
+  const fetchMin = new Date(now.getTime() + 34 * DAY);
+  const fetchMax = new Date(now.getTime() + 43 * DAY);
 
   let events;
   try {
-    events = await fetchBookings(timeMin.toISOString(), timeMax.toISOString());
+    events = await fetchBookings(fetchMin.toISOString(), fetchMax.toISOString());
   } catch (e) {
     await writeAuditLog(sb, {
       event_type: "sync.run",
@@ -128,8 +158,11 @@ Deno.serve(async (req) => {
     // starts this week but checks out later (e.g. 19 Aug → 23 Aug) is stored as
     // a booking now, but its clean is created by the run whose window contains
     // the check-out date (next week).
-    const checkOut = new Date(ev.checkOut);
-    if (checkOut < timeMin || checkOut >= timeMax) continue;
+    // Venue-local check-out date — also the clean's date, so the week gate and
+    // shift_date can never disagree (they could when one used the raw string and
+    // the other an absolute instant).
+    const checkOutDate = localDateStr(new Date(ev.checkOut));
+    if (checkOutDate < fromDate || checkOutDate >= toDate) continue;
 
     // Idempotent per booking: a later run must not duplicate a shift an earlier
     // run already created for this booking.
@@ -144,7 +177,7 @@ Deno.serve(async (req) => {
       {
         booking_id: bookingId,
         shift_type: "standard",
-        shift_date: ev.checkOut.slice(0, 10),
+        shift_date: checkOutDate,
         start_time: "10:00",
         status: "pending_confirmation",
         source: "auto",
@@ -156,7 +189,7 @@ Deno.serve(async (req) => {
       shiftRows.push({
         booking_id: bookingId,
         shift_type: "mid_retreat",
-        shift_date: mid.toISOString().slice(0, 10),
+        shift_date: localDateStr(mid),
         start_time: "10:00",
         status: "pending_confirmation",
         source: "auto",
@@ -205,7 +238,6 @@ Deno.serve(async (req) => {
   if (pendingForEmail.length) {
     const base = Deno.env.get("SUPABASE_URL") ?? "";
     const appUrl = Deno.env.get("APP_URL") ?? "";
-    const fmtWeek = (d: Date) => d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
 
     const shiftsWithLinks = await Promise.all(
       pendingForEmail.map(async (s) => ({ s, sig: await signShift(s.id) })),
@@ -213,8 +245,10 @@ Deno.serve(async (req) => {
     const linkBySig = new Map(shiftsWithLinks.map(({ s, sig }) => [s.id, sig]));
 
     const email = confirmationEmail(pendingForEmail, {
-      weekFrom: fmtWeek(timeMin),
-      weekTo: fmtWeek(timeMax),
+      weekFrom: fmtWeek(fromDate),
+      // `toDate` is exclusive — label the last day actually covered, so a Monday
+      // run reads "Mon → Sun" rather than "Mon → Mon".
+      weekTo: fmtWeek(lastDate),
       signedLinkFor: (id) => `${base}/functions/v1/confirm-shift-email?shift=${id}&token=${linkBySig.get(id) ?? ""}`,
       editUrlFor: (id) => `${appUrl}/?edit=${id}`,
     });
