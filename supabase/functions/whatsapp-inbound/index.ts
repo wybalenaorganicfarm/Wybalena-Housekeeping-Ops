@@ -93,6 +93,15 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // 2a. SECOND HARD GATE: only react to an actual button tap. Cleaners hold
+    //     normal conversations on this line too, so any message that isn't a
+    //     recognised button action is ignored completely — no reply, no log.
+    if (r.action === "unknown") {
+      console.log(`[whatsapp-inbound] ignoring non-button message from ${cleaner.full_name}`);
+      results.push({ id: r.providerMessageId, skipped: "not a button reply" });
+      continue;
+    }
+
     // 2b. Resolve the offer this reply refers to, trying each signal in turn and
     //     FALLING THROUGH if one doesn't resolve. We only verify the row belongs to
     //     this cleaner (no status filter) so a declined offer can still be
@@ -128,7 +137,8 @@ Deno.serve(async (req) => {
         .order("offered_at", { ascending: false });
       if ((open ?? []).length === 1) assignmentId = open![0].id;
       else if ((open ?? []).length > 1) {
-        await sendMessage(cleaner.phone, "Please scroll to the specific shift and tap *Accept* or *Decline* on that message.");
+        // Stay silent — never send the cleaner an error. Log it internally only so
+        // the admin can see the tap didn't correlate and follow up in the portal.
         // DIAGNOSTIC: the tap didn't carry a button payload or a matchable quoted id,
         // so we couldn't pin it to one of several open offers. Capture the raw webhook
         // shape + what we parsed, so the correlation fields can be fixed precisely.
@@ -149,11 +159,9 @@ Deno.serve(async (req) => {
     }
 
     if (!assignmentId) {
-      // A real command (accept/decline/cancel) with no offer to apply it to →
-      // tell them. Free-form chatter from a cleaner with no open offer → stay
-      // silent so we don't reply to every "thanks"/"ok".
+      // A button action with no open offer to apply it to. Record it internally,
+      // but never message the cleaner — they get no error replies at all.
       if (r.action !== "unknown") {
-        await sendMessage(cleaner.phone, "Sorry, we couldn't find an open shift offer to apply that to. If you were offered a shift, please tap Accept or Decline on the offer message.");
         await writeAuditLog(sb, {
           event_type: "response.unknown",
           event_label: "WhatsApp Reply Received",
@@ -299,8 +307,9 @@ Deno.serve(async (req) => {
         break;
       }
       default: {
-        await sendMessage(cleaner.phone, "Sorry, I can only understand the buttons. Please tap *Accept* or *Decline* on the shift offer.");
-        results.push({ id: r.providerMessageId, action: "unknown, nudged" });
+        // Unreachable in practice (unknown actions are gated out above), and we
+        // never send "I didn't understand" replies. Stay silent.
+        results.push({ id: r.providerMessageId, action: "ignored" });
       }
     }
    } catch (e) {

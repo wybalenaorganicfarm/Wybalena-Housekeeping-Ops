@@ -177,6 +177,9 @@ export interface InboundReply {
   // store each offer's outbound message id on the assignment, so this maps a tap
   // back to the exact offer even with several open offers.
   quotedMessageId: string | null;
+  // True only when this came from a real interactive button payload. The webhook
+  // acts on button taps only — see the strict text rules below.
+  fromButton: boolean;
   rawText: string;
 }
 
@@ -245,6 +248,32 @@ function actionFromText(s: string): InboundReply["action"] {
   if (/\bYES\b/.test(u)) return "accept";
   if (/\bNO\b/.test(u)) return "decline";
   return "unknown";
+}
+
+// STRICT matcher for plain-text messages (no interactive payload present).
+//
+// This line also carries normal staff conversation, so we must NEVER infer an
+// action from prose — "no worries" / "yes thanks" previously read as Decline /
+// Accept. The only text we act on is the exact echo of a tapped button title
+// (Whapi sends taps as plain text when the interactive payload is absent), plus
+// the legacy "ACCEPT <code>" keyword form. Everything else is left as "unknown"
+// and the webhook stays silent.
+function strictTextAction(s: string): InboundReply["action"] {
+  // Drop emoji/punctuation, collapse whitespace: "✅ Yes, decline" -> "YES DECLINE".
+  const u = s.toUpperCase().replace(/[^A-Z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  // A button title is short; anything longer is conversation.
+  if (!u || u.length > 20) return "unknown";
+  // "Are you sure?" confirmation titles — verb-tagged, so Yes/No are unambiguous.
+  if (u === "YES CANCEL") return "cancel_confirm";
+  if (u === "YES DECLINE") return "decline_confirm";
+  if (u === "NO KEEP SHIFT") return "cancel_cancel";
+  if (u === "NO KEEP OFFER" || u === "NO GO BACK") return "decline_cancel";
+  // Offer button titles, optionally with a legacy offer code ("ACCEPT 4823").
+  // Note: bare YES/NO/Y/N/1/2/3 are deliberately NOT accepted — they collide with
+  // ordinary conversation.
+  const m = u.match(/^(ACCEPT|DECLINE|CANCEL)( [0-9]{3,6})?$/);
+  if (!m) return "unknown";
+  return m[1].toLowerCase() as InboundReply["action"];
 }
 
 // Read-only connection probe — hits Whapi's /health endpoint. Does NOT send any
@@ -330,13 +359,14 @@ export function parseInbound(payload: unknown): InboundReply[] {
         action = actionFromText(buttonTitle(m) || payload);
       }
     } else {
-      // Fallback path: free text. Covers both keyword replies ("YES 4823") and a
-      // tapped button echoed by Whapi as plain text ("✅ Accept" / "Accept") when
-      // the interactive payload isn't present. actionFromText handles titles,
-      // emojis and keywords alike; the code is any 3–6 digit token in the message.
-      action = actionFromText(text);
-      const tokens = text.trim().toUpperCase().split(/\s+/);
-      offerCode = tokens.find((t) => /^[0-9]{3,6}$/.test(t)) ?? null;
+      // Fallback path: plain text with no interactive payload. Only an exact
+      // button-title echo counts — ordinary conversation stays "unknown" so the
+      // webhook never replies to it.
+      action = strictTextAction(text);
+      if (action !== "unknown") {
+        const tokens = text.trim().toUpperCase().split(/\s+/);
+        offerCode = tokens.find((t) => /^[0-9]{3,6}$/.test(t)) ?? null;
+      }
     }
 
     out.push({
@@ -346,6 +376,7 @@ export function parseInbound(payload: unknown): InboundReply[] {
       offerCode,
       assignmentId,
       quotedMessageId: quotedMessageId(m),
+      fromButton: Boolean(payload),
       rawText: text,
     });
   }
