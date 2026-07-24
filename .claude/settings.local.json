@@ -54,7 +54,15 @@
       "Bash(curl -s -D - -o /dev/null \"https://wctunwynyugdncbiwwhs.supabase.co/functions/v1/google-oauth-callback\")",
       "Bash(curl -s \"https://wctunwynyugdncbiwwhs.supabase.co/functions/v1/google-oauth-callback\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code} %{content_type}\\\\n\" \"https://wybalena-housekeeping-ops.vercel.app/google-oauth-result.html\")",
-      "WebFetch(domain:supabase.com)"
+      "WebFetch(domain:supabase.com)",
+      "Bash(python -)",
+      "Bash(python __TRACKED_VAR__/md2docx.py __TRACKED_VAR__/doc.md docs/Shift-Offer-Flow-and-Message-Templates.docx)",
+      "Bash(python \"C:/Users/Admin/AppData/Local/Temp/claude/c--Clients-Julian-Mateer/3e69bd61-6de0-4842-99fa-da2840d31ff2/scratchpad/build_doc.py\" \"docs/Shift-Offer-Flow-and-Message-Templates.docx\")",
+      "Bash(\" supabase/functions/_shared/engine.ts | head -40)",
+      "Bash(grep -rn \"sendMessage\\\\|sendButtons\\\\|composeMessage\\\\|`\" supabase/functions/_shared/engine.ts | head -40)",
+      "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[System.IO.Compression.ZipFile]::OpenRead\\(\"c:\\\\Clients\\\\Julian Mateer\\\\Shift-Offer-Flow-and-Message-Templates.docx\"\\); $e=$z.Entries | Where-Object {$_.FullName -eq \"word/document.xml\"}; $r=New-Object System.IO.StreamReader\\($e.Open\\(\\)\\); $x=$r.ReadToEnd\\(\\); $r.Close\\(\\); $z.Dispose\\(\\); $x=$x -replace '</w:p>',\"`n\" -replace '<[^>]+>',''; [System.Web.HttpUtility]::HtmlDecode\\($x\\) 2>$null; $x)",
+      "Bash(grep -n \"\\\\`\\\\|Total:\\\\|Summary\\\\|Tier\" supabase/functions/_shared/managerSummary.ts)",
+      "mcp__claude_ai_Supabase__list_edge_functions"
     ],
     "additionalDirectories": [
       "\\tmp"

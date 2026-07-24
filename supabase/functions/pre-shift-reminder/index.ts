@@ -3,6 +3,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
+import { fillVars, loadTemplate } from "../_shared/templates.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "pre-shift-reminder";
@@ -40,6 +41,8 @@ Deno.serve(async (req) => {
     return json({ ok: true, reminders: 0 });
   }
 
+  const tmpl = await loadTemplate(sb, "reminder_preshift");
+
   let messaged = 0;
   for (const s of shifts ?? []) {
     const { data: accepted } = await sb
@@ -50,11 +53,14 @@ Deno.serve(async (req) => {
     let shiftMessaged = 0;
     for (const a of accepted ?? []) {
       const { data: c } = await sb
-        .from("cleaners").select("phone").eq("id", a.cleaner_id).maybeSingle();
-      if (c?.phone) {
+        .from("cleaners").select("phone, is_active").eq("id", a.cleaner_id).maybeSingle();
+      // Don't send while the cleaner is currently Away/Inactive.
+      if (c?.phone && c.is_active) {
         await sendMessage(
           c.phone,
-          `Reminder: your ${s.shift_type} clean is tomorrow (${s.shift_date}) at ${s.start_time}. See you there!`,
+          tmpl?.body
+            ? fillVars(tmpl.body, { shift_type: s.shift_type, shift_date: s.shift_date, start_time: s.start_time })
+            : `Reminder: your ${s.shift_type} clean is tomorrow (${s.shift_date}) at ${s.start_time}. See you there!`,
         );
         messaged++;
         shiftMessaged++;

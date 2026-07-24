@@ -73,6 +73,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 <NavIcon to="/schedule" icon="clock" label="Schedule" />
                 <NavIcon to="/logs" icon="activity" label="System Logs" />
                 <NavIcon to="/connections" icon="cloud" label="Connections" />
+                <NavIcon to="/templates" icon="note" label="Message Templates" />
                 <NavIcon to="/users" icon="user" label="Users" />
               </>
             )}
@@ -111,6 +112,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <NavItem to="/schedule" icon="clock" label="Schedule" />
               <NavItem to="/logs" icon="activity" label="System Logs" />
               <NavItem to="/connections" icon="cloud" label="Connections" />
+              <NavItem to="/templates" icon="note" label="Message Templates" />
               <NavItem to="/users" icon="user" label="Users" />
             </>
           )}

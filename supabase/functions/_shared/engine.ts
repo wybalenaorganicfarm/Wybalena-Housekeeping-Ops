@@ -3,6 +3,7 @@
 // and the whatsapp-inbound webhook. All writes use the service-role client.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage } from "./adapters/whatsapp.ts";
+import { btnTitle, fillVars, loadTemplate } from "./templates.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -46,26 +47,32 @@ function gen4(): string {
 // this exact row. Only Accept/Decline are offered up front — the Cancel button
 // appears later, on the "Shift Accepted" confirmation, for cleaners who accepted.
 async function sendOfferMessage(
+  sb: SupabaseClient,
   phone: string,
   shift: ShiftRow,
   assignmentId: string | undefined,
 ) {
   const time = shift.start_time.slice(0, 5);
-  const body =
-    `*SHIFT DETAILS*\n\n📅 Date: ${shift.shift_date}\n⏰ Time: ${time}\n\n` +
-    `Tap *Accept* to take this shift, or *Decline* to pass.`;
+  const t = await loadTemplate(sb, "shift_offer");
+  const vars = { shift_date: shift.shift_date, start_time: time };
+  const body = t?.body
+    ? fillVars(t.body, vars)
+    : `*SHIFT DETAILS*\n\n📅 Date: ${shift.shift_date}\n⏰ Time: ${time}\n\n` +
+      `Tap *Accept* to take this shift, or *Decline* to pass.`;
   return await sendButtons(
     phone,
     body,
     [
-      { id: `accept:${assignmentId}`, title: "✅ Accept" },
-      { id: `decline:${assignmentId}`, title: "❌ Decline" },
+      { id: `accept:${assignmentId}`, title: btnTitle(t, "accept", "✅ Accept") },
+      { id: `decline:${assignmentId}`, title: btnTitle(t, "decline", "❌ Decline") },
     ],
     {
-      header: "🧹 New Cleaning Shift Available",
-      footer: "Wybalena Organic Farm",
-      fallbackText: `New cleaning shift on ${shift.shift_date} at ${time}. ` +
-        `Please open WhatsApp and tap Accept or Decline on the offer.`,
+      header: t?.header ?? "🧹 New Cleaning Shift Available",
+      footer: t?.footer ?? "Wybalena Organic Farm",
+      fallbackText: t?.fallback
+        ? fillVars(t.fallback, vars)
+        : `New cleaning shift on ${shift.shift_date} at ${time}. ` +
+          `Please open WhatsApp and tap Accept or Decline on the offer.`,
     },
   );
 }
@@ -82,7 +89,7 @@ async function sendAndRecordOffer(
   assignmentId: string | undefined,
 ): Promise<boolean> {
   if (!phone || !assignmentId) return false;
-  const res = await sendOfferMessage(phone, shift, assignmentId);
+  const res = await sendOfferMessage(sb, phone, shift, assignmentId);
   if (!res.ok) return false;
   if (res.providerMessageId) {
     await sb.from("shift_assignments")
@@ -100,15 +107,18 @@ export async function offerToCleaner(
   sb: SupabaseClient,
   shiftId: string,
   cleanerId: string,
-): Promise<"offered" | "error" | "send_failed"> {
+): Promise<"offered" | "error" | "send_failed" | "inactive"> {
   const shift = await loadShift(sb, shiftId);
   if (!shift || shift.status === "cancelled") return "error";
 
   const { data: cleaner } = await sb
-    .from("cleaners").select("id, phone, tier, is_team_leader").eq("id", cleanerId).maybeSingle();
+    .from("cleaners").select("id, phone, tier, is_team_leader, is_active").eq("id", cleanerId).maybeSingle();
   if (!cleaner) return "error";
   // The team lead is auto-assigned to every shift and is never offered/re-offered.
   if (cleaner.is_team_leader) return "error";
+  // Never send an offer to an Away/Inactive cleaner — the UI already hides them,
+  // this is the server-side guard for manual assign / any direct call.
+  if (!cleaner.is_active) return "inactive";
 
   const code = gen4();
   const { data: row } = await sb
@@ -354,8 +364,10 @@ export async function markFullyStaffed(sb: SupabaseClient, shiftId: string): Pro
 
   for (const a of leftover ?? []) {
     const { data: cleaner } = await sb
-      .from("cleaners").select("phone").eq("id", a.cleaner_id).maybeSingle();
-    if (cleaner?.phone) await sendMessage(cleaner.phone, "That shift is now fully booked. Thanks!");
+      .from("cleaners").select("phone, is_active").eq("id", a.cleaner_id).maybeSingle();
+    // Don't message a cleaner who is currently Away/Inactive; their offer is still
+    // closed below.
+    if (cleaner?.phone && cleaner.is_active) await sendMessage(cleaner.phone, "That shift is now fully booked. Thanks!");
   }
   if ((leftover ?? []).length) {
     await sb

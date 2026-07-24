@@ -5,6 +5,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
+import { fillVars, loadTemplate } from "../_shared/templates.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "remind-nonresponders";
@@ -22,16 +23,24 @@ Deno.serve(async (req) => {
     .eq("status", "offered")
     .is("reminder_sent_at", null);
 
+  const tmpl = await loadTemplate(sb, "reminder_nonresponder");
+
   let reminded = 0;
   for (const a of pending ?? []) {
     const { data: cleaner } = await sb
-      .from("cleaners").select("full_name, phone").eq("id", a.cleaner_id).maybeSingle();
+      .from("cleaners").select("full_name, phone, is_active").eq("id", a.cleaner_id).maybeSingle();
+    // Don't remind a cleaner who is currently Away/Inactive. Skip entirely (no
+    // stamp) so the offer can still be reminded if they reactivate later.
+    if (!cleaner?.is_active) continue;
     const sh = (a as Record<string, any>).shifts;
     if (cleaner?.phone) {
+      const shiftDate = sh?.shift_date ?? "";
       await sendMessage(
         cleaner.phone,
-        `Reminder: please respond to the cleaning shift offer on ${sh?.shift_date ?? ""}.\n` +
-          `Tap Accept or Decline on the offer.`,
+        tmpl?.body
+          ? fillVars(tmpl.body, { shift_date: shiftDate })
+          : `Reminder: please respond to the cleaning shift offer on ${shiftDate}.\n` +
+            `Tap Accept or Decline on the offer.`,
       );
     }
     await sb.from("shift_assignments")

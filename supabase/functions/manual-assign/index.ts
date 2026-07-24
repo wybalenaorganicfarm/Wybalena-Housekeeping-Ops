@@ -37,6 +37,22 @@ Deno.serve(async (req) => {
     });
     return json({ error: "whatsapp send failed — the messaging channel needs reconnecting" }, 502);
   }
+  if (result === "inactive") {
+    const { data: cl } = await sb.from("cleaners").select("full_name").eq("id", cleanerId).maybeSingle();
+    await writeAuditLog(sb, {
+      event_type: "assignment.manual",
+      event_label: "Manual Assignment",
+      status: "failed",
+      summary: `Manual offer to ${cl?.full_name ?? "a cleaner"} was blocked — the cleaner is Away/Inactive.`,
+      error_message: "cleaner inactive",
+      detail: { shift_id: shiftId, cleaner_id: cleanerId, by: caller.userId },
+      source: "manual-assign",
+      shift_id: shiftId,
+      cleaner_id: cleanerId,
+      triggered_by: "manual",
+    });
+    return json({ error: "that cleaner is Away or Inactive — set them Active before assigning" }, 400);
+  }
   if (result === "error") {
     await writeAuditLog(sb, {
       event_type: "assignment.manual",

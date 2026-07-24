@@ -11,6 +11,9 @@
 // replies ("accept"/"decline") are still parsed as a fallback, but we never send
 // short codes to cleaners.
 
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { btnTitle, loadTemplate } from "../templates.ts";
+
 const WHAPI_BASE = Deno.env.get("WHAPI_BASE_URL") ?? "https://gate.whapi.cloud";
 
 // Whapi addresses chats as "<digits>@s.whatsapp.net". Accept a raw phone number
@@ -102,40 +105,44 @@ export async function sendButtons(
 // Send the "Are you sure you want to decline?" confirmation with Yes/No buttons
 // whose payloads carry the assignment id. Returns the message id so the caller can
 // store it for quoted-id matching of the Yes/No tap.
-export function sendDeclineConfirm(
+export async function sendDeclineConfirm(
   toPhone: string,
   assignmentId: string,
+  sb?: SupabaseClient,
 ): Promise<SendResult> {
+  const t = sb ? await loadTemplate(sb, "decline_prompt") : null;
   return sendButtons(
     toPhone,
-    `Are you sure you want to decline?`,
+    t?.body ?? `Are you sure you want to decline?`,
     [
       // Titles carry the verb so a text-echoed tap (no interactive payload) is still
       // unambiguous vs the cancel confirmation's Yes/No. Keep ≤20 chars (WA limit).
-      { id: `declineyes:${assignmentId}`, title: "✅ Yes, decline" },
-      { id: `declineno:${assignmentId}`, title: "↩️ No, keep offer" },
+      { id: `declineyes:${assignmentId}`, title: btnTitle(t, "declineyes", "✅ Yes, decline") },
+      { id: `declineno:${assignmentId}`, title: btnTitle(t, "declineno", "↩️ No, keep offer") },
     ],
-    { footer: "Wybalena Organic Farm" },
+    { footer: t?.footer ?? "Wybalena Organic Farm" },
   );
 }
 
 // Send the "Are you sure you want to cancel?" confirmation with Yes/No buttons
 // whose payloads carry the assignment id. Returns the message id so the caller can
 // store it for quoted-id matching of the Yes/No tap.
-export function sendCancelConfirm(
+export async function sendCancelConfirm(
   toPhone: string,
   assignmentId: string,
+  sb?: SupabaseClient,
 ): Promise<SendResult> {
+  const t = sb ? await loadTemplate(sb, "cancel_prompt") : null;
   return sendButtons(
     toPhone,
-    `Are you sure you want to cancel?`,
+    t?.body ?? `Are you sure you want to cancel?`,
     [
       // Distinct verbs from the decline confirmation so a text-echoed tap resolves
       // to cancel_confirm/cancel_cancel, not decline. Keep ≤20 chars (WA limit).
-      { id: `cancelyes:${assignmentId}`, title: "✅ Yes, cancel" },
-      { id: `cancelno:${assignmentId}`, title: "↩️ No, keep shift" },
+      { id: `cancelyes:${assignmentId}`, title: btnTitle(t, "cancelyes", "✅ Yes, cancel") },
+      { id: `cancelno:${assignmentId}`, title: btnTitle(t, "cancelno", "↩️ No, keep shift") },
     ],
-    { footer: "Wybalena Organic Farm" },
+    { footer: t?.footer ?? "Wybalena Organic Farm" },
   );
 }
 
@@ -143,15 +150,17 @@ export function sendCancelConfirm(
 // who accepted can later drop the shift from this message. The button payload
 // carries the assignment id ("cancel:<id>"). Returns the message id so the caller
 // can store it for quoted-id matching of the Cancel tap.
-export function sendAcceptConfirm(
+export async function sendAcceptConfirm(
   toPhone: string,
   assignmentId: string,
+  sb?: SupabaseClient,
 ): Promise<SendResult> {
+  const t = sb ? await loadTemplate(sb, "accept_confirmation") : null;
   return sendButtons(
     toPhone,
-    `Shift Accepted ✅`,
-    [{ id: `cancel:${assignmentId}`, title: "🚫 Cancel" }],
-    { footer: "Wybalena Organic Farm" },
+    t?.body ?? `Shift Accepted ✅`,
+    [{ id: `cancel:${assignmentId}`, title: btnTitle(t, "cancel", "🚫 Cancel") }],
+    { footer: t?.footer ?? "Wybalena Organic Farm" },
   );
 }
 

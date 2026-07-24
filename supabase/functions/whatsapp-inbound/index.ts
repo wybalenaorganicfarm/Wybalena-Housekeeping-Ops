@@ -194,13 +194,13 @@ Deno.serve(async (req) => {
     switch (r.action) {
       case "accept": {
         if (alreadyAccepted) {
-          await sendAcceptConfirm(cleaner.phone, assignmentId);
+          await sendAcceptConfirm(cleaner.phone, assignmentId, sb);
           results.push({ id: r.providerMessageId, action: "accept", result: "already_accepted" });
           break;
         }
         const res = await acceptOffer(sb, assignmentId);
         if (res === "accepted") {
-          const conf = await sendAcceptConfirm(cleaner.phone, assignmentId);
+          const conf = await sendAcceptConfirm(cleaner.phone, assignmentId, sb);
           // Store the confirmation's message id so a later Cancel tap on it resolves.
           if (conf?.providerMessageId) {
             await sb.from("shift_assignments").update({ confirm_message_id: conf.providerMessageId }).eq("id", assignmentId);
@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
         }
         // Re-verify before declining. Store the prompt's id separately so a later
         // reply to the original offer still resolves.
-        const res = await sendDeclineConfirm(cleaner.phone, assignmentId);
+        const res = await sendDeclineConfirm(cleaner.phone, assignmentId, sb);
         if (res?.providerMessageId) {
           await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
         }
@@ -267,7 +267,7 @@ Deno.serve(async (req) => {
         }
         // Confirm before releasing the spot. Store the prompt's id separately so the
         // Yes/No reply resolves back to this assignment.
-        const res = await sendCancelConfirm(cleaner.phone, assignmentId);
+        const res = await sendCancelConfirm(cleaner.phone, assignmentId, sb);
         if (res?.providerMessageId) {
           await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
         }

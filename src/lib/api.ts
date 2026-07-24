@@ -1,7 +1,7 @@
 import { supabase, invokeFn } from "./supabase";
 import { friendlyError } from "./errors";
 import type {
-  Alert, AuditLogResolved, Booking, Cleaner, CleanerNote, CleanerReliability, Profile, Shift, ShiftAssignment, ShiftStaffing,
+  Alert, AuditLogResolved, Booking, Cleaner, CleanerNote, CleanerReliability, MessageTemplate, MessageTemplatePatch, Profile, Shift, ShiftAssignment, ShiftStaffing,
 } from "./types";
 
 // ---- Reads (governed by RLS) -----------------------------------------------
@@ -138,6 +138,25 @@ export async function getRecentFailureCount(): Promise<number> {
     .eq("status", "failed")
     .gte("created_at", since);
   return count ?? 0;
+}
+
+// ---- Message templates (admin + operations_manager via RLS) ----------------
+
+export async function getMessageTemplates(): Promise<MessageTemplate[]> {
+  const { data } = await supabase
+    .from("message_templates").select("*").order("sort_order", { ascending: true });
+  return (data as MessageTemplate[] | null) ?? [];
+}
+
+// Update the editable fields of one template. updated_at / updated_by are stamped
+// by a DB trigger. RLS blocks anyone below admin / operations_manager.
+export async function updateMessageTemplate(
+  key: string,
+  patch: MessageTemplatePatch,
+): Promise<string | null> {
+  const { error } = await supabase
+    .from("message_templates").update(patch as never).eq("key", key);
+  return error ? friendlyError(error.message) : null;
 }
 
 export async function getUsers(): Promise<Profile[]> {

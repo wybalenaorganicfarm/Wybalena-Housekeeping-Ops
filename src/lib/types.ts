@@ -150,10 +150,50 @@ export interface CleanerReliability {
   cancelled_count: number;
 }
 
+// Editable WhatsApp message template (message_templates table).
+export interface TemplateButton {
+  id: string;
+  title: string;
+}
+export interface TemplateVariable {
+  name: string;
+  description: string;
+}
+export interface MessageTemplate {
+  key: string;
+  category: string;
+  label: string;
+  description: string;
+  channel: string;
+  body: string;
+  header: string | null;
+  footer: string | null;
+  fallback: string | null;
+  buttons: TemplateButton[] | null;
+  variables: TemplateVariable[];
+  defaults: {
+    body: string;
+    header: string | null;
+    footer: string | null;
+    fallback: string | null;
+    buttons: TemplateButton[] | null;
+  };
+  sort_order: number;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+// Fields the UI is allowed to edit / save.
+export type MessageTemplatePatch = Pick<
+  MessageTemplate,
+  "body" | "header" | "footer" | "fallback" | "buttons"
+>;
+
 // Minimal Database shape for the typed client.
 export interface Database {
   public: {
     Tables: {
+      message_templates: { Row: MessageTemplate; Insert: Partial<MessageTemplate>; Update: Partial<MessageTemplate> };
       profiles: { Row: Profile; Insert: Partial<Profile>; Update: Partial<Profile> };
       cleaners: { Row: Cleaner; Insert: Partial<Cleaner>; Update: Partial<Cleaner> };
       bookings: { Row: Booking; Insert: Partial<Booking>; Update: Partial<Booking> };
