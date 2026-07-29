@@ -1,5 +1,5 @@
 -- ============================================================================
--- Schedule the wipeover-cleaning notifier (venue-gap detection + email to Ashley).
+-- Schedule the wipeover-cleaning notifier (venue-gap detection + email to Ashleigh).
 -- Extracted from sync-bookings so it can be scheduled independently on the
 -- /schedule page. Default: weekly, just after the booking sync. The admin can
 -- change/pause this from the Automation Schedule page (admin_set_cron_schedule).

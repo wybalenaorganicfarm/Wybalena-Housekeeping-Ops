@@ -49,6 +49,7 @@ export function EditShiftModal({ shift, onClose, onSaved }: { shift: Shift; onCl
                 <option value="standard">Standard Clean</option>
                 <option value="mid_retreat">Mid-Retreat Clean</option>
                 <option value="deep_full_venue">Deep Clean</option>
+                <option value="wipeover">Wipeover Clean</option>
                 <option value="other">Other</option>
               </select>
             </label>

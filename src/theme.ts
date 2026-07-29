@@ -53,6 +53,7 @@ export const SHIFT_TYPE_LABEL: Record<string, string> = {
   standard: "Standard Clean",
   deep_full_venue: "Deep Clean",
   mid_retreat: "Mid-Retreat Clean",
+  wipeover: "Wipeover Clean",
   other: "Other",
 };
 

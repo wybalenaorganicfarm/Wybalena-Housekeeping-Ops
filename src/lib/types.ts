@@ -4,7 +4,7 @@ export type UserRole = "super_admin" | "admin" | "operations_manager" | "team_le
 export type UserStatus = "invite_sent" | "active" | "away" | "inactive";
 export type CleanerTier = "tier_1" | "tier_2" | "tier_3";
 export type CleanerStatus = "active" | "away" | "inactive";
-export type ShiftType = "standard" | "deep_full_venue" | "mid_retreat" | "other";
+export type ShiftType = "standard" | "deep_full_venue" | "mid_retreat" | "wipeover" | "other";
 export type ShiftStatus =
   | "pending_confirmation" | "confirmed" | "staffing" | "fully_staffed" | "cancelled";
 export type ShiftSource = "auto" | "manual";

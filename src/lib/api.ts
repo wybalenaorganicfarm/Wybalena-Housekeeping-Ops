@@ -235,8 +235,9 @@ export const manualAssign = (shiftId: string, cleanerId: string) =>
 export const confirmCancellation = (alertId: string) =>
   invokeFn("confirm-cancellation", { alertId });
 
+// Removal never notifies the cleaner — no email or WhatsApp is sent.
 export const removeCleaner = (cleanerId: string) =>
-  invokeFn<{ ok: boolean; mode: "deleted" | "deactivated"; emailed: boolean }>("remove-cleaner", { cleanerId });
+  invokeFn<{ ok: boolean; mode: "deleted" | "deactivated" }>("remove-cleaner", { cleanerId });
 
 export const provisionUser = (input: {
   email: string; full_name: string; role: string; redirectTo: string; phone?: string;
@@ -253,9 +254,19 @@ export async function setUserRole(userId: string, role: string): Promise<string 
 }
 
 // Edit a cleaner's contact details (phone/email) — Edge Function for the audit log.
-export async function updateCleaner(cleanerId: string, input: { phone: string; email: string | null }): Promise<string | null> {
-  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("update-cleaner", { cleanerId, ...input });
-  return error ?? data?.error ?? null;
+export async function updateCleaner(cleanerId: string, input: { phone: string; email: string | null; tier?: string }): Promise<string | null> {
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string; tier?: string }>("update-cleaner", { cleanerId, ...input });
+  if (error) return error;
+  if (data?.error) return data.error;
+  // An older deployment of the function accepts the call but drops `tier` — it
+  // echoes nothing back. Write the tier directly (admin/ops-manager RLS allows
+  // it) so the change isn't silently lost.
+  if (input.tier && data?.tier !== input.tier) {
+    const { error: tierErr } = await supabase
+      .from("cleaners").update({ tier: input.tier } as never).eq("id", cleanerId);
+    if (tierErr) return friendlyError(tierErr.message);
+  }
+  return null;
 }
 
 export const activateSelf = () => invokeFn("activate-self", {});

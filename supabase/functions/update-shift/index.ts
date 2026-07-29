@@ -1,4 +1,4 @@
-// update-shift — app-facing. Ashley edits a shift's fields from the Edit Shift modal.
+// update-shift — app-facing. Ashleigh edits a shift's fields from the Edit Shift modal.
 // Routed through an Edge Function (not a direct RLS update) so the change is recorded
 // in the audit log — audit_logs has no frontend write policy. Caller must be a writer.
 import { serviceClient } from "../_shared/client.ts";

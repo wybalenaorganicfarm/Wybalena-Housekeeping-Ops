@@ -1,5 +1,5 @@
 // escalate-tier-3 — cron (admin-scheduled). Any shift still in Tier-2 staffing ->
-// offer Tier 3 + raise understaffed_urgent alert + urgent email to Ashley. No
+// offer Tier 3 + raise understaffed_urgent alert + urgent email to Ashleigh. No
 // internal delay: the admin controls the spacing after Tier 2 via this job's
 // schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
@@ -8,7 +8,6 @@ import { offerTier } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
-import { notifyManagerSummary, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
 
 const SOURCE = "escalate-tier-3";
 
@@ -27,21 +26,10 @@ Deno.serve(async (req) => {
     .eq("current_tier", "tier_2");
 
   let escalated = 0;
-  let totalOffers = 0;
-  const summaries: ShiftOfferSummary[] = [];
   for (const s of shifts ?? []) {
     try {
       const res = await offerTier(sb, s.id, "tier_3");
       escalated++;
-      if (res.count > 0) {
-        totalOffers += res.count;
-        summaries.push({
-          shiftDate: res.shiftDate,
-          startTime: (s.start_time ?? "").slice(0, 5),
-          shiftType: s.shift_type,
-          names: res.offered.map((c) => c.full_name),
-        });
-      }
 
       // Raise urgent alert (dedupe one open per shift) + urgent email.
       const { data: dup } = await sb
@@ -67,7 +55,7 @@ Deno.serve(async (req) => {
       );
 
       // Report what actually reached cleaners — a failed WhatsApp send must not be
-      // logged as "offers sent". Ashley is already emailed urgently above either way.
+      // logged as "offers sent". Ashleigh is already emailed urgently above either way.
       const deliveryNote = res.failed > 0
         ? `Tier 3 offers to ${res.failedNames.join(", ")} could NOT be sent — the WhatsApp channel needs reconnecting.`
         : res.count > 0
@@ -77,7 +65,7 @@ Deno.serve(async (req) => {
         event_type: "escalation.tier3_triggered",
         event_label: "Tier 3 Escalation",
         status: res.failed > 0 ? "failed" : "warning",
-        summary: `Tier 3 escalation triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled after Tier 2. ${deliveryNote} Ashley notified urgently.`,
+        summary: `Tier 3 escalation triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled after Tier 2. ${deliveryNote} Ashleigh notified urgently.`,
         detail: { shift_id: s.id, open_spots: res.openSpots, count: res.count, cleaners: res.offered, failed: res.failed, failed_cleaners: res.failedNames },
         source: SOURCE,
         shift_id: s.id,
@@ -108,9 +96,6 @@ Deno.serve(async (req) => {
       triggered_by: "cron",
     });
   }
-
-  // Per-shift summary to Zara (team leader).
-  await notifyManagerSummary(sb, "tier_3", summaries, totalOffers, SOURCE);
 
   return json({ ok: true, escalatedShifts: escalated });
 });

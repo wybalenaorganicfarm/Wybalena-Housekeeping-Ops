@@ -32,12 +32,20 @@ function Kpi({ icon, color, label, value, sub }: { icon: string; color: string; 
   );
 }
 
+// "SUN 23 AUG" — the date on each agenda card, now that days aren't grouped.
+function cardDate(dateStr: string): string {
+  return new Date(dateStr + "T00:00:00")
+    .toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })
+    .toUpperCase();
+}
+
 type View = "agenda" | "calendar";
 
 const TYPE_BADGE: Record<string, { bg: string; fg: string }> = {
   standard: { bg: "#eaf3ed", fg: "#2c6446" },
   deep_full_venue: { bg: "#f0e9f5", fg: "#6b4a86" },
   mid_retreat: { bg: "#eef3ef", fg: "#21564b" },
+  wipeover: { bg: "#fdf4e3", fg: "#9a6512" },
   other: { bg: "#eef3ef", fg: "#21564b" },
 };
 
@@ -59,7 +67,7 @@ const ALERT_COLOR: Record<string, string> = {
 };
 
 export function Dashboard() {
-  const { canEdit, profile } = useAuth();
+  const { canEdit, isTeamLead, profile } = useAuth();
   const escLabel = useEscalationLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -106,13 +114,12 @@ export function Dashboard() {
 
   const pendingShifts = useMemo(() => active.filter((s) => s.status === "pending_confirmation"), [active]);
 
-  const byDay = useMemo(() => {
-    const groups: Record<string, Shift[]> = {};
-    for (const s of [...active].sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time))) {
-      (groups[s.shift_date] ??= []).push(s);
-    }
-    return Object.entries(groups);
-  }, [active]);
+  // Flat, chronological list — no per-day grouping headers; each card shows its
+  // own date.
+  const upcoming = useMemo(
+    () => [...active].sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time)),
+    [active],
+  );
 
   const openAlerts = alerts.filter((a) => a.status === "open");
   const attention = kpis.pending + kpis.urgent + kpis.staffing;
@@ -165,15 +172,12 @@ export function Dashboard() {
           </div>
 
           {view === "calendar" ? (
-            <ShiftCalendar shifts={active} bookings={bookings} initialDate={byDay[0]?.[0]} onSelect={(s) => setDrawer(s)} />
-          ) : byDay.length === 0 ? (
+            <ShiftCalendar shifts={active} bookings={bookings} initialDate={upcoming[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
+          ) : upcoming.length === 0 ? (
             <Card style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>No upcoming shifts.</Card>
-          ) : byDay.map(([day, dayShifts]) => (
-            <div key={day}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: "#5e7a6a", textTransform: "uppercase", letterSpacing: "0.10em", margin: "20px 0 10px", padding: "7px 12px", background: c.railGreenBg, borderRadius: 6, border: `1px solid ${c.railGreenBd}` }}>
-                {dateLabel(day)} <span style={{ fontWeight: 500, color: "#7fa491", textTransform: "none" }}>· {dayShifts.length} shift{dayShifts.length === 1 ? "" : "s"}</span>
-              </div>
-              {dayShifts.map((s) => {
+          ) : (
+            <div style={{ marginTop: 16 }}>
+              {upcoming.map((s) => {
                 const status = statusOf(s);
                 const tp = timeParts(s.start_time);
                 const dots = staffingDots(staffing[s.id], s.required_cleaners);
@@ -181,7 +185,8 @@ export function Dashboard() {
                 const escalating = s.status === "staffing" && s.current_tier === "tier_2";
                 return (
                   <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: "15px 16px", marginBottom: 10, borderLeft: `3px solid ${status.dot}`, display: "flex", alignItems: "center", gap: 18, cursor: "pointer" }}>
-                    <div style={{ textAlign: "center", flex: "none", width: 42 }}>
+                    <div style={{ textAlign: "center", flex: "none", width: 62 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: c.muted2, letterSpacing: "0.04em", marginBottom: 3 }}>{cardDate(s.shift_date)}</div>
                       <div style={{ fontSize: 19, fontWeight: 700, lineHeight: 1.1 }}>{tp.hour}</div>
                       <div style={{ fontSize: 11, color: c.muted2 }}>:{tp.min.split(" ")[0]}</div>
                       <div style={{ fontSize: 10, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
@@ -191,11 +196,11 @@ export function Dashboard() {
                         <Badge label={shortType(s)} bg={(TYPE_BADGE[s.shift_type] ?? TYPE_BADGE.other).bg} fg={(TYPE_BADGE[s.shift_type] ?? TYPE_BADGE.other).fg} />
                         <Badge label={tierLabel} dot={status.dot} bg={status.bg} fg={status.fg} />
                         {escalating && <Badge label={escLabel ? `Tier 3 ${escLabel}` : "Escalating · Tier 3"} bg="#eaf4ee" fg="#256b43" />}
-                        <Badge label={s.source === "manual" ? "Manual" : "Auto"} bg={s.source === "manual" ? "#e7f0ed" : "#f0eee9"} fg={s.source === "manual" ? "#21564b" : "#6b665c"} />
-                        {s.is_modified && <span style={{ fontSize: 10, color: c.muted2, border: `1px solid ${c.border3}`, borderRadius: 3, padding: "0 5px" }}>Edited</span>}
                       </div>
                       <div style={{ fontSize: 14, fontWeight: 600 }}>{shiftName(s)}</div>
-                      <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2 }}>{shiftSubtitle(s, staffing[s.id])}</div>
+                      {shiftSubtitle(s, staffing[s.id]) && (
+                        <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2 }}>{shiftSubtitle(s, staffing[s.id])}</div>
+                      )}
                     </div>
                     <div style={{ flex: "none", textAlign: "center" }}>
                       <div style={{ display: "flex", gap: 3, marginBottom: 5, justifyContent: "center", flexWrap: "wrap", maxWidth: 120 }}>
@@ -214,10 +219,12 @@ export function Dashboard() {
                 );
               })}
             </div>
-          ))}
+          )}
         </div>
 
-        {/* right rail */}
+        {/* right rail — pending shifts + alerts queue. Hidden for the team lead:
+            neither is theirs to action, so their dashboard is just the agenda. */}
+        {!isTeamLead && (
         <div style={{ flex: "none", width: 296, background: c.rail, borderLeft: `1px solid ${c.border2}`, overflowY: "auto", padding: "22px 18px 40px" }}>
           {canEdit && pendingShifts.length > 0 && (
             <div style={{ marginBottom: 22 }}>
@@ -292,6 +299,7 @@ export function Dashboard() {
             );
           })}
         </div>
+        )}
       </div>
 
       {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} />}

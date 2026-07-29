@@ -1,11 +1,12 @@
 // offer-tier-1 — cron: daily 15:00 IST testing (09:30 UTC); go-live tz TBD.
-// For confirmed, not-yet-staffed shifts: offer Tier 1, set status=staffing,
-// current_tier=tier_1, and send a WhatsApp summary to Zara (Spec §2, §7.1).
+// For confirmed, not-yet-staffed shifts: offer Tier 1, set status=staffing and
+// current_tier=tier_1 (Spec §2, §7.1). The team lead is NOT messaged here — she
+// gets a single roster WhatsApp the day before the shift (pre-shift-reminder).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
-import { notifyManagerSummary, notifyOfferFailure, type OfferFailure, type ShiftOfferSummary } from "../_shared/managerSummary.ts";
+import { notifyOfferFailure, type OfferFailure } from "../_shared/managerSummary.ts";
 
 const SOURCE = "offer-tier-1";
 
@@ -20,8 +21,6 @@ Deno.serve(async (req) => {
     .eq("status", "confirmed");
 
   let offered = 0;
-  // Per-shift breakdown for the manager summary (shift, date/time, tier, names).
-  const summaries: ShiftOfferSummary[] = [];
   // Shifts whose offers WhatsApp refused to deliver — emailed to Ashleigh below.
   const failures: OfferFailure[] = [];
   for (const s of shifts ?? []) {
@@ -29,12 +28,6 @@ Deno.serve(async (req) => {
       const res = await offerTier(sb, s.id, "tier_1");
       if (res.count > 0) {
         offered += res.count;
-        summaries.push({
-          shiftDate: res.shiftDate,
-          startTime: (s.start_time ?? "").slice(0, 5),
-          shiftType: s.shift_type,
-          names: res.offered.map((c) => c.full_name),
-        });
         const names = res.offered.map((c) => c.full_name).join(", ");
         await writeAuditLog(sb, {
           event_type: "offer.tier1_sent",
@@ -117,9 +110,6 @@ Deno.serve(async (req) => {
     });
     return json({ ok: true, offersSent: 0 });
   }
-
-  // Per-shift summary to Zara (team leader).
-  await notifyManagerSummary(sb, "tier_1", summaries, offered, SOURCE);
 
   return json({ ok: true, offersSent: offered });
 });

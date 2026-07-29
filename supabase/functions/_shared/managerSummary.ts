@@ -1,18 +1,23 @@
-// Manager (team leader / Zara) WhatsApp summary for tier offer runs.
-// Shared by offer-tier-1, escalate-tier-2 and escalate-tier-3 so the manager
-// gets one consistent per-shift breakdown: shift date/time, type, tier and the
-// name of every cleaner the offer went to.
+// Team-lead (Zara) notifications.
+//
+// The lead gets exactly ONE WhatsApp about staffing: the day before the shift,
+// listing the confirmed roster (pre-shift-reminder). Tier offer runs deliberately
+// send her nothing — offers churn as cleaners accept/decline, so a message per
+// tier run was noise. Offer delivery *failures* still email the ops manager.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendMessage } from "./adapters/whatsapp.ts";
 import { sendEmail } from "./adapters/email.ts";
 import { opsManager } from "./admin.ts";
+import { prettyDate, prettyTime } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
 
-export interface ShiftOfferSummary {
+// One of tomorrow's shifts and the cleaners who accepted it.
+export interface ShiftRoster {
+  shiftId: string;
   shiftDate: string;
   startTime: string; // "HH:MM" or ""
   shiftType: string;
-  names: string[];
+  names: string[]; // accepted cleaners; empty when nobody confirmed
 }
 
 const TIER_LABEL: Record<string, string> = {
@@ -25,24 +30,23 @@ function prettyType(t: string): string {
   return (t ?? "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
-// Build the manager summary message: a per-shift block listing date/time, type,
-// tier and each offered cleaner's name.
-export function buildManagerSummary(
-  tier: string,
-  summaries: ShiftOfferSummary[],
-  totalOffers: number,
-): string {
-  const tierLabel = TIER_LABEL[tier] ?? tier;
-  const blocks = summaries.map((s) => {
-    const time = s.startTime ? ` · ⏰ ${s.startTime}` : "";
-    const roster = s.names.map((n) => `   • ${n}`).join("\n");
-    return `📅 ${s.shiftDate}${time}\n🧹 ${prettyType(s.shiftType)}\n` +
-      `👥 ${tierLabel} — ${s.names.length} cleaner(s):\n${roster}`;
+// Build the day-before roster message: one block per shift with date/time, type
+// and every confirmed cleaner. Shifts with nobody confirmed are still listed so
+// the lead can chase them.
+export function buildLeadRoster(rosters: ShiftRoster[]): string {
+  const total = rosters.reduce((n, r) => n + r.names.length, 0);
+  const blocks = rosters.map((r) => {
+    const time = r.startTime ? ` · ⏰ ${prettyTime(r.startTime)}` : "";
+    const roster = r.names.length
+      ? `👥 ${r.names.length} cleaner(s) confirmed:\n` +
+        r.names.map((n) => `   • ${n}`).join("\n")
+      : "⚠️ No cleaners confirmed yet.";
+    return `📅 ${prettyDate(r.shiftDate)}${time}\n🧹 ${prettyType(r.shiftType)}\n${roster}`;
   });
   return (
-    `*${tierLabel} Shift Offers — Summary* 📋\n\n` +
+    `*Tomorrow's Roster* 📋\n\n` +
     blocks.join("\n\n") +
-    `\n\n_Total: ${totalOffers} offer(s) across ${summaries.length} shift(s)._`
+    `\n\n_Total: ${total} cleaner(s) across ${rosters.length} shift(s)._`
   );
 }
 
@@ -94,31 +98,30 @@ export async function notifyOfferFailure(
   });
 }
 
-// Find the team leader (Zara) and send the per-shift offer summary via WhatsApp,
-// then record the outcome in the audit log. No-op when nothing was offered.
-export async function notifyManagerSummary(
+// Find the team leader (Zara) and send ONE WhatsApp with tomorrow's confirmed
+// roster, then record the outcome in the audit log. Called once per day from
+// pre-shift-reminder. No-op when there are no shifts tomorrow.
+export async function notifyLeadRoster(
   sb: SupabaseClient,
-  tier: string,
-  summaries: ShiftOfferSummary[],
-  totalOffers: number,
+  rosters: ShiftRoster[],
   source: string,
 ): Promise<void> {
-  if (summaries.length === 0) return;
+  if (rosters.length === 0) return;
   // The team lead is a profiles row (role = team_leader), not a cleaner.
   const { data: lead } = await sb
     .from("profiles").select("phone").eq("role", "team_leader").eq("is_active", true).limit(1).maybeSingle();
   if (!lead?.phone) return;
 
-  const tierLabel = TIER_LABEL[tier] ?? tier;
-  const sent = await sendMessage(lead.phone, buildManagerSummary(tier, summaries, totalOffers));
+  const total = rosters.reduce((n, r) => n + r.names.length, 0);
+  const sent = await sendMessage(lead.phone, buildLeadRoster(rosters));
   await writeAuditLog(sb, {
     event_type: "notification.zara_summary",
     event_label: "Zara Shift Summary",
     status: sent.ok ? "success" : "failed",
     summary: sent.ok
-      ? `WhatsApp ${tierLabel} shift summary sent to Zara.`
-      : `Failed to send WhatsApp ${tierLabel} shift summary to Zara.`,
-    detail: { tier, offers: totalOffers, shifts: summaries },
+      ? `Tomorrow's roster sent to Zara — ${total} cleaner(s) across ${rosters.length} shift(s).`
+      : "Failed to send tomorrow's roster to Zara.",
+    detail: { shifts: rosters, cleaners: total },
     source,
     triggered_by: "cron",
   });

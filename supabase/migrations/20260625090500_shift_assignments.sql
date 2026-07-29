@@ -18,7 +18,7 @@ create table public.shift_assignments (
   offered_at          timestamptz not null default now(),
   responded_at        timestamptz,
   reminder_sent_at    timestamptz,                    -- the +18h non-responder reminder
-  is_manual_override  boolean not null default false, -- Ashley assigned directly
+  is_manual_override  boolean not null default false, -- Ashleigh assigned directly
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
   constraint shift_assignments_shift_cleaner_unique unique (shift_id, cleaner_id)

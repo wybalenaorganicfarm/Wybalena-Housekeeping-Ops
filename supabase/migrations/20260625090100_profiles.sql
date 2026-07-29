@@ -2,7 +2,7 @@
 -- Wybalena Housekeeping Operations — Phase A, Step 3
 -- profiles (app logins) + auth-insert trigger + auth_role() helper
 -- ============================================================================
--- One row per app login (Julian/super_admin, Ashley/admin, Zara-as-user/
+-- One row per app login (Julian/super_admin, Ashleigh/admin, Zara-as-user/
 -- team_leader, future staff). NOT cleaners. Extends auth.users.
 -- ============================================================================
 

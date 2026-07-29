@@ -6,6 +6,7 @@ const SHIFT_LABEL: Record<string, string> = {
   standard: "Standard Clean",
   mid_retreat: "Mid-Retreat Clean",
   deep_full_venue: "Deep Clean",
+  wipeover: "Wipeover Clean",
   other: "Other Clean",
 };
 
@@ -151,7 +152,7 @@ function bookingCard(headerBg: string, heading: string, b: GapBooking): string {
   </table>`;
 }
 
-// Notifies Ashley that a wipeover (interim) clean is needed in the >3-day gap
+// Notifies Ashleigh that a wipeover (interim) clean is needed in the >3-day gap
 // between two bookings. Mirrors the original make.com layout.
 export function wipeoverEmail(prev: GapBooking, next: GapBooking, gapDays: number): { subject: string; text: string; html: string } {
   const subject = `Wipeover Cleaning Required — ${gapDays}-day gap between bookings`;

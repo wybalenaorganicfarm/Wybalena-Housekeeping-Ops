@@ -1,11 +1,11 @@
 // remove-cleaner — app-facing. An ops manager (admin/super_admin) removes a
-// cleaner from the roster. The cleaner is notified by email, then deleted.
+// cleaner from the roster. The cleaner is NOT notified — removal is an internal
+// roster decision the venue communicates itself, so no email or WhatsApp goes out.
 // If they have shift-assignment history (FK on delete restrict), we cannot hard
 // delete without destroying that history, so we deactivate instead.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { getCaller, isWriter } from "../_shared/authz.ts";
-import { sendEmail } from "../_shared/adapters/email.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 Deno.serve(async (req) => {
@@ -24,22 +24,6 @@ Deno.serve(async (req) => {
   if (loadErr) return json({ error: loadErr.message }, 400);
   if (!cleaner) return json({ error: "cleaner not found" }, 404);
   if (cleaner.is_team_leader) return json({ error: "the team leader cannot be removed" }, 400);
-
-  // Notify the cleaner (stubbed until Gmail creds are set; skipped if no email).
-  // A notification failure must NEVER block removal.
-  let emailed = false;
-  if (cleaner.email) {
-    try {
-      const r = await sendEmail(
-        "You have been removed from the Wybalena cleaning roster",
-        `Hi ${cleaner.full_name},\n\nThis is to let you know that your profile has been removed from the Wybalena cleaning roster. You will no longer receive shift offers.\n\nIf you believe this was a mistake, please contact the Wybalena operations team.\n\nThank you for your work.`,
-        cleaner.email,
-      );
-      emailed = r.ok;
-    } catch (e) {
-      console.error(`[remove-cleaner] email notify failed: ${e}`);
-    }
-  }
 
   // Clear shift-assignment history first (FK is on delete restrict) so the
   // cleaner is actually deleted, not just deactivated.
@@ -60,7 +44,7 @@ Deno.serve(async (req) => {
       source: "remove-cleaner",
       triggered_by: "manual",
     });
-    return json({ ok: true, mode: "deactivated", emailed });
+    return json({ ok: true, mode: "deactivated" });
   }
 
   await writeAuditLog(sb, {
@@ -72,5 +56,5 @@ Deno.serve(async (req) => {
     source: "remove-cleaner",
     triggered_by: "manual",
   });
-  return json({ ok: true, mode: "deleted", emailed });
+  return json({ ok: true, mode: "deleted" });
 });

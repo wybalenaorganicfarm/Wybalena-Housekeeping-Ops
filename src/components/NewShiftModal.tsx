@@ -19,7 +19,13 @@ const CLEAN_TYPES: [string, string][] = [
   ["standard", "Standard Clean"],
   ["mid_retreat", "Mid-Retreat Clean"],
   ["deep_full_venue", "Deep Clean"],
+  ["wipeover", "Wipeover Clean"],
 ];
+
+// Crew size pre-filled per clean type (still editable on the form).
+const DEFAULT_REQUIRED: Record<string, number> = {
+  deep_full_venue: 7,
+};
 
 const labelStyle = { fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase" as const, color: c.muted2, fontWeight: 600 };
 const fieldStyle = { border: `1px solid ${c.border3}`, borderRadius: 8, padding: "10px 12px", fontSize: 14, background: "#fff", color: c.ink, outline: "none", width: "100%" } as const;
@@ -90,7 +96,7 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Clean type */}
           <label style={{ display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Clean type</span>
-            <select value={type} onChange={(e) => { setType(e.target.value); setRequired(e.target.value === "deep_full_venue" ? 7 : 6); }} style={fieldStyle}>
+            <select value={type} onChange={(e) => { setType(e.target.value); setRequired(DEFAULT_REQUIRED[e.target.value] ?? 6); }} style={fieldStyle}>
               {CLEAN_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>

@@ -62,7 +62,9 @@
       "Bash(grep -rn \"sendMessage\\\\|sendButtons\\\\|composeMessage\\\\|`\" supabase/functions/_shared/engine.ts | head -40)",
       "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[System.IO.Compression.ZipFile]::OpenRead\\(\"c:\\\\Clients\\\\Julian Mateer\\\\Shift-Offer-Flow-and-Message-Templates.docx\"\\); $e=$z.Entries | Where-Object {$_.FullName -eq \"word/document.xml\"}; $r=New-Object System.IO.StreamReader\\($e.Open\\(\\)\\); $x=$r.ReadToEnd\\(\\); $r.Close\\(\\); $z.Dispose\\(\\); $x=$x -replace '</w:p>',\"`n\" -replace '<[^>]+>',''; [System.Web.HttpUtility]::HtmlDecode\\($x\\) 2>$null; $x)",
       "Bash(grep -n \"\\\\`\\\\|Total:\\\\|Summary\\\\|Tier\" supabase/functions/_shared/managerSummary.ts)",
-      "mcp__claude_ai_Supabase__list_edge_functions"
+      "mcp__claude_ai_Supabase__list_edge_functions",
+      "Bash(npx eslint *)",
+      "Bash(grep -v \"^_shared$\")"
     ],
     "additionalDirectories": [
       "\\tmp"

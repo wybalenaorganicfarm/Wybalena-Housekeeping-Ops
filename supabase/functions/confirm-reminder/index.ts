@@ -1,4 +1,4 @@
-// confirm-reminder — cron. Reminds Ashley about EVERY shift still awaiting
+// confirm-reminder — cron. Reminds Ashleigh about EVERY shift still awaiting
 // confirmation, raising an unconfirmed_shifts alert per shift + one summary email.
 // No internal age check: the admin controls cadence purely through the schedule,
 // so whenever this runs it reminds about all currently-pending shifts.
@@ -73,8 +73,8 @@ Deno.serve(async (req) => {
     event_label: "Confirmation Reminder",
     status: sent.ok ? "success" : "failed",
     summary: sent.ok
-      ? `Confirmation reminder sent to Ashley — ${raised} shift(s) still awaiting confirmation.`
-      : "Failed to send confirmation reminder email to Ashley. Error: email provider returned an error.",
+      ? `Confirmation reminder sent to Ashleigh — ${raised} shift(s) still awaiting confirmation.`
+      : "Failed to send confirmation reminder email to Ashleigh. Error: email provider returned an error.",
     error_message: sent.ok ? undefined : "email provider returned an error",
     detail: { pending: raised },
     source: SOURCE,

@@ -1,4 +1,4 @@
-// confirm-cancellation — app-facing. Ashley actions a booking_cancelled alert:
+// confirm-cancellation — app-facing. Ashleigh actions a booking_cancelled alert:
 // cancel all linked shifts, notify accepted cleaners via WhatsApp, close the
 // alert. Caller must be admin or super_admin (Spec §7.3).
 import { serviceClient } from "../_shared/client.ts";

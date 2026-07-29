@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Wybalena Housekeeping Operations — Phase A, Step 8
--- alerts (Ashley's review queue)
+-- alerts (Ashleigh's review queue)
 -- ============================================================================
 
 create table public.alerts (
@@ -16,4 +16,4 @@ create table public.alerts (
   created_at   timestamptz not null default now()
 );
 
-comment on table public.alerts is 'Review queue surfaced to Ashley: venue gaps, unconfirmed shifts, booking cancellations, understaffing, cleaner cancellations.';
+comment on table public.alerts is 'Review queue surfaced to Ashleigh: venue gaps, unconfirmed shifts, booking cancellations, understaffing, cleaner cancellations.';

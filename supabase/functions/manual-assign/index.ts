@@ -1,4 +1,4 @@
-// manual-assign — app-facing. Ashley manually offers a shift to a specific
+// manual-assign — app-facing. Ashleigh manually offers a shift to a specific
 // cleaner, bypassing tier order. Creates an `offered` assignment with
 // is_manual_override=true and sends the Accept/Decline buttons — the cleaner must
 // reply, so the status stays "awaiting" until they accept (not auto-accepted).

@@ -4,7 +4,7 @@
 -- ============================================================================
 -- Unique gcal_event_id is the dedupe key that makes "already in system -> skip"
 -- idempotent on every sync run. is_cancelled is set when a GCal event is
--- detected removed; it does NOT auto-cancel shifts (Ashley stays in control).
+-- detected removed; it does NOT auto-cancel shifts (Ashleigh stays in control).
 -- ============================================================================
 
 create table public.bookings (

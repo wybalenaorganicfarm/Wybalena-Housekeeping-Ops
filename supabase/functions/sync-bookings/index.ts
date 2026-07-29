@@ -109,7 +109,7 @@ Deno.serve(async (req) => {
           event_type: "booking.cancellation_detected",
           event_label: "Booking Cancellation Detected",
           status: "success",
-          summary: "Booking cancellation detected. Alert sent to Ashley to review.",
+          summary: "Booking cancellation detected. Alert sent to Ashleigh to review.",
           detail: { booking_id: existing.id, gcal_event_id: ev.gcalEventId },
           source: SOURCE,
           booking_id: existing.id,
@@ -233,7 +233,7 @@ Deno.serve(async (req) => {
   // Venue-gap detection + the wipeover-cleaning email now live in their own
   // independently-schedulable function (wipeover-notify), so they're not run here.
 
-  // --- Confirmation email to Ashley: one email, every pending shift, per-shift
+  // --- Confirmation email to Ashleigh: one email, every pending shift, per-shift
   //     Confirm/Edit buttons (Confirm = signed one-click link; Edit = app deep-link).
   if (pendingForEmail.length) {
     const base = Deno.env.get("SUPABASE_URL") ?? "";

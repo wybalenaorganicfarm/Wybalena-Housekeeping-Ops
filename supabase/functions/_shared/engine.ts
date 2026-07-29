@@ -4,6 +4,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage } from "./adapters/whatsapp.ts";
 import { btnTitle, fillVars, loadTemplate } from "./templates.ts";
+import { prettyDate, prettyTime } from "./datetime.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -52,12 +53,14 @@ async function sendOfferMessage(
   shift: ShiftRow,
   assignmentId: string | undefined,
 ) {
-  const time = shift.start_time.slice(0, 5);
+  // Cleaners read these — spell the day out and use am/pm, never raw ISO.
+  const date = prettyDate(shift.shift_date);
+  const time = prettyTime(shift.start_time);
   const t = await loadTemplate(sb, "shift_offer");
-  const vars = { shift_date: shift.shift_date, start_time: time };
+  const vars = { shift_date: date, start_time: time };
   const body = t?.body
     ? fillVars(t.body, vars)
-    : `*SHIFT DETAILS*\n\n📅 Date: ${shift.shift_date}\n⏰ Time: ${time}\n\n` +
+    : `*SHIFT DETAILS*\n\n📅 Date: ${date}\n⏰ Time: ${time}\n\n` +
       `Tap *Accept* to take this shift, or *Decline* to pass.`;
   return await sendButtons(
     phone,
@@ -71,7 +74,7 @@ async function sendOfferMessage(
       footer: t?.footer ?? "Wybalena Organic Farm",
       fallbackText: t?.fallback
         ? fillVars(t.fallback, vars)
-        : `New cleaning shift on ${shift.shift_date} at ${time}. ` +
+        : `New cleaning shift on ${date} at ${time}. ` +
           `Please open WhatsApp and tap Accept or Decline on the offer.`,
     },
   );

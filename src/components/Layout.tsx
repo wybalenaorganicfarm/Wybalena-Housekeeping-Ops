@@ -43,15 +43,17 @@ function NavIcon({ to, icon, label, badge }: { to: string; icon: string; label: 
 }
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { profile, role, canEdit, signOut } = useAuth();
+  const { profile, role, canEdit, isTeamLead, signOut } = useAuth();
   const navigate = useNavigate();
   const [openAlerts, setOpenAlerts] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
 
   useEffect(() => {
+    // The team lead has no Alerts nav — don't fetch the count for them.
+    if (isTeamLead) return;
     getAlerts().then((a) => setOpenAlerts(a.filter((x) => x.status === "open").length));
-  }, []);
+  }, [isTeamLead]);
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: c.sand }}>
@@ -63,7 +65,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </button>
           <nav style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 22 }}>
             <NavIcon to="/" icon="dashboard" label="Dashboard" />
-            <NavIcon to="/alerts" icon="alert" label="Alerts" badge={openAlerts || undefined} />
+            {!isTeamLead && <NavIcon to="/alerts" icon="alert" label="Alerts" badge={openAlerts || undefined} />}
             <NavIcon to="/bookings" icon="book" label="Bookings" />
             <NavIcon to="/shifts" icon="calendar" label="Shifts" />
             <NavIcon to="/cleaners" icon="users" label="Cleaners" />
@@ -101,7 +103,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <nav style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 24 }}>
           <div style={SECTION_LABEL}>Operations</div>
           <NavItem to="/" icon="dashboard" label="Dashboard" />
-          <NavItem to="/alerts" icon="alert" label="Alerts" badge={openAlerts || undefined} />
+          {!isTeamLead && <NavItem to="/alerts" icon="alert" label="Alerts" badge={openAlerts || undefined} />}
           <NavItem to="/bookings" icon="book" label="Bookings" />
           <NavItem to="/shifts" icon="calendar" label="Shifts" />
           <NavItem to="/cleaners" icon="users" label="Cleaners" />

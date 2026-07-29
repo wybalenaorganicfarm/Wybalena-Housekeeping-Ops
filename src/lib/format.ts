@@ -39,14 +39,16 @@ export function weekKey(dateStr: string): string {
   return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-${String(m.getDate()).padStart(2, "0")}`;
 }
 
-// "THIS WEEK · 22–28 Jun" / "NEXT WEEK · 29 Jun – 5 Jul" / "27 Jul – 2 Aug".
+// Spelled out in full so the week a shift sits in is unmistakable:
+// "THIS WEEK · Mon 24 – Sun 30 August" / "Mon 28 July – Sun 3 August".
 export function weekRangeLabel(mondayKey: string, today: Date = new Date()): string {
   const mon = new Date(mondayKey + "T00:00:00");
   const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
   const sameMonth = mon.getMonth() === sun.getMonth();
-  const day = (d: Date) => d.toLocaleDateString("en-AU", { day: "numeric" });
-  const dayMon = (d: Date) => d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-  const range = sameMonth ? `${day(mon)}–${dayMon(sun)}` : `${dayMon(mon)} – ${dayMon(sun)}`;
+  const dayName = (d: Date) => d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric" });
+  const dayNameMon = (d: Date) => d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "long" });
+  // Same month → name the month once, at the end: "Mon 24 – Sun 30 August".
+  const range = sameMonth ? `${dayName(mon)} – ${dayNameMon(sun)}` : `${dayNameMon(mon)} – ${dayNameMon(sun)}`;
   const diff = Math.round((startOfWeek(mon).getTime() - startOfWeek(today).getTime()) / (7 * 86400000));
   const prefix = diff === 0 ? "THIS WEEK" : diff === 1 ? "NEXT WEEK" : "";
   return prefix ? `${prefix} · ${range}` : range;
@@ -57,6 +59,7 @@ const TYPE_COLUMN: Record<string, string> = {
   standard: "Standard",
   deep_full_venue: "Deep",
   mid_retreat: "Mid-Retreat",
+  wipeover: "Wipeover",
   other: "Other",
 };
 export function typeColumn(s: Shift): string {
@@ -107,6 +110,7 @@ const SHORT_TYPE: Record<string, string> = {
   standard: "Standard",
   deep_full_venue: "Deep",
   mid_retreat: "Mid-Retreat",
+  wipeover: "Wipeover",
   other: "Other",
 };
 export function shortType(s: Shift): string {
@@ -124,11 +128,12 @@ export function shiftBookingName(s: Shift, bookings: Record<string, Booking>): s
   return (s.booking_id && bookings[s.booking_id]?.guest_name) || shiftTitle(s);
 }
 
-// Venue scope: "Full venue" or "Partial · The Barn, Studio".
+// Venue scope, shown only when it's worth saying: "Partial · The Barn, Studio".
+// Full venue is the norm (~99% of shifts) so it renders as nothing.
 export function venueLabel(s: Shift): string {
   return s.venue_scope === "partial_venue" && s.buildings?.length
     ? `Partial · ${s.buildings.join(", ")}`
-    : "Full venue";
+    : s.venue_scope === "partial_venue" ? "Partial venue" : "";
 }
 
 // Secondary line under the title — the venue scope.

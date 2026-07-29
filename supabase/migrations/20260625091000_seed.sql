@@ -7,7 +7,7 @@
 -- mid_retreat), one short booking -> 1 shift, assignments across statuses, and
 -- a couple of alerts. Enough to validate end to end.
 --
--- NOTE: app-user profiles (Julian/Ashley/Zara-login) are NOT seeded here —
+-- NOTE: app-user profiles (Julian/Ashleigh/Zara-login) are NOT seeded here —
 -- auth users must be created via GoTrue (admin API) so passwords + identities
 -- are correct; the handle_new_user trigger then auto-creates their profiles.
 -- See the bootstrap commands in the build notes.

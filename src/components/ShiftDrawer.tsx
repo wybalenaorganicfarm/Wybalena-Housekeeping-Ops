@@ -71,8 +71,8 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
     .filter((r) => r.cl && r.a.status !== "no_response")
     .map(({ a, cl }) => ({ key: a.id, name: cl!.full_name, statusKey: a.status, tierLabel: TIER_LABEL[a.tier_at_offer], isLead: false }));
   // The team lead (a profiles row, not a cleaner) is auto-assigned to every shift
-  // — inject them at the top with a "Team Lead" status.
-  const responders: ResponderRow[] = teamLead
+  // except wipeover cleans — inject them at the top with a "Team Lead" status.
+  const responders: ResponderRow[] = teamLead && s.shift_type !== "wipeover"
     ? [{ key: "team-lead", name: teamLead.full_name, statusKey: "team_lead", tierLabel: null, isLead: true }, ...cleanerRows]
     : cleanerRows;
 
@@ -119,6 +119,8 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: status.dot }} />{tierBadge}
                 </span>
                 <span style={{ background: s.source === "manual" ? "#e7f0ed" : "#f0eee9", color: s.source === "manual" ? "#21564b" : "#6b665c", fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>{s.source === "manual" ? "Manual" : "Auto"}</span>
+                {/* Shown here only — the list views stay uncluttered. */}
+                {s.is_modified && <span style={{ background: "#f0eee9", color: "#6b665c", fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>Edited</span>}
               </div>
               <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, margin: "0 0 2px" }}>{typeLabel(s)}</h2>
               <div style={{ fontSize: 12.5, color: c.muted2 }}>{typeLabel(s)} · {dateLabel(s.shift_date)}, {time} · {s.estimated_hours} hrs</div>

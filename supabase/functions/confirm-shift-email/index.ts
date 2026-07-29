@@ -16,6 +16,7 @@ const SHIFT_LABEL: Record<string, string> = {
   standard: "Standard Clean",
   mid_retreat: "Mid-Retreat Clean",
   deep_full_venue: "Deep Clean",
+  wipeover: "Wipeover Clean",
   other: "Other Clean",
 };
 

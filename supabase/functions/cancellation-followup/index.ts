@@ -1,5 +1,5 @@
 // cancellation-followup — cron: daily 09:00 IST testing (03:30 UTC); go-live tz TBD.
-// For open booking_cancelled alerts unactioned >=3 days, re-remind Ashley (Spec §2, §7.1).
+// For open booking_cancelled alerts unactioned >=3 days, re-remind Ashleigh (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
       event_type: "followup.cancellation_sent",
       event_label: "Cancellation Follow-up",
       status: "success",
-      summary: "Follow-up sent to Ashley — booking cancellation alert still unactioned after 3 days.",
+      summary: "Follow-up sent to Ashleigh — booking cancellation alert still unactioned after 3 days.",
       detail: { alert_id: a.id },
       source: SOURCE,
       booking_id: a.booking_id ?? undefined,

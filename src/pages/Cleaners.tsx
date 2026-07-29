@@ -100,13 +100,15 @@ function AddCleanerModal({ existing, onClose, onSaved }: { existing: Cleaner[]; 
   );
 }
 
-// Edit a cleaner's contact details (phone + email) — e.g. number changed, or the
-// email wasn't known at creation. Prefills phone by parsing the stored E.164.
+// Edit a cleaner's contact details (phone + email) and tier — e.g. number
+// changed, or they've earned a move up the offer order. Prefills phone by
+// parsing the stored E.164.
 function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cleaner; existing: Cleaner[]; onClose: () => void; onSaved: () => void }) {
   const parsed = (() => { try { return parsePhoneNumber(cleaner.phone); } catch { return null; } })();
   const [country, setCountry] = useState<CountryCode>((parsed?.country as CountryCode) ?? "AU");
   const [national, setNational] = useState(parsed?.nationalNumber ? String(parsed.nationalNumber) : "");
   const [email, setEmail] = useState(cleaner.email ?? "");
+  const [tier, setTier] = useState<CleanerTier>(cleaner.tier);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -125,7 +127,7 @@ function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cl
     }
 
     setBusy(true);
-    const e = await updateCleaner(cleaner.id, { phone: e164, email: emailNorm || null });
+    const e = await updateCleaner(cleaner.id, { phone: e164, email: emailNorm || null, tier });
     setBusy(false);
     if (e) { setErr(e); return; }
     onSaved(); onClose();
@@ -137,6 +139,28 @@ function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cl
         <PhoneInput country={country} national={national} onCountry={setCountry} onNational={setNational} />
       </Field>
       <Field label="Email"><Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="name@email.com" /></Field>
+      <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Tier</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+        {(["tier_1", "tier_2", "tier_3"] as CleanerTier[]).map((t) => {
+          const on = tier === t;
+          return (
+            <button key={t} onClick={() => setTier(t)} style={{ flex: 1, textAlign: "left", display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1.5px solid ${on ? c.green : c.border3}`, borderRadius: 8, padding: "11px 12px", cursor: "pointer" }}>
+              <span style={{ width: 14, height: 14, flex: "none", borderRadius: "50%", border: `2px solid ${on ? c.green : c.border3}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {on && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.green }} />}
+              </span>
+              <span>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{TIER_LABEL[t]}</span>
+                <span style={{ display: "block", fontSize: 11, color: c.muted2 }}>{TIER_SUB[t]}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {tier !== cleaner.tier && (
+        <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 8 }}>
+          Moving from {TIER_LABEL[cleaner.tier]} to {TIER_LABEL[tier]} changes when they're offered shifts. Offers already sent aren't affected.
+        </div>
+      )}
       {err && <div style={{ color: c.danger, fontSize: 12.5, margin: "10px 0 0" }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <Button kind="secondary" onClick={onClose}>Cancel</Button>
@@ -154,6 +178,24 @@ const CLEANER_STATUS_META: Record<CleanerStatus, { label: string; color: string;
 
 const COL = { phone: 120, email: 180, status: 116, rel: 168, rate: 84, action: 40 };
 
+// The tier/status selection survives refreshes and tab changes — an admin
+// working through, say, the Away list shouldn't be reset to "All" every time
+// they leave the page.
+const TIER_KEY = "cleaners.tierFilter";
+const STATUS_KEY = "cleaners.statusFilter";
+function storedFilter(key: string, valid: string[]): string {
+  try {
+    const v = localStorage.getItem(key);
+    return v && valid.includes(v) ? v : "all";
+  } catch { return "all"; }
+}
+
+const filterStyle = {
+  fontSize: 12.5, fontWeight: 600, color: "#5d665f", background: "#fff",
+  border: `1px solid ${c.border3}`, borderRadius: 8, padding: "6px 10px",
+  outline: "none", cursor: "pointer", minWidth: 150,
+} as const;
+
 export function Cleaners() {
   const { canEdit, isTeamLead } = useAuth();
   const canManage = canEdit || isTeamLead; // status + notes; add/remove stays admin-only
@@ -161,7 +203,8 @@ export function Cleaners() {
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
   const [loading, setLoading] = useState(true);
-  const [tierFilter, setTierFilter] = useState<string>("all");
+  const [tierFilter, setTierFilter] = useState<string>(() => storedFilter(TIER_KEY, ["all", "tier_1", "tier_2", "tier_3"]));
+  const [statusFilter, setStatusFilter] = useState<string>(() => storedFilter(STATUS_KEY, ["all", "active", "away", "inactive"]));
   const [showAdd, setShowAdd] = useState(false);
 
   const [removing, setRemoving] = useState<string | null>(null);
@@ -175,6 +218,8 @@ export function Cleaners() {
     setCleaners(cs); setRel(r); setLoading(false);
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => { try { localStorage.setItem(TIER_KEY, tierFilter); } catch { /* private mode */ } }, [tierFilter]);
+  useEffect(() => { try { localStorage.setItem(STATUS_KEY, statusFilter); } catch { /* private mode */ } }, [statusFilter]);
 
   async function changeStatus(cl: Cleaner, status: CleanerStatus) {
     const prevStatus = cl.status, prevActive = cl.is_active;
@@ -197,25 +242,55 @@ export function Cleaners() {
     if (error) { toastError(error); return; }
     await load();
     const where = data?.mode === "deactivated" ? "deactivated (kept for shift history)" : "removed";
-    toastOk(`${cl.full_name} ${where}.${data?.emailed ? " Email notification sent." : cl.email ? "" : " No email on file — not notified."}`);
+    toastOk(`${cl.full_name} ${where}. They were not notified.`);
   }
 
+  // Two independent filters: tier and status. "All" on either means no narrowing.
+  const byStatus = useMemo(
+    () => statusFilter === "all" ? cleaners : cleaners.filter((x) => x.status === statusFilter),
+    [cleaners, statusFilter],
+  );
+  const byTier = useMemo(
+    () => tierFilter === "all" ? cleaners : cleaners.filter((x) => x.tier === tierFilter),
+    [cleaners, tierFilter],
+  );
+
+  // Each chip row counts against the other filter's current selection.
   const counts = useMemo(() => ({
-    all: cleaners.length,
-    tier_1: cleaners.filter((c) => c.tier === "tier_1").length,
-    tier_2: cleaners.filter((c) => c.tier === "tier_2").length,
-    tier_3: cleaners.filter((c) => c.tier === "tier_3").length,
-  }), [cleaners]);
+    all: byStatus.length,
+    tier_1: byStatus.filter((c) => c.tier === "tier_1").length,
+    tier_2: byStatus.filter((c) => c.tier === "tier_2").length,
+    tier_3: byStatus.filter((c) => c.tier === "tier_3").length,
+  }), [byStatus]);
+
+  const statusCounts = useMemo(() => ({
+    all: byTier.length,
+    active: byTier.filter((c) => c.status === "active").length,
+    away: byTier.filter((c) => c.status === "away").length,
+    inactive: byTier.filter((c) => c.status === "inactive").length,
+  }), [byTier]);
 
   const activeCount = cleaners.filter((c) => c.is_active).length;
 
-  const chips: [string, string, string?][] = [
-    ["all", "All tiers"], ["tier_1", "Tier 1", c.greenMid], ["tier_2", "Tier 2", c.warn], ["tier_3", "Tier 3", c.danger],
+  const tierOptions: [string, string][] = [
+    ["all", "All tiers"], ["tier_1", "Tier 1"], ["tier_2", "Tier 2"], ["tier_3", "Tier 3"],
+  ];
+  const statusOptions: [string, string][] = [
+    ["all", "All statuses"],
+    ...(["active", "away", "inactive"] as CleanerStatus[]).map((s) => [s, CLEANER_STATUS_META[s].label] as [string, string]),
   ];
 
   if (loading) return <Spinner />;
 
-  const shown = (["tier_1", "tier_2", "tier_3"] as CleanerTier[]).filter((t) => tierFilter === "all" || tierFilter === t);
+  const byRate = (list: Cleaner[]) => [...list].sort((a, b) =>
+    (acceptRate(rel[b.id]?.accepted_count ?? 0, rel[b.id]?.declined_count ?? 0, rel[b.id]?.cancelled_count ?? 0) ?? -1) -
+    (acceptRate(rel[a.id]?.accepted_count ?? 0, rel[a.id]?.declined_count ?? 0, rel[a.id]?.cancelled_count ?? 0) ?? -1));
+
+  const visible = byStatus.filter((x) => tierFilter === "all" || x.tier === tierFilter);
+  const groups: { key: string; label: string; sub: string; rows: Cleaner[] }[] =
+    (["tier_1", "tier_2", "tier_3"] as CleanerTier[])
+      .filter((t) => tierFilter === "all" || tierFilter === t)
+      .map((t) => ({ key: t, label: TIER_LABEL[t], sub: TIER_SUB[t], rows: byRate(visible.filter((cl) => cl.tier === t)) }));
 
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
@@ -228,15 +303,13 @@ export function Cleaners() {
         ) : undefined} />
 
       <div style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 7, padding: "10px 24px" }}>
-        {chips.map(([k, l, dot]) => {
-          const on = tierFilter === k;
-          return (
-            <span key={k} onClick={() => setTierFilter(k)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? c.green : "#fff", color: on ? "#fff" : "#5d665f", border: on ? "none" : `1px solid ${c.chipBd}`, fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 20, cursor: "pointer" }}>
-              {dot && <span style={{ width: 6, height: 6, borderRadius: "50%", background: dot }} />}
-              {l} <span style={{ opacity: 0.8 }}>{counts[k as keyof typeof counts]}</span>
-            </span>
-          );
-        })}
+        {/* Two independent dropdowns — tier and status. "All" means no narrowing. */}
+        <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)} style={filterStyle}>
+          {tierOptions.map(([k, l]) => <option key={k} value={k}>{l} ({counts[k as keyof typeof counts]})</option>)}
+        </select>
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={filterStyle}>
+          {statusOptions.map(([k, l]) => <option key={k} value={k}>{l} ({statusCounts[k as keyof typeof statusCounts]})</option>)}
+        </select>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 11.5, color: c.faint }}>Sorted by tier, then reliability</span>
       </div>
@@ -253,17 +326,14 @@ export function Cleaners() {
             {canManage && <div style={{ flex: "none", width: COL.action }} />}
           </div>
 
-          {shown.map((t) => {
-            const inTier = cleaners.filter((cl) => cl.tier === t).sort((a, b) =>
-              (acceptRate(rel[b.id]?.accepted_count ?? 0, rel[b.id]?.declined_count ?? 0, rel[b.id]?.cancelled_count ?? 0) ?? -1) -
-              (acceptRate(rel[a.id]?.accepted_count ?? 0, rel[a.id]?.declined_count ?? 0, rel[a.id]?.cancelled_count ?? 0) ?? -1));
-            if (!inTier.length) return null;
+          {groups.map((g, gi) => {
+            if (!g.rows.length) return null;
             return (
-              <div key={t}>
-                <div style={{ padding: "7px 18px", background: c.sectionBg, borderTop: t !== shown[0] ? `1px solid ${c.sectionBd}` : "none", borderBottom: `1px solid ${c.sectionBd}` }}>
-                  <span style={{ fontSize: 10.5, letterSpacing: "0.07em", textTransform: "uppercase", color: "#2c6446", fontWeight: 700 }}>{TIER_LABEL[t]} · {TIER_SUB[t]}</span>
+              <div key={g.key}>
+                <div style={{ padding: "7px 18px", background: c.sectionBg, borderTop: gi > 0 ? `1px solid ${c.sectionBd}` : "none", borderBottom: `1px solid ${c.sectionBd}` }}>
+                  <span style={{ fontSize: 10.5, letterSpacing: "0.07em", textTransform: "uppercase", color: g.key === "inactive" ? c.muted2 : "#2c6446", fontWeight: 700 }}>{g.label} · {g.sub}</span>
                 </div>
-                {inTier.map((cl) => {
+                {g.rows.map((cl) => {
                   const r = rel[cl.id];
                   const acc = r?.accepted_count ?? 0, dec = r?.declined_count ?? 0, can = r?.cancelled_count ?? 0;
                   const rate = acceptRate(acc, dec, can);
@@ -326,7 +396,11 @@ export function Cleaners() {
               </div>
             );
           })}
-          {cleaners.length === 0 && <div style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>No cleaners yet.</div>}
+          {groups.every((g) => !g.rows.length) && (
+            <div style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>
+              {cleaners.length === 0 ? "No cleaners yet." : "No cleaners match these filters."}
+            </div>
+          )}
         </div>
       </div>
 
@@ -336,7 +410,7 @@ export function Cleaners() {
       {toRemove && (
         <ConfirmDialog
           title="Remove cleaner"
-          message={<>Remove <b>{toRemove.full_name}</b> from the roster? They will be notified by email.</>}
+          message={<>Remove <b>{toRemove.full_name}</b> from the roster? They stop receiving shift offers. No email or WhatsApp is sent — tell them yourself if they need to know.</>}
           confirmLabel="Remove cleaner"
           danger
           busy={removing === toRemove.id}

@@ -1,6 +1,6 @@
 // wipeover-notify — cron. Scans upcoming bookings for a >3-day gap between two
 // consecutive stays (a "wipeover" clean is needed in between), raises a venue_gap
-// alert (shown on the Dashboard + Alerts page) and emails Ashley the wipeover
+// alert (shown on the Dashboard + Alerts page) and emails Ashleigh the wipeover
 // notice — the old make.com scenario. Independently schedulable from the /schedule
 // page. Dedupes on the alert body so re-runs don't re-alert or re-email.
 import { serviceClient } from "../_shared/client.ts";
@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
       event_label: "Wipeover Cleaning",
       status: sent.ok ? "success" : "failed",
       summary: sent.ok
-        ? `Wipeover clean needed — ${gapWhole}-day gap between ${from} and ${to}. Email sent to Ashley.`
+        ? `Wipeover clean needed — ${gapWhole}-day gap between ${from} and ${to}. Email sent to Ashleigh.`
         : `Wipeover clean needed — ${gapWhole}-day gap between ${from} and ${to}. Alert raised, but the email failed to send.`,
       detail: { from, to, gap_days: gapWhole, emailed: sent.ok },
       source: SOURCE,

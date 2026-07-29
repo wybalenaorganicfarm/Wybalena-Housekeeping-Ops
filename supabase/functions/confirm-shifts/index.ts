@@ -1,4 +1,4 @@
-// confirm-shifts — app-facing. Ashley confirms / bulk-confirms pending shifts.
+// confirm-shifts — app-facing. Ashleigh confirms / bulk-confirms pending shifts.
 // Sets status=confirmed, confirmed_at/by and closes any open unconfirmed alerts.
 // Caller must be admin or super_admin (Spec §7.3).
 import { serviceClient } from "../_shared/client.ts";

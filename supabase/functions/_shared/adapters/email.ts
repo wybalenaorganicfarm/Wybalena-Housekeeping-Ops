@@ -8,7 +8,7 @@
 //
 // Env:
 //   GMAIL_SENDER     — the account that sends (e.g. ops@wybalena.com)   [confirmed: Gmail]
-//   ALERT_EMAIL_TO   — Ashley's inbox (default recipient for alerts)
+//   ALERT_EMAIL_TO   — Ashleigh's inbox (default recipient for alerts)
 //   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN — see google.ts
 import { getGoogleAccessToken, googleConfigured } from "./google.ts";
 

@@ -6,6 +6,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { fillVars, loadTemplate } from "../_shared/templates.ts";
+import { prettyDate } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "remind-nonresponders";
@@ -34,7 +35,7 @@ Deno.serve(async (req) => {
     if (!cleaner?.is_active) continue;
     const sh = (a as Record<string, any>).shifts;
     if (cleaner?.phone) {
-      const shiftDate = sh?.shift_date ?? "";
+      const shiftDate = prettyDate(sh?.shift_date ?? "");
       await sendMessage(
         cleaner.phone,
         tmpl?.body
