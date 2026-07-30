@@ -32,11 +32,16 @@ function Kpi({ icon, color, label, value, sub }: { icon: string; color: string; 
   );
 }
 
-// "SUN 23 AUG" — the date on each agenda card, now that days aren't grouped.
+// "Sun 23 Aug" — the date on each agenda card, now that days aren't grouped.
 function cardDate(dateStr: string): string {
   return new Date(dateStr + "T00:00:00")
-    .toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" })
-    .toUpperCase();
+    .toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+}
+
+// "10:00 am" — one line, am/pm kept.
+function cardTime(t: string): string {
+  const tp = timeParts(t);
+  return `${tp.hour}:${tp.min}`;
 }
 
 type View = "agenda" | "calendar";
@@ -179,17 +184,15 @@ export function Dashboard() {
             <div style={{ marginTop: 16 }}>
               {upcoming.map((s) => {
                 const status = statusOf(s);
-                const tp = timeParts(s.start_time);
                 const dots = staffingDots(staffing[s.id], s.required_cleaners);
                 const tierLabel = s.status === "staffing" && s.current_tier ? `${status.label} · ${TIER_LABEL[s.current_tier]}` : status.label;
                 const escalating = s.status === "staffing" && s.current_tier === "tier_2";
                 return (
-                  <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: "15px 16px", marginBottom: 10, borderLeft: `3px solid ${status.dot}`, display: "flex", alignItems: "center", gap: 18, cursor: "pointer" }}>
-                    <div style={{ textAlign: "center", flex: "none", width: 62 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: c.muted2, letterSpacing: "0.04em", marginBottom: 3 }}>{cardDate(s.shift_date)}</div>
-                      <div style={{ fontSize: 19, fontWeight: 700, lineHeight: 1.1 }}>{tp.hour}</div>
-                      <div style={{ fontSize: 11, color: c.muted2 }}>:{tp.min.split(" ")[0]}</div>
-                      <div style={{ fontSize: 10, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
+                  <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: "15px 16px", marginBottom: 10, borderLeft: `3px solid ${status.dot}`, display: "flex", alignItems: "center", gap: 16, cursor: "pointer" }}>
+                    <div style={{ flex: "none", width: 104, borderRight: `1px solid ${c.border2}`, paddingRight: 14 }}>
+                      <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: 700, lineHeight: 1.2 }}>{cardDate(s.shift_date)}</div>
+                      <div style={{ fontSize: 12.5, color: c.muted, marginTop: 3 }}>{cardTime(s.start_time)}</div>
+                      <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>

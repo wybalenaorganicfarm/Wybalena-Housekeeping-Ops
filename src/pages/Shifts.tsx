@@ -189,10 +189,11 @@ export function Shifts() {
                           <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>Partial venue</div>
                         )}
                       </div>
-                      {/* The booking this clean follows — click to open that booking. */}
+                      {/* The booking this clean follows — read-only here; the row
+                          always opens the shift. The booking is reachable from
+                          the shift drawer's "View booking for this shift". */}
                       <div
-                        onClick={(e) => { e.stopPropagation(); if (booking) setBookingDrawer(booking); else setDrawer(s); }}
-                        title={booking ? "View booking for this shift" : undefined}
+                        onClick={() => setDrawer(s)}
                         style={{ flex: 1, minWidth: 0, cursor: "pointer", paddingRight: 12 }}
                       >
                         {booking ? (
