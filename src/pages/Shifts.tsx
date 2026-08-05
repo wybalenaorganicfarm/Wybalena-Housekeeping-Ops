@@ -20,7 +20,7 @@ type View = "list" | "calendar";
 
 // Same table shape as the Bookings page. Columns: date · time · type · booking
 // (the check-out this clean is linked to) · staffing · action.
-const COL = { check: 28, date: 150, time: 96, type: 140, staffing: 172, action: 110 };
+const COL = { check: 28, date: 150, time: 96, type: 140, notes: 190, staffing: 172, action: 110 };
 
 export function Shifts() {
   const { canEdit } = useAuth();
@@ -61,7 +61,8 @@ export function Shifts() {
     const q = search.trim().toLowerCase();
     if (!q) return visible;
     return visible.filter((s) =>
-      (shiftBookingName(s, bookings) + " " + dayDateMonth(s.shift_date) + " " + (s.source ?? "") + " " + typeLabel(s)).toLowerCase().includes(q));
+      (shiftBookingName(s, bookings) + " " + dayDateMonth(s.shift_date) + " " + (s.source ?? "")
+        + " " + typeLabel(s) + " " + (s.special_instructions ?? "")).toLowerCase().includes(q));
   }, [visible, search, bookings]);
 
   // Grouped by week so the green header states the range the shifts fall in —
@@ -145,6 +146,7 @@ export function Shifts() {
               <div style={{ flex: "none", width: COL.time }}>Time</div>
               <div style={{ flex: "none", width: COL.type }}>Type</div>
               <div style={{ flex: 1 }}>Booking</div>
+              <div style={{ flex: "none", width: COL.notes }}>Notes</div>
               <div style={{ flex: "none", width: COL.staffing }}>Staffing</div>
               <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>Action</div>
             </div>
@@ -205,6 +207,22 @@ export function Shifts() {
                           <div style={{ fontSize: 13, color: c.muted2 }}>No linked booking</div>
                         )}
                       </div>
+                      {/* Notes carry the same weight as every other shift field,
+                          so the text previews inline rather than hiding behind
+                          the drawer. Full note (and editing) is in the drawer. */}
+                      <div
+                        onClick={() => setDrawer(s)}
+                        title={s.special_instructions ?? undefined}
+                        style={{ flex: "none", width: COL.notes, minWidth: 0, cursor: "pointer", paddingRight: 12 }}
+                      >
+                        {s.special_instructions ? (
+                          <div style={{ fontSize: 12, color: c.body, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.4 }}>
+                            {s.special_instructions}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: "#c4bdb0" }}>—</span>
+                        )}
+                      </div>
                       <div style={{ flex: "none", width: COL.staffing, display: "flex", alignItems: "center", gap: 10, paddingRight: 12 }}>
                         <div style={{ flex: 1, display: "flex", gap: 2 }}>
                           {dots.map((d, i) => <span key={i} style={{ height: 4, flex: 1, borderRadius: 2, background: d }} />)}
@@ -240,7 +258,9 @@ export function Shifts() {
       {bookingDrawer && (
         <BookingDrawer
           booking={bookingDrawer}
-          shift={shifts.find((s) => s.booking_id === bookingDrawer.id)}
+          shifts={shifts
+            .filter((s) => s.booking_id === bookingDrawer.id)
+            .sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time))}
           onClose={() => setBookingDrawer(null)}
           onViewShift={(s) => { setBookingDrawer(null); setDrawer(s); }}
         />

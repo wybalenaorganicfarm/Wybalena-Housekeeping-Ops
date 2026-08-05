@@ -1,6 +1,6 @@
 import { c, font } from "../theme";
 import { Icon } from "./Icon";
-import { dateTimeLabel, statusOf } from "../lib/format";
+import { dateTimeLabel, shiftDateTimeLabel, shiftTitle, statusOf } from "../lib/format";
 import type { Booking, Shift } from "../lib/types";
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -12,10 +12,11 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export function BookingDrawer({ booking, shift, onClose, onViewShift }: {
-  booking: Booking; shift?: Shift; onClose: () => void; onViewShift: (s: Shift) => void;
+// A booking can carry more than one clean — e.g. a checkout clean plus a
+// mid-retreat clean — so every linked shift is listed, not just the first.
+export function BookingDrawer({ booking, shifts, onClose, onViewShift }: {
+  booking: Booking; shifts: Shift[]; onClose: () => void; onViewShift: (s: Shift) => void;
 }) {
-  const ss = shift ? statusOf(shift) : null;
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(20,30,25,.34)", zIndex: 55, display: "flex", justifyContent: "flex-end" }}>
@@ -51,22 +52,28 @@ export function BookingDrawer({ booking, shift, onClose, onViewShift }: {
             </div>
           </div>
 
-          <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Cleaning shift</div>
-          <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: shift ? "14px 16px" : 16 }}>
-            {shift && ss ? (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: ss.bg, color: ss.fg, fontSize: 10.5, fontWeight: 600, padding: "2px 9px", borderRadius: 20 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: ss.dot }} />{ss.label}</span>
-                  <span style={{ fontSize: 12.5, color: c.muted2 }}>{dateTimeLabel(shift.shift_date + "T" + shift.start_time)}</span>
-                </div>
-                <button onClick={() => onViewShift(shift)} style={{ width: "100%", background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                  View shift for this booking <Icon name="chevronRight" size={15} strokeWidth={2.2} />
-                </button>
-              </>
-            ) : (
-              <div style={{ fontSize: 12.5, color: c.faint, textAlign: "center", padding: "6px 0" }}>No cleaning shift linked to this booking.</div>
-            )}
+          <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>
+            Cleaning shift{shifts.length > 1 ? `s · ${shifts.length}` : ""}
           </div>
+          {shifts.length === 0 ? (
+            <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 12.5, color: c.faint, textAlign: "center", padding: "6px 0" }}>No cleaning shift linked to this booking.</div>
+            </div>
+          ) : shifts.map((s) => {
+            const ss = statusOf(s);
+            return (
+              <div key={s.id} style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: "14px 16px", marginBottom: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{shiftTitle(s)}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: ss.bg, color: ss.fg, fontSize: 10.5, fontWeight: 600, padding: "2px 9px", borderRadius: 20 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: ss.dot }} />{ss.label}</span>
+                  <span style={{ fontSize: 12.5, color: c.muted2 }}>{shiftDateTimeLabel(s.shift_date, s.start_time)}</span>
+                </div>
+                <button onClick={() => onViewShift(s)} style={{ width: "100%", background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                  View this shift <Icon name="chevronRight" size={15} strokeWidth={2.2} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

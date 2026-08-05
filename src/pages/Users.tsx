@@ -22,7 +22,6 @@ const ROLE_BADGE: Record<UserRole, { bg: string; fg: string; dot: string; shield
 const STATUS_META: Record<UserStatus, { label: string; color: string; dot: string }> = {
   invite_sent: { label: "Invite sent", color: "#9a7320", dot: "#C8821A" },
   active: { label: "Active", color: "#2c6446", dot: "#3D8B5F" },
-  away: { label: "Away", color: "#21564b", dot: "#2f7068" },
   inactive: { label: "Inactive", color: c.muted2, dot: "#c4bdb0" },
 };
 
@@ -254,7 +253,7 @@ export function Users() {
           {filtered.map((u) => {
             const b = ROLE_BADGE[u.role];
             const isYou = u.id === profile?.id;
-            const live = u.status === "active" || u.status === "away";
+            const live = u.status === "active";
             const avBg = u.role === "admin" ? c.greenMid : live ? c.warn : "#c4bdb0";
             return (
               <div key={u.id} style={{ display: "flex", alignItems: "center", padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: live ? 1 : 0.72 }}>
@@ -288,7 +287,6 @@ export function Users() {
                   ) : (
                     <select value={u.status} disabled={saving[u.id]} onChange={(e) => changeStatus(u, e.target.value as UserStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: STATUS_META[u.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
                       <option value="active">Active</option>
-                      <option value="away">Away</option>
                       <option value="inactive">Inactive</option>
                     </select>
                   )}

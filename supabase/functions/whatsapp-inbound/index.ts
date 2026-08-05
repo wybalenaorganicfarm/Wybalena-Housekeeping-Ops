@@ -7,7 +7,8 @@
 // cleaner (phone) + offer (offer_code) -> apply accept/decline/cancel -> reply.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { parseInbound, sendAcceptConfirm, sendCancelConfirm, sendDeclineConfirm, sendMessage } from "../_shared/adapters/whatsapp.ts";
+import { parseInbound, sendAcceptConfirm, sendCancelConfirm, sendDeclineConfirm, sendMessage, sendOutcome } from "../_shared/adapters/whatsapp.ts";
+import { prettyDate, prettyDateTime } from "../_shared/datetime.ts";
 import { acceptOffer, cancelOffer, declineOffer } from "../_shared/engine.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
@@ -179,7 +180,12 @@ Deno.serve(async (req) => {
 
     // Snapshot the shift context + this assignment's current state BEFORE acting.
     const ctx = await shiftContext(sb, assignmentId);
-    const dateLabel = ctx.shiftDate ?? "—";
+    // Spelled out for admin-facing alerts/logs too — never raw ISO.
+    const dateLabel = ctx.shiftDate ? prettyDate(ctx.shiftDate) : "—";
+    // Passed to every cleaner-facing confirmation so the reply names its shift.
+    const shiftRef = { shift_date: ctx.shiftDate, start_time: ctx.shiftTime };
+    // "Sunday 23rd August 2026 at 10:00am" — for one-line replies.
+    const shiftPhrase = ctx.shiftDate ? prettyDateTime(ctx.shiftDate, ctx.shiftTime ?? "") : "that shift";
     const { data: assn } = await sb
       .from("shift_assignments").select("status").eq("id", assignmentId).maybeSingle();
     const alreadyAccepted = assn?.status === "accepted";
@@ -194,13 +200,13 @@ Deno.serve(async (req) => {
     switch (r.action) {
       case "accept": {
         if (alreadyAccepted) {
-          await sendAcceptConfirm(cleaner.phone, assignmentId, sb);
+          await sendAcceptConfirm(cleaner.phone, assignmentId, sb, shiftRef);
           results.push({ id: r.providerMessageId, action: "accept", result: "already_accepted" });
           break;
         }
         const res = await acceptOffer(sb, assignmentId);
         if (res === "accepted") {
-          const conf = await sendAcceptConfirm(cleaner.phone, assignmentId, sb);
+          const conf = await sendAcceptConfirm(cleaner.phone, assignmentId, sb, shiftRef);
           // Store the confirmation's message id so a later Cancel tap on it resolves.
           if (conf?.providerMessageId) {
             await sb.from("shift_assignments").update({ confirm_message_id: conf.providerMessageId }).eq("id", assignmentId);
@@ -211,10 +217,10 @@ Deno.serve(async (req) => {
             await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. Remaining offered cleaners notified.`);
           }
         } else if (res === "already_full") {
-          await sendMessage(cleaner.phone, "Sorry, this shift just filled up and is now fully staffed. Thanks for responding!");
+          await sendMessage(cleaner.phone, `Sorry, the shift on ${shiftPhrase} just filled up and is now fully staffed. Thanks for responding!`);
           await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. ${cleaner.full_name}'s acceptance came in after it filled.`);
         } else {
-          await sendMessage(cleaner.phone, "Sorry, that shift offer is no longer open.");
+          await sendMessage(cleaner.phone, `Sorry, the shift offer for ${shiftPhrase} is no longer open.`);
         }
         results.push({ id: r.providerMessageId, action: "accept", result: res });
         break;
@@ -222,7 +228,7 @@ Deno.serve(async (req) => {
       case "decline": {
         // Can't decline after accepting — give it up via Cancel instead.
         if (alreadyAccepted) {
-          await sendMessage(cleaner.phone, "You've already accepted this shift. If you can't make it, tap the *Cancel* button on your confirmation message.");
+          await sendMessage(cleaner.phone, `You've already accepted the shift on ${shiftPhrase}. If you can't make it, tap the *Cancel* button on your confirmation message.`);
           results.push({ id: r.providerMessageId, action: "decline", result: "blocked_already_accepted" });
           break;
         }
@@ -234,7 +240,7 @@ Deno.serve(async (req) => {
         }
         // Re-verify before declining. Store the prompt's id separately so a later
         // reply to the original offer still resolves.
-        const res = await sendDeclineConfirm(cleaner.phone, assignmentId, sb);
+        const res = await sendDeclineConfirm(cleaner.phone, assignmentId, sb, shiftRef);
         if (res?.providerMessageId) {
           await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
         }
@@ -243,7 +249,7 @@ Deno.serve(async (req) => {
       }
       case "decline_confirm": { // tapped "Yes"
         await declineOffer(sb, assignmentId);
-        await sendMessage(cleaner.phone, "Shift Declined");
+        await sendOutcome(cleaner.phone, "declined_confirmation", "Shift Declined", sb, shiftRef);
         await logResponse("response.declined", "success", `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list.`);
         results.push({ id: r.providerMessageId, action: "decline_confirm" });
         break;
@@ -267,7 +273,7 @@ Deno.serve(async (req) => {
         }
         // Confirm before releasing the spot. Store the prompt's id separately so the
         // Yes/No reply resolves back to this assignment.
-        const res = await sendCancelConfirm(cleaner.phone, assignmentId, sb);
+        const res = await sendCancelConfirm(cleaner.phone, assignmentId, sb, shiftRef);
         if (res?.providerMessageId) {
           await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
         }
@@ -282,7 +288,7 @@ Deno.serve(async (req) => {
           break;
         }
         await cancelOffer(sb, assignmentId);
-        await sendMessage(cleaner.phone, "Shift Cancelled");
+        await sendOutcome(cleaner.phone, "cancelled_confirmation", "Shift Cancelled", sb, shiftRef);
         // Raise an alert so the admin sees it on the Dashboard + Alerts and can
         // step in / assign manually. Dedupe one open alert per shift.
         if (ctx.shiftId) {

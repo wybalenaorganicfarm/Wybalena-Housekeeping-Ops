@@ -285,8 +285,8 @@ export async function setUserPhone(userId: string, phone: string | null): Promis
   return error ? friendlyError(error.message) : null;
 }
 
-// Keep a team leader's cleaner row in sync with their user status. away/inactive
-// stop offers (is_active only true when active).
+// Keep a team leader's cleaner row in sync with their user status. inactive
+// stops offers (is_active only true when active).
 export async function setCleanerStatusByEmail(email: string, status: string): Promise<void> {
   await supabase.from("cleaners")
     .update({ status, is_active: status === "active" } as never)
@@ -315,6 +315,37 @@ export async function updateCronSchedule(fn: string, schedule: string, active: b
   if (error) return error;
   if (data?.error) return data.error;
   return null;
+}
+
+// ---- Booking sync date range (app_settings) --------------------------------
+// How far ahead the Weekly Booking Sync looks and how long a window it covers.
+// RLS restricts writes to admin / operations_manager, so this goes direct rather
+// than through an Edge Function. sync-bookings falls back to 5 weeks / 7 days if
+// the row is ever missing, so a read failure here is display-only.
+
+export interface BookingSyncRange { lead_weeks: number; window_days: number }
+
+export const BOOKING_SYNC_RANGE_DEFAULT: BookingSyncRange = { lead_weeks: 5, window_days: 7 };
+export const BOOKING_SYNC_RANGE_LIMITS = {
+  lead_weeks: { min: 0, max: 52 },
+  window_days: { min: 1, max: 90 },
+};
+
+export async function getBookingSyncRange(): Promise<BookingSyncRange> {
+  const { data, error } = await supabase
+    .from("app_settings").select("value").eq("key", "booking_sync_range").maybeSingle();
+  if (error || !data) return BOOKING_SYNC_RANGE_DEFAULT;
+  const v = (data as { value: Partial<BookingSyncRange> }).value ?? {};
+  return {
+    lead_weeks: Number(v.lead_weeks ?? BOOKING_SYNC_RANGE_DEFAULT.lead_weeks),
+    window_days: Number(v.window_days ?? BOOKING_SYNC_RANGE_DEFAULT.window_days),
+  };
+}
+
+export async function updateBookingSyncRange(range: BookingSyncRange): Promise<string | null> {
+  const { error } = await supabase
+    .from("app_settings").update({ value: range } as never).eq("key", "booking_sync_range");
+  return error ? friendlyError(error.message) : null;
 }
 
 // ---- Connections / integration health (admin) ------------------------------

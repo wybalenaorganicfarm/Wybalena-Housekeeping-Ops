@@ -8,16 +8,25 @@ import { BookingDrawer } from "../components/BookingDrawer";
 import { BookingCalendar } from "../components/BookingCalendar";
 import { AssignModal } from "../components/AssignModal";
 import { getBookings, getShifts } from "../lib/api";
-import { dateTimeLabel, statusOf } from "../lib/format";
+import { dateTimeLabel, shiftDateTimeLabel, shortType, statusOf } from "../lib/format";
 import type { Booking, Shift } from "../lib/types";
 
 type Filter = "all" | "active" | "cancelled";
 type View = "list" | "calendar";
-const COL = { dates: 200, nights: 80, guests: 80, shift: 150, status: 110 };
+const COL = { date: 130, dates: 200, nights: 80, guests: 80, shift: 190, status: 110 };
+
+// "Sun 23 Aug 2026" — the booking's own date column (from check-in).
+function bookingDate(d: string): string {
+  return new Date(d).toLocaleDateString("en-AU", {
+    weekday: "short", day: "numeric", month: "short", year: "numeric",
+  });
+}
 
 export function Bookings() {
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [shiftByBooking, setShiftByBooking] = useState<Record<string, Shift>>({});
+  // A booking can carry more than one clean (e.g. a checkout clean AND a
+  // mid-retreat clean), so every linked shift is kept, in date order.
+  const [shiftsByBooking, setShiftsByBooking] = useState<Record<string, Shift[]>>({});
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [view, setView] = useState<View>("list");
@@ -29,9 +38,12 @@ export function Bookings() {
   async function load() {
     const [bs, ss] = await Promise.all([getBookings(), getShifts()]);
     setBookings(bs);
-    const map: Record<string, Shift> = {};
-    for (const s of ss) if (s.booking_id) map[s.booking_id] = s;
-    setShiftByBooking(map);
+    const map: Record<string, Shift[]> = {};
+    for (const s of ss) if (s.booking_id) (map[s.booking_id] ??= []).push(s);
+    for (const list of Object.values(map)) {
+      list.sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time));
+    }
+    setShiftsByBooking(map);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -49,9 +61,15 @@ export function Bookings() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return byFilter;
-    return byFilter.filter((b) =>
-      ((b.guest_name ?? "") + " " + (b.gcal_event_id ?? "") + " " + dateTimeLabel(b.check_in) + " " + dateTimeLabel(b.check_out)).toLowerCase().includes(q));
-  }, [byFilter, search]);
+    return byFilter.filter((b) => {
+      const shiftText = (shiftsByBooking[b.id] ?? [])
+        .map((s) => shiftDateTimeLabel(s.shift_date, s.start_time) + " " + shortType(s))
+        .join(" ");
+      return ((b.guest_name ?? "") + " " + (b.gcal_event_id ?? "") + " " + bookingDate(b.check_in)
+        + " " + dateTimeLabel(b.check_in) + " " + dateTimeLabel(b.check_out) + " " + shiftText)
+        .toLowerCase().includes(q);
+    });
+  }, [byFilter, search, shiftsByBooking]);
 
   const chips: [Filter, string][] = [["all", "All"], ["active", "Active"], ["cancelled", "Cancelled"]];
 
@@ -108,6 +126,7 @@ export function Bookings() {
           <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
               <div style={{ flex: 1 }}>Guest / Booking</div>
+              <div style={{ flex: "none", width: COL.date }}>Date</div>
               <div style={{ flex: "none", width: COL.dates }}>Check-in</div>
               <div style={{ flex: "none", width: COL.dates }}>Check-out</div>
               <div style={{ flex: "none", width: COL.nights }}>Nights</div>
@@ -118,22 +137,42 @@ export function Bookings() {
 
             {filtered.length === 0 && <div style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>{search ? "No bookings match your search." : "No bookings."}</div>}
             {filtered.map((b) => {
-              const shift = shiftByBooking[b.id];
-              const ss = shift ? statusOf(shift) : null;
+              const linked = shiftsByBooking[b.id] ?? [];
               return (
-                <div key={b.id} onClick={() => setBookingDrawer(b)} title="View booking details" style={{ display: "flex", alignItems: "center", padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: b.is_cancelled ? 0.65 : 1, cursor: "pointer" }}>
+                <div key={b.id} onClick={() => setBookingDrawer(b)} title="View booking details" style={{ display: "flex", alignItems: "flex-start", padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: b.is_cancelled ? 0.65 : 1, cursor: "pointer" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.guest_name || "Unnamed booking"}</div>
                     <div style={{ fontSize: 11.5, color: c.faint }}>{b.gcal_event_id}</div>
                   </div>
+                  <div style={{ flex: "none", width: COL.date, fontSize: 12.5, color: c.body }}>{bookingDate(b.check_in)}</div>
                   <div style={{ flex: "none", width: COL.dates, fontSize: 12, color: "#5d665f" }}>{dateTimeLabel(b.check_in)}</div>
                   <div style={{ flex: "none", width: COL.dates, fontSize: 12, color: "#5d665f" }}>{dateTimeLabel(b.check_out)}</div>
                   <div style={{ flex: "none", width: COL.nights, fontSize: 12.5, color: c.body }}>{b.nights}</div>
                   <div style={{ flex: "none", width: COL.guests, fontSize: 12.5, color: c.body }}>{b.guest_count ?? "—"}</div>
+                  {/* Every linked clean — day date month time, its type, and its
+                      state — matching the Airtable column. A booking can carry
+                      more than one (checkout clean + mid-retreat), so they stack.
+                      Clicking one opens that shift rather than the booking. */}
                   <div style={{ flex: "none", width: COL.shift }}>
-                    {ss
-                      ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: ss.bg, color: ss.fg, fontSize: 10.5, fontWeight: 600, padding: "2px 9px", borderRadius: 20 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: ss.dot }} />{ss.label}</span>
-                      : <span style={{ fontSize: 12, color: c.faint }}>No shift</span>}
+                    {linked.length === 0 ? (
+                      <span style={{ fontSize: 12, color: c.faint }}>No shift</span>
+                    ) : linked.map((s, i) => {
+                      const ss = statusOf(s);
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={(e) => { e.stopPropagation(); setDrawer(s); }}
+                          title="View this shift"
+                          style={{ marginTop: i === 0 ? 0 : 9 }}
+                        >
+                          <div style={{ fontSize: 12.5, color: c.body }}>{shiftDateTimeLabel(s.shift_date, s.start_time)}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 11, color: c.muted2 }}>{shortType(s)}</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: ss.bg, color: ss.fg, fontSize: 10.5, fontWeight: 600, padding: "2px 9px", borderRadius: 20 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: ss.dot }} />{ss.label}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div style={{ flex: "none", width: COL.status, textAlign: "right" }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: b.is_cancelled ? "#a8392b" : "#2c6446" }}>
@@ -150,7 +189,7 @@ export function Bookings() {
       {bookingDrawer && (
         <BookingDrawer
           booking={bookingDrawer}
-          shift={shiftByBooking[bookingDrawer.id]}
+          shifts={shiftsByBooking[bookingDrawer.id] ?? []}
           onClose={() => setBookingDrawer(null)}
           onViewShift={(s) => { setBookingDrawer(null); setDrawer(s); }}
         />

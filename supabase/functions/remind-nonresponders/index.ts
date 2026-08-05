@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
   for (const a of pending ?? []) {
     const { data: cleaner } = await sb
       .from("cleaners").select("full_name, phone, is_active").eq("id", a.cleaner_id).maybeSingle();
-    // Don't remind a cleaner who is currently Away/Inactive. Skip entirely (no
+    // Don't remind a cleaner who is currently Inactive. Skip entirely (no
     // stamp) so the offer can still be reminded if they reactivate later.
     if (!cleaner?.is_active) continue;
     const sh = (a as Record<string, any>).shifts;

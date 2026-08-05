@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(npx tsc --noEmit -p tsconfig.json)"
+      "PowerShell(npx tsc --noEmit -p tsconfig.json)",
+      "PowerShell($d = \\(Get-Command deno -ErrorAction SilentlyContinue\\); if \\($d\\) { \"deno: $\\($d.Source\\)\" } else { \"deno not installed\" })"
     ]
   }
 }

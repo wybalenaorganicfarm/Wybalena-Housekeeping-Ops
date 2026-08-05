@@ -3,10 +3,13 @@ import { c, font } from "../theme";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
 import { Button, Modal, Spinner } from "../components/ui";
-import { getCronSchedules, updateCronSchedule, type CronJob } from "../lib/api";
+import {
+  BOOKING_SYNC_RANGE_DEFAULT, BOOKING_SYNC_RANGE_LIMITS, getBookingSyncRange, getCronSchedules,
+  updateBookingSyncRange, updateCronSchedule, type BookingSyncRange, type CronJob,
+} from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import {
-  describe, parseCron, toCron, toTimeInput, WEEKDAY_SHORT, tzLabel,
+  describe, nextCronRun, parseCron, toCron, toTimeInput, WEEKDAY_SHORT, tzLabel,
   type Freq, type ScheduleForm,
 } from "../lib/cron";
 
@@ -34,14 +37,17 @@ export function Schedule() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Row | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [range, setRange] = useState<BookingSyncRange>(BOOKING_SYNC_RANGE_DEFAULT);
+  const [editRange, setEditRange] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const list = await getCronSchedules();
+      const [list, r] = await Promise.all([getCronSchedules(), getBookingSyncRange()]);
       const map: Record<string, CronJob> = {};
       for (const j of list) map[j.fn] = j;
       setJobs(map);
+      setRange(r);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Failed to load schedules");
     } finally {
@@ -75,6 +81,14 @@ export function Schedule() {
     return null;
   }
 
+  async function saveRange(next: BookingSyncRange) {
+    const err = await updateBookingSyncRange(next);
+    if (err) return err;
+    toastOk("Booking sync date range updated.");
+    await load();
+    return null;
+  }
+
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
       <PageHeader
@@ -99,8 +113,15 @@ export function Schedule() {
             <>
               <Section title="Weekly booking & staffing cycle" hint="Runs once a week, in the order shown.">
                 {weekly.map((r, i) => (
-                  <JobRow key={r.fn} row={r} step={i + 1} busy={toggling === r.fn}
-                    onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />
+                  <div key={r.fn}>
+                    <JobRow row={r} step={i + 1} busy={toggling === r.fn}
+                      onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />
+                    {/* The sync's date range sits with the job it belongs to,
+                        rather than in a separate settings screen. */}
+                    {r.fn === "sync-bookings" && (
+                      <RangeRow range={range} schedule={r.schedule} onEdit={() => setEditRange(true)} />
+                    )}
+                  </div>
                 ))}
               </Section>
 
@@ -117,6 +138,9 @@ export function Schedule() {
 
       {editing && (
         <EditModal row={editing} onClose={() => setEditing(null)} onSave={save} />
+      )}
+      {editRange && (
+        <RangeModal range={range} onClose={() => setEditRange(false)} onSave={saveRange} />
       )}
     </div>
   );
@@ -158,6 +182,120 @@ function JobRow({ row, step, busy, onEdit, onToggle }: {
       <Toggle on={row.active} busy={busy} onClick={onToggle} />
       <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit</Button>
     </div>
+  );
+}
+
+// The window the sync covers, anchored to the run day: it starts `lead_weeks`
+// after the run and lasts `window_days`. Mirrors the arithmetic in
+// sync-bookings/index.ts, so the preview is what the next run will actually do.
+function windowFor(range: BookingSyncRange, runAt: Date): { from: Date; to: Date } {
+  const DAY = 86400000;
+  const lead = range.lead_weeks * 7;
+  return {
+    from: new Date(runAt.getTime() + lead * DAY),
+    to: new Date(runAt.getTime() + (lead + range.window_days - 1) * DAY),
+  };
+}
+
+const fmtDay = (d: Date) =>
+  d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+
+function RangeRow({ range, schedule, onEdit }: {
+  range: BookingSyncRange; schedule: string | null; onEdit: () => void;
+}) {
+  const next = schedule ? nextCronRun(schedule) : null;
+  const win = next ? windowFor(range, next) : null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px 14px 52px", borderTop: `1px dashed ${c.rowBd}`, background: "#fcfbf8" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.05em" }}>Date range</div>
+        <div style={{ fontSize: 12.5, color: c.body, marginTop: 4, lineHeight: 1.5 }}>
+          Looks <b>{range.lead_weeks} week{range.lead_weeks === 1 ? "" : "s"}</b> ahead and covers{" "}
+          <b>{range.window_days} day{range.window_days === 1 ? "" : "s"}</b>.
+        </div>
+        <div style={{ fontSize: 12, color: c.faint, marginTop: 3 }}>
+          {win
+            ? <>Next run syncs {fmtDay(win.from)} → {fmtDay(win.to)}</>
+            : "Schedule this job to see the window it will cover."}
+        </div>
+      </div>
+      <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit range</Button>
+    </div>
+  );
+}
+
+function RangeModal({ range, onClose, onSave }: {
+  range: BookingSyncRange; onClose: () => void; onSave: (r: BookingSyncRange) => Promise<string | null>;
+}) {
+  const [lead, setLead] = useState(String(range.lead_weeks));
+  const [days, setDays] = useState(String(range.window_days));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const L = BOOKING_SYNC_RANGE_LIMITS;
+  const leadN = Number(lead);
+  const daysN = Number(days);
+  const leadOk = Number.isInteger(leadN) && leadN >= L.lead_weeks.min && leadN <= L.lead_weeks.max;
+  const daysOk = Number.isInteger(daysN) && daysN >= L.window_days.min && daysN <= L.window_days.max;
+  const win = leadOk && daysOk
+    ? windowFor({ lead_weeks: leadN, window_days: daysN }, new Date())
+    : null;
+
+  async function submit() {
+    if (!leadOk) { setErr(`Look ahead must be a whole number between ${L.lead_weeks.min} and ${L.lead_weeks.max} weeks.`); return; }
+    if (!daysOk) { setErr(`Cover must be a whole number between ${L.window_days.min} and ${L.window_days.max} days.`); return; }
+    setSaving(true); setErr(null);
+    const e = await onSave({ lead_weeks: leadN, window_days: daysN });
+    setSaving(false);
+    if (e) { setErr(e); return; }
+    onClose();
+  }
+
+  const field: React.CSSProperties = {
+    width: 90, boxSizing: "border-box", padding: "8px 10px", fontSize: 13,
+    border: `1px solid ${c.border3}`, borderRadius: 7, outline: "none", color: c.ink, background: "#fff",
+  };
+
+  return (
+    <Modal title="Booking sync date range" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: c.muted, lineHeight: 1.55, marginBottom: 16 }}>
+        The window is anchored to the day the job runs, so it rolls forward automatically each week —
+        you only need to change these when the lead time itself changes.
+      </div>
+
+      <div style={{ display: "flex", gap: 18, marginBottom: 16 }}>
+        <label style={{ display: "block" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Look ahead</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="number" min={L.lead_weeks.min} max={L.lead_weeks.max} value={lead}
+              onChange={(e) => setLead(e.target.value)} style={field} />
+            <span style={{ fontSize: 12.5, color: c.muted }}>weeks</span>
+          </div>
+        </label>
+        <label style={{ display: "block" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Cover</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="number" min={L.window_days.min} max={L.window_days.max} value={days}
+              onChange={(e) => setDays(e.target.value)} style={field} />
+            <span style={{ fontSize: 12.5, color: c.muted }}>days</span>
+          </div>
+        </label>
+      </div>
+
+      <div style={{ background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: c.body, lineHeight: 1.5 }}>
+        {win
+          ? <>A run today would sync <b>{fmtDay(win.from)}</b> → <b>{fmtDay(win.to)}</b>.</>
+          : "Enter whole numbers to preview the window."}
+      </div>
+
+      {err && <div style={{ color: c.danger, fontSize: 12.5, marginTop: 12 }}>{err}</div>}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 18 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={submit} loading={saving}>Save range</Button>
+      </div>
+    </Modal>
   );
 }
 

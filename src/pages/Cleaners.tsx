@@ -172,15 +172,14 @@ function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cl
 
 const CLEANER_STATUS_META: Record<CleanerStatus, { label: string; color: string; dot: string }> = {
   active: { label: "Active", color: "#2c6446", dot: "#3D8B5F" },
-  away: { label: "Away", color: "#21564b", dot: "#2f7068" },
   inactive: { label: "Inactive", color: "#8a8478", dot: "#c4bdb0" },
 };
 
 const COL = { phone: 120, email: 180, status: 116, rel: 168, rate: 84, action: 40 };
 
 // The tier/status selection survives refreshes and tab changes — an admin
-// working through, say, the Away list shouldn't be reset to "All" every time
-// they leave the page.
+// working through, say, the Inactive list shouldn't be reset to "All" every
+// time they leave the page.
 const TIER_KEY = "cleaners.tierFilter";
 const STATUS_KEY = "cleaners.statusFilter";
 function storedFilter(key: string, valid: string[]): string {
@@ -204,7 +203,7 @@ export function Cleaners() {
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
   const [loading, setLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState<string>(() => storedFilter(TIER_KEY, ["all", "tier_1", "tier_2", "tier_3"]));
-  const [statusFilter, setStatusFilter] = useState<string>(() => storedFilter(STATUS_KEY, ["all", "active", "away", "inactive"]));
+  const [statusFilter, setStatusFilter] = useState<string>(() => storedFilter(STATUS_KEY, ["all", "active", "inactive"]));
   const [showAdd, setShowAdd] = useState(false);
 
   const [removing, setRemoving] = useState<string | null>(null);
@@ -266,7 +265,6 @@ export function Cleaners() {
   const statusCounts = useMemo(() => ({
     all: byTier.length,
     active: byTier.filter((c) => c.status === "active").length,
-    away: byTier.filter((c) => c.status === "away").length,
     inactive: byTier.filter((c) => c.status === "inactive").length,
   }), [byTier]);
 
@@ -277,7 +275,7 @@ export function Cleaners() {
   ];
   const statusOptions: [string, string][] = [
     ["all", "All statuses"],
-    ...(["active", "away", "inactive"] as CleanerStatus[]).map((s) => [s, CLEANER_STATUS_META[s].label] as [string, string]),
+    ...(["active", "inactive"] as CleanerStatus[]).map((s) => [s, CLEANER_STATUS_META[s].label] as [string, string]),
   ];
 
   if (loading) return <Spinner />;
@@ -358,7 +356,6 @@ export function Cleaners() {
                           <>
                           <select value={cl.status} disabled={saving[cl.id]} onChange={(e) => changeStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[cl.id] ? "wait" : "pointer", outline: "none" }}>
                             <option value="active">Active</option>
-                            <option value="away">Away</option>
                             <option value="inactive">Inactive</option>
                           </select>
                           {saving[cl.id] && <Spin size={13} color={c.muted2} />}

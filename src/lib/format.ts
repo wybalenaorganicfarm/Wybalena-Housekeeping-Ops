@@ -92,6 +92,22 @@ export function dateTimeLabel(d: string): string {
   });
 }
 
+// 1st / 2nd / 3rd / 4th … 11th–13th are the exceptions.
+function ordinal(d: number): string {
+  if (d % 100 >= 11 && d % 100 <= 13) return `${d}th`;
+  return `${d}${["th", "st", "nd", "rd"][d % 10] ?? "th"}`;
+}
+
+// "Mon 24th Aug 10:00am" — the linked shift itself (day date month time), as
+// the Airtable "Cleaning Shifts" column showed it.
+export function shiftDateTimeLabel(dateStr: string, startTime: string): string {
+  const dt = new Date(dateStr + "T00:00:00");
+  const wd = dt.toLocaleDateString("en-AU", { weekday: "short" });
+  const mon = dt.toLocaleDateString("en-AU", { month: "short" });
+  const tp = timeParts(startTime);
+  return `${wd} ${ordinal(dt.getDate())} ${mon} ${tp.hour}:${tp.min.replace(" ", "")}`;
+}
+
 // Acceptance rate as a whole-number percent (null when no history).
 export function acceptRate(accepted: number, declined: number, cancelled: number): number | null {
   const total = accepted + declined + cancelled;

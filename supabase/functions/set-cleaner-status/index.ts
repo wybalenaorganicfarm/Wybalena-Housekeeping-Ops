@@ -7,8 +7,8 @@ import { handleOptions, json } from "../_shared/http.ts";
 import { getCaller, canManageCleaners } from "../_shared/authz.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
-const VALID = ["active", "away", "inactive"];
-const STATUS_WORD: Record<string, string> = { active: "Active", away: "Away", inactive: "Inactive" };
+const VALID = ["active", "inactive"];
+const STATUS_WORD: Record<string, string> = { active: "Active", inactive: "Inactive" };
 
 Deno.serve(async (req) => {
   const pre = handleOptions(req);

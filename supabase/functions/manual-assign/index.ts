@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
       event_type: "assignment.manual",
       event_label: "Manual Assignment",
       status: "failed",
-      summary: `Manual offer to ${cl?.full_name ?? "a cleaner"} was blocked — the cleaner is Away/Inactive.`,
+      summary: `Manual offer to ${cl?.full_name ?? "a cleaner"} was blocked — the cleaner is Inactive.`,
       error_message: "cleaner inactive",
       detail: { shift_id: shiftId, cleaner_id: cleanerId, by: caller.userId },
       source: "manual-assign",
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
       cleaner_id: cleanerId,
       triggered_by: "manual",
     });
-    return json({ error: "that cleaner is Away or Inactive — set them Active before assigning" }, 400);
+    return json({ error: "that cleaner is Inactive — set them Active before assigning" }, 400);
   }
   if (result === "error") {
     await writeAuditLog(sb, {

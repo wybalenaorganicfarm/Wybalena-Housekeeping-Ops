@@ -1,9 +1,9 @@
 // Hand-written DB types matching the Supabase schema. (Can be regenerated later
 // with `supabase gen types typescript`.)
 export type UserRole = "super_admin" | "admin" | "operations_manager" | "team_leader";
-export type UserStatus = "invite_sent" | "active" | "away" | "inactive";
+export type UserStatus = "invite_sent" | "active" | "inactive";
 export type CleanerTier = "tier_1" | "tier_2" | "tier_3";
-export type CleanerStatus = "active" | "away" | "inactive";
+export type CleanerStatus = "active" | "inactive";
 export type ShiftType = "standard" | "deep_full_venue" | "mid_retreat" | "wipeover" | "other";
 export type ShiftStatus =
   | "pending_confirmation" | "confirmed" | "staffing" | "fully_staffed" | "cancelled";
@@ -73,6 +73,17 @@ export interface Shift {
   confirmed_at: string | null;
   cancelled_at: string | null;
   created_at: string;
+}
+
+// Admin-editable operational settings (app_settings). `value` is per-key JSON —
+// e.g. booking_sync_range is { lead_weeks, window_days }.
+export interface AppSetting {
+  key: string;
+  value: Record<string, unknown>;
+  label: string;
+  description: string;
+  updated_at: string;
+  updated_by: string | null;
 }
 
 export interface CleanerNote {
@@ -200,6 +211,7 @@ export interface Database {
       shifts: { Row: Shift; Insert: Partial<Shift>; Update: Partial<Shift> };
       shift_assignments: { Row: ShiftAssignment; Insert: Partial<ShiftAssignment>; Update: Partial<ShiftAssignment> };
       cleaner_notes: { Row: CleanerNote; Insert: Partial<CleanerNote>; Update: Partial<CleanerNote> };
+      app_settings: { Row: AppSetting; Insert: Partial<AppSetting>; Update: Partial<AppSetting> };
       alerts: { Row: Alert; Insert: Partial<Alert>; Update: Partial<Alert> };
       audit_logs: { Row: AuditLog; Insert: Partial<AuditLog>; Update: Partial<AuditLog> };
     };

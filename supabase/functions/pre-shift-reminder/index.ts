@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
       // Rostered either way — the lead needs the full confirmed list, including
       // cleaners we can't WhatsApp.
       if (c?.full_name) rosterNames.push(c.full_name);
-      // Don't send while the cleaner is currently Away/Inactive.
+      // Don't send while the cleaner is currently Inactive.
       if (c?.phone && c.is_active) {
         await sendMessage(
           c.phone,

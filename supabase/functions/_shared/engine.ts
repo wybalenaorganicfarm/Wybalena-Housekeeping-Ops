@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage } from "./adapters/whatsapp.ts";
 import { btnTitle, fillVars, loadTemplate } from "./templates.ts";
-import { prettyDate, prettyTime } from "./datetime.ts";
+import { prettyDate, prettyDateTime, prettyTime } from "./datetime.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -119,7 +119,7 @@ export async function offerToCleaner(
   if (!cleaner) return "error";
   // The team lead is auto-assigned to every shift and is never offered/re-offered.
   if (cleaner.is_team_leader) return "error";
-  // Never send an offer to an Away/Inactive cleaner — the UI already hides them,
+  // Never send an offer to an Inactive cleaner — the UI already hides them,
   // this is the server-side guard for manual assign / any direct call.
   if (!cleaner.is_active) return "inactive";
 
@@ -359,6 +359,10 @@ export async function markFullyStaffed(sb: SupabaseClient, shiftId: string): Pro
     .update({ status: "fully_staffed", current_tier: null })
     .eq("id", shiftId);
 
+  // Name the shift being closed — a cleaner may hold offers on several.
+  const closed = await loadShift(sb, shiftId);
+  const phrase = closed ? ` on ${prettyDateTime(closed.shift_date, closed.start_time)}` : "";
+
   const { data: leftover } = await sb
     .from("shift_assignments")
     .select("id, cleaner_id")
@@ -368,9 +372,9 @@ export async function markFullyStaffed(sb: SupabaseClient, shiftId: string): Pro
   for (const a of leftover ?? []) {
     const { data: cleaner } = await sb
       .from("cleaners").select("phone, is_active").eq("id", a.cleaner_id).maybeSingle();
-    // Don't message a cleaner who is currently Away/Inactive; their offer is still
+    // Don't message a cleaner who is currently Inactive; their offer is still
     // closed below.
-    if (cleaner?.phone && cleaner.is_active) await sendMessage(cleaner.phone, "That shift is now fully booked. Thanks!");
+    if (cleaner?.phone && cleaner.is_active) await sendMessage(cleaner.phone, `That shift${phrase} is now fully booked. Thanks!`);
   }
   if ((leftover ?? []).length) {
     await sb

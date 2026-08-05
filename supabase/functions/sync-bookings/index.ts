@@ -1,7 +1,9 @@
 // sync-bookings — cron: schedule is admin-editable from /schedule; go-live tz TBD.
-// The target week is anchored to whichever weekday the job runs on (run day 00:00
-// UTC + 35d, for 7 days), so changing the schedule shifts the week with it.
-// Fetches the target booking week (~5 weeks out), dedupes on gcal_event_id,
+// The target window is anchored to whichever weekday the job runs on, so changing
+// the schedule shifts the window with it. How far ahead it starts (lead weeks)
+// and how long it runs (window days) are admin-editable from /schedule too —
+// stored in app_settings, defaulting to the original 5 weeks / 7 days.
+// Fetches the target booking window, dedupes on gcal_event_id,
 // stores bookings, creates shift(s) by the >=7-night rule, raises venue-gap
 // alerts for >3-day gaps, and detects calendar cancellations (Spec §2, §7.1, §7.2).
 import { serviceClient } from "../_shared/client.ts";
@@ -13,6 +15,7 @@ import { confirmationEmail, type ConfirmShift } from "../_shared/emailTemplates.
 import { signShift } from "../_shared/confirmToken.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { loadBookingSyncRange } from "../_shared/settings.ts";
 
 const DAY = 86400000;
 const SOURCE = "sync-bookings";
@@ -43,19 +46,22 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
 
-  // Target week: ~5 weeks out (after a 4-week buffer, excluding current week).
-  // A true 7-day block on VENUE-LOCAL dates, anchored on whichever weekday the
-  // job is scheduled for: `fromDate` is included, `toDate` (day+7) is excluded.
-  // Run it on a Wednesday and it covers Wed→Tue, excluding the next Wednesday.
+  // Target window: `leadWeeks` ahead, covering `windowDays` (default 5 weeks /
+  // 7 days — the long-standing behaviour). A true N-day block on VENUE-LOCAL
+  // dates, anchored on whichever weekday the job is scheduled for: `fromDate`
+  // is included, `toDate` (lead + window) is excluded. Run a 7-day window on a
+  // Wednesday and it covers Wed→Tue, excluding the next Wednesday.
+  const { leadWeeks, windowDays } = await loadBookingSyncRange(sb);
+  const leadDays = leadWeeks * 7;
   const now = new Date();
-  const fromDate = localDateStr(new Date(now.getTime() + 35 * DAY)); // inclusive
-  const toDate = localDateStr(new Date(now.getTime() + 42 * DAY));   // EXCLUSIVE
-  const lastDate = localDateStr(new Date(now.getTime() + 41 * DAY)); // last day covered
+  const fromDate = localDateStr(new Date(now.getTime() + leadDays * DAY));                    // inclusive
+  const toDate = localDateStr(new Date(now.getTime() + (leadDays + windowDays) * DAY));       // EXCLUSIVE
+  const lastDate = localDateStr(new Date(now.getTime() + (leadDays + windowDays - 1) * DAY)); // last day covered
 
   // The Google query is only a coarse prefilter — padded a day either side so no
   // local-date edge case is dropped before the authoritative check below.
-  const fetchMin = new Date(now.getTime() + 34 * DAY);
-  const fetchMax = new Date(now.getTime() + 43 * DAY);
+  const fetchMin = new Date(now.getTime() + (leadDays - 1) * DAY);
+  const fetchMax = new Date(now.getTime() + (leadDays + windowDays + 1) * DAY);
 
   let events;
   try {
@@ -276,7 +282,8 @@ Deno.serve(async (req) => {
       event_type: "sync.run",
       event_label: "Weekly Booking Sync",
       status: "skipped",
-      summary: "Weekly booking sync ran. No new bookings found for the target week.",
+      summary: `Weekly booking sync ran. No new bookings found for ${fmtWeek(fromDate)} – ${fmtWeek(lastDate)}.`,
+      detail: { leadWeeks, windowDays, from: fromDate, to: lastDate },
       source: SOURCE,
       triggered_by: "cron",
     });
@@ -286,7 +293,7 @@ Deno.serve(async (req) => {
       event_label: "Weekly Booking Sync",
       status: "success",
       summary: `Weekly booking sync completed. ${createdBookings} new booking(s) found, ${createdShifts} shift(s) created.`,
-      detail: { createdBookings, createdShifts, cancellations },
+      detail: { createdBookings, createdShifts, cancellations, leadWeeks, windowDays, from: fromDate, to: lastDate },
       source: SOURCE,
       triggered_by: "cron",
     });

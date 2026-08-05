@@ -12,9 +12,25 @@
 // short codes to cleaners.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { btnTitle, loadTemplate } from "../templates.ts";
+import { btnTitle, fillVars, loadTemplate } from "../templates.ts";
+import { prettyDate, prettyTime } from "../datetime.ts";
 
 const WHAPI_BASE = Deno.env.get("WHAPI_BASE_URL") ?? "https://gate.whapi.cloud";
+
+// Every cleaner-facing confirmation names the shift it refers to, so a reply is
+// never ambiguous when someone holds several shifts. Raw DB values in; the
+// spelled-out forms cleaners read out.
+export interface ShiftVars {
+  shift_date?: string | null;  // YYYY-MM-DD
+  start_time?: string | null;  // HH:MM(:SS)
+}
+
+function shiftVars(s?: ShiftVars): Record<string, string> {
+  return {
+    shift_date: prettyDate(s?.shift_date ?? ""),
+    start_time: prettyTime(s?.start_time ?? ""),
+  };
+}
 
 // Whapi addresses chats as "<digits>@s.whatsapp.net". Accept a raw phone number
 // and normalize; pass through anything that already looks like a chat id.
@@ -109,11 +125,15 @@ export async function sendDeclineConfirm(
   toPhone: string,
   assignmentId: string,
   sb?: SupabaseClient,
+  shift?: ShiftVars,
 ): Promise<SendResult> {
   const t = sb ? await loadTemplate(sb, "decline_prompt") : null;
+  const v = shiftVars(shift);
   return sendButtons(
     toPhone,
-    t?.body ?? `Are you sure you want to decline?`,
+    t?.body
+      ? fillVars(t.body, v)
+      : `Are you sure you want to decline the shift on ${v.shift_date} at ${v.start_time}?`,
     [
       // Titles carry the verb so a text-echoed tap (no interactive payload) is still
       // unambiguous vs the cancel confirmation's Yes/No. Keep ≤20 chars (WA limit).
@@ -131,11 +151,15 @@ export async function sendCancelConfirm(
   toPhone: string,
   assignmentId: string,
   sb?: SupabaseClient,
+  shift?: ShiftVars,
 ): Promise<SendResult> {
   const t = sb ? await loadTemplate(sb, "cancel_prompt") : null;
+  const v = shiftVars(shift);
   return sendButtons(
     toPhone,
-    t?.body ?? `Are you sure you want to cancel?`,
+    t?.body
+      ? fillVars(t.body, v)
+      : `Are you sure you want to cancel the shift on ${v.shift_date} at ${v.start_time}?`,
     [
       // Distinct verbs from the decline confirmation so a text-echoed tap resolves
       // to cancel_confirm/cancel_cancel, not decline. Keep ≤20 chars (WA limit).
@@ -154,13 +178,36 @@ export async function sendAcceptConfirm(
   toPhone: string,
   assignmentId: string,
   sb?: SupabaseClient,
+  shift?: ShiftVars,
 ): Promise<SendResult> {
   const t = sb ? await loadTemplate(sb, "accept_confirmation") : null;
+  const v = shiftVars(shift);
   return sendButtons(
     toPhone,
-    t?.body ?? `Shift Accepted ✅`,
+    t?.body
+      ? fillVars(t.body, v)
+      : `Shift Accepted ✅\n\n📅 Date: ${v.shift_date}\n⏰ Time: ${v.start_time}`,
     [{ id: `cancel:${assignmentId}`, title: btnTitle(t, "cancel", "🚫 Cancel") }],
     { footer: t?.footer ?? "Wybalena Organic Farm" },
+  );
+}
+
+// Plain outcome replies sent after a Yes tap ("Shift Cancelled" / "Shift
+// Declined"). Templated so they can be reworded, and always naming the shift.
+export async function sendOutcome(
+  toPhone: string,
+  key: "cancelled_confirmation" | "declined_confirmation",
+  dflt: string,
+  sb?: SupabaseClient,
+  shift?: ShiftVars,
+): Promise<SendResult> {
+  const t = sb ? await loadTemplate(sb, key) : null;
+  const v = shiftVars(shift);
+  return sendMessage(
+    toPhone,
+    t?.body
+      ? fillVars(t.body, v)
+      : `${dflt}\n\n📅 Date: ${v.shift_date}\n⏰ Time: ${v.start_time}`,
   );
 }
 

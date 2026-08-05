@@ -15,9 +15,12 @@ import { toastError, toastOk } from "../lib/toast";
 // Editing happens in a modal (not inline) so the collapsed 2-column grid never
 // reflows / leaves dead whitespace when a card is opened.
 
+// Preview values must match what the Edge Functions actually substitute at send
+// time (prettyDate / prettyTime in _shared/datetime.ts) — never raw ISO, or the
+// preview misrepresents the real message.
 const SAMPLE: Record<string, string> = {
-  shift_date: "2026-07-25",
-  start_time: "09:30",
+  shift_date: "Saturday 25th July 2026",
+  start_time: "9:30am",
   shift_type: "standard",
 };
 
