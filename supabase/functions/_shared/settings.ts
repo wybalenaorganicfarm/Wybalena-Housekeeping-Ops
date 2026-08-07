@@ -25,6 +25,34 @@ function clampInt(v: unknown, min: number, max: number, dflt: number): number {
   return Math.min(max, Math.max(min, Math.round(n)));
 }
 
+// How the daily catch-up decides a shift has waited long enough.
+export interface StaffingCatchup {
+  escalationWaitHours: number;  // at one tier before escalating to the next
+  offerGraceHours: number;      // after confirmation before the first offer
+}
+
+export const DEFAULT_STAFFING_CATCHUP: StaffingCatchup = { escalationWaitHours: 24, offerGraceHours: 0 };
+
+export const CATCHUP_LIMITS = {
+  escalationWaitHours: { min: 1, max: 168 },  // 1 hour … 7 days
+  offerGraceHours: { min: 0, max: 72 },
+};
+
+export async function loadStaffingCatchup(sb: SupabaseClient): Promise<StaffingCatchup> {
+  try {
+    const { data } = await sb
+      .from("app_settings").select("value").eq("key", "staffing_catchup").maybeSingle();
+    const v = (data as { value?: Record<string, unknown> } | null)?.value;
+    if (!v) return DEFAULT_STAFFING_CATCHUP;
+    return {
+      escalationWaitHours: clampInt(v.escalation_wait_hours, CATCHUP_LIMITS.escalationWaitHours.min, CATCHUP_LIMITS.escalationWaitHours.max, DEFAULT_STAFFING_CATCHUP.escalationWaitHours),
+      offerGraceHours: clampInt(v.offer_grace_hours, CATCHUP_LIMITS.offerGraceHours.min, CATCHUP_LIMITS.offerGraceHours.max, DEFAULT_STAFFING_CATCHUP.offerGraceHours),
+    };
+  } catch {
+    return DEFAULT_STAFFING_CATCHUP;
+  }
+}
+
 export async function loadBookingSyncRange(sb: SupabaseClient): Promise<BookingSyncRange> {
   try {
     const { data } = await sb

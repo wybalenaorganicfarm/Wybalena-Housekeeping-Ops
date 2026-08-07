@@ -18,6 +18,7 @@ const META: Record<AlertType, { icon: string; accent: string; iconBg: string; ba
   unconfirmed_shifts: { icon: "clock", accent: c.warn, iconBg: "#FBF1DF", badge: "Reminder", badgeBg: "#FBF1DF", badgeFg: "#9a7320" },
   cleaner_cancelled: { icon: "user", accent: c.danger, iconBg: "#F8E5E1", badge: "Urgent", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
   connection_down: { icon: "cloud", accent: c.danger, iconBg: "#F8E5E1", badge: "Connection", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
+  mid_retreat_needed: { icon: "sunrise", accent: c.warn, iconBg: "#FBF1DF", badge: "Plan ahead", badgeBg: "#FBF1DF", badgeFg: "#9a7320" },
 };
 
 export function Alerts() {
@@ -117,7 +118,7 @@ export function Alerts() {
                           <button onClick={async () => { await confirmCancellation(a.id); await load(); }} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Confirm cancellation</button>
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Take no action</button>
                         </>
-                      ) : a.alert_type === "venue_gap" ? (
+                      ) : a.alert_type === "venue_gap" || a.alert_type === "mid_retreat_needed" ? (
                         <>
                           <button onClick={() => navigate("/shifts")} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Schedule a cleaning shift</button>
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>

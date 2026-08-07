@@ -190,6 +190,83 @@ export function wipeoverEmail(prev: GapBooking, next: GapBooking, gapDays: numbe
   return { subject, text, html };
 }
 
+// One booking needing a mid-retreat clean. `suggestedDate` arrives already
+// display-formatted from the caller (prettyDate) — this file stays dependency-free.
+export interface MidRetreatItem {
+  booking: GapBooking;
+  nights: number;
+  suggestedDate: string;
+}
+
+// Notifies the Operations Manager that long stays (>=7 nights) need a
+// mid-retreat clean. The system no longer creates those shifts automatically —
+// the date and crew are a judgement call — so this is the prompt to schedule them.
+// ALL of a run's long stays go in ONE email: the manager gets a single list to
+// work through, matching how the confirmation email batches its shifts.
+export function midRetreatEmail(items: MidRetreatItem[]): { subject: string; text: string; html: string } {
+  const n = items.length;
+  const many = n > 1;
+  const subject = many
+    ? `Mid-Retreat Cleans Required — ${n} bookings need a mid-stay clean`
+    : `Mid-Retreat Clean Required — ${items[0].nights}-night stay${items[0].booking.guest_name ? ` (${items[0].booking.guest_name})` : ""}`;
+
+  const cards = items.map(({ booking: b, nights, suggestedDate }) => {
+    const rows =
+      gapRow("Booking Name", esc(b.guest_name ?? "Guest booking")) +
+      gapRow("Event ID", `<span style="font-family:monospace;font-size:12px;color:${MUTED};">${esc(b.gcal_event_id ?? "—")}</span>`) +
+      gapRow("Check-In Time", fmtDateTime(b.check_in)) +
+      gapRow("Check-Out Time", fmtDateTime(b.check_out)) +
+      gapRow("Nights", `${nights} nights`) +
+      gapRow("Suggested date (mid-stay)", `<strong style="color:#9a7320;">${esc(suggestedDate)}</strong>`);
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eee;border-radius:8px;overflow:hidden;margin:6px 0 14px;">
+      <tr><td style="background:#2e8b57;padding:11px 14px;color:#fff;font-size:13px;font-weight:700;">📅 ${esc(b.guest_name ?? "Guest booking")}</td></tr>
+      <tr><td style="padding:0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table></td></tr>
+    </table>`;
+  }).join("");
+
+  const intro = many
+    ? `<strong>${n} bookings</strong> in this roster are 7 nights or longer, so each needs a <strong>mid-retreat clean</strong> part-way through the stay.`
+    : `This booking is <strong>${items[0].nights} nights</strong>, so a <strong>mid-retreat clean</strong> is required part-way through the stay.`;
+  const callout = many
+    ? `👉 Please create the Mid-Retreat Cleaning shifts for the ${n} bookings listed below.`
+    : `👉 Please create the Mid-Retreat Cleaning shift for this booking.`;
+
+  const html = `<!DOCTYPE html><html><body style="margin:0;background:#eef0ee;font-family:Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0ee;padding:24px 0;"><tr><td align="center">
+    <table role="presentation" width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
+      <tr><td style="padding:22px 24px 4px;">
+        <div style="font-size:19px;font-weight:700;color:${INK};">🧹 Mid-Retreat Clean${many ? "s" : ""} Required</div>
+      </td></tr>
+      <tr><td style="padding:8px 24px 0;color:${INK};font-size:13.5px;line-height:1.6;">
+        ${intro}
+        <div style="margin-top:10px;">Reason: The stay is <strong>7 nights or longer</strong>.</div>
+        <div style="margin-top:12px;background:#e7f0ed;border-left:3px solid #2e8b57;border-radius:6px;padding:11px 14px;font-size:13.5px;font-weight:600;color:#21564b;">
+          ${callout}
+        </div>
+      </td></tr>
+      <tr><td style="padding:16px 24px 0;">
+        ${cards}
+      </td></tr>
+      <tr><td style="padding:6px 24px 22px;color:${MUTED};font-size:12.5px;line-height:1.6;">
+        ${many ? "These shifts are" : "This shift is"} <strong>not created automatically</strong> — please add ${many ? "them" : "it"} from the Shifts page, choosing the date and crew that suit each stay.
+        <br/><br/>Thank you,<br/>Wybalena Organic Farm
+      </td></tr>
+    </table>
+  </td></tr></table>
+  </body></html>`;
+
+  const lines = items.map(({ booking: b, nights, suggestedDate }) =>
+    `• ${b.guest_name ?? "Guest booking"} — ${nights} nights\n` +
+    `  ${fmtDateTime(b.check_in)} → ${fmtDateTime(b.check_out)}\n` +
+    `  Suggested date (mid-stay): ${suggestedDate}`).join("\n\n");
+  const text = (many
+    ? `Mid-Retreat Cleans Required — ${n} bookings in this roster are 7 nights or longer.\n\n`
+    : `Mid-Retreat Clean Required — this ${items[0].nights}-night stay needs a mid-retreat clean.\n\n`) +
+    `${callout.replace("👉 ", "")}\n\n${lines}\n\n` +
+    `${many ? "These shifts are" : "This shift is"} not created automatically — please add ${many ? "them" : "it"} from the Shifts page.`;
+  return { subject, text, html };
+}
+
 // ── Auth emails (sent by the send-auth-email hook, NOT by Supabase) ──────────
 // Supabase's default auth templates are replaced by the Send Email hook; these
 // builders produce the branded invite / password-reset emails instead.

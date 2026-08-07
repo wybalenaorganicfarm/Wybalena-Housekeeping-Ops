@@ -58,6 +58,7 @@ const ALERT_ICON: Record<string, string> = {
   understaffed_urgent: "alert",
   booking_cancelled: "calendar",
   venue_gap: "cloud",
+  mid_retreat_needed: "sunrise",
   unconfirmed_shifts: "clock",
   cleaner_cancelled: "user",
   connection_down: "cloud",
@@ -66,6 +67,7 @@ const ALERT_COLOR: Record<string, string> = {
   understaffed_urgent: c.danger,
   booking_cancelled: c.teal,
   venue_gap: c.muted2,
+  mid_retreat_needed: c.warn,
   unconfirmed_shifts: c.warn,
   cleaner_cancelled: c.danger,
   connection_down: c.danger,
@@ -289,7 +291,7 @@ export function Dashboard() {
                             <button onClick={() => shift && setAssign(shift)} style={{ background: "none", border: "none", color: c.danger, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Assign manually <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
                             {a.alert_type === "cleaner_cancelled" && <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>}
                           </>
-                        ) : a.alert_type === "venue_gap" ? (
+                        ) : a.alert_type === "venue_gap" || a.alert_type === "mid_retreat_needed" ? (
                           <button onClick={() => setShowNew(true)} style={{ background: "none", border: "none", color: c.teal, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Plan a clean <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
                         ) : (
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>

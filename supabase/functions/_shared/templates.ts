@@ -53,6 +53,19 @@ export async function loadTemplate(
   }
 }
 
+// Render one template's body by key, falling back to the caller's built-in copy
+// if the row is missing or the table isn't reachable. The single most common
+// pattern at a send site — load, fill, or fall back — in one call.
+export async function renderTemplate(
+  sb: SupabaseClient,
+  key: string,
+  fallback: string,
+  vars: Record<string, string | number | null | undefined> = {},
+): Promise<string> {
+  const t = await loadTemplate(sb, key);
+  return t?.body ? fillVars(t.body, vars) : fallback;
+}
+
 // Resolve a button title from the template (by button id), falling back to the
 // caller's default. Keeps the interactive payload id fixed in code while letting
 // the visible label be edited.

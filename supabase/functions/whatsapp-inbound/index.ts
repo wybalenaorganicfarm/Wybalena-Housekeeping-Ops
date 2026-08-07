@@ -8,8 +8,10 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { parseInbound, sendAcceptConfirm, sendCancelConfirm, sendDeclineConfirm, sendMessage, sendOutcome } from "../_shared/adapters/whatsapp.ts";
-import { prettyDate, prettyDateTime } from "../_shared/datetime.ts";
+import { prettyDate, prettyDateTime, prettyTime } from "../_shared/datetime.ts";
 import { acceptOffer, cancelOffer, declineOffer } from "../_shared/engine.ts";
+import { renderTemplate } from "../_shared/templates.ts";
+import { notifyLeadCancellation } from "../_shared/managerSummary.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "whatsapp-inbound";
@@ -23,7 +25,7 @@ function normPhone(p: string): string {
 async function shiftContext(sb: ReturnType<typeof serviceClient>, assignmentId: string) {
   const { data: a } = await sb
     .from("shift_assignments")
-    .select("shift_id, shifts(shift_date, start_time, required_cleaners, status)")
+    .select("shift_id, shifts(shift_date, start_time, shift_type, required_cleaners, status)")
     .eq("id", assignmentId)
     .maybeSingle();
   const sh = (a as Record<string, any>)?.shifts;
@@ -41,6 +43,7 @@ async function shiftContext(sb: ReturnType<typeof serviceClient>, assignmentId: 
     shiftId,
     shiftDate: sh?.shift_date as string | undefined,
     shiftTime: (sh?.start_time as string | undefined)?.slice(0, 5),
+    shiftType: sh?.shift_type as string | undefined,
     required: sh?.required_cleaners as number | undefined,
     status: sh?.status as string | undefined,
     accepted,
@@ -186,6 +189,11 @@ Deno.serve(async (req) => {
     const shiftRef = { shift_date: ctx.shiftDate, start_time: ctx.shiftTime };
     // "Sunday 23rd August 2026 at 10:00am" — for one-line replies.
     const shiftPhrase = ctx.shiftDate ? prettyDateTime(ctx.shiftDate, ctx.shiftTime ?? "") : "that shift";
+    // Display-formatted vars for the editable reply templates.
+    const tplVars = {
+      shift_date: ctx.shiftDate ? prettyDate(ctx.shiftDate) : "",
+      start_time: ctx.shiftTime ? prettyTime(ctx.shiftTime) : "",
+    };
     const { data: assn } = await sb
       .from("shift_assignments").select("status").eq("id", assignmentId).maybeSingle();
     const alreadyAccepted = assn?.status === "accepted";
@@ -217,10 +225,12 @@ Deno.serve(async (req) => {
             await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. Remaining offered cleaners notified.`);
           }
         } else if (res === "already_full") {
-          await sendMessage(cleaner.phone, `Sorry, the shift on ${shiftPhrase} just filled up and is now fully staffed. Thanks for responding!`);
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_shift_just_filled",
+            `Sorry, the shift on ${shiftPhrase} just filled up and is now fully staffed. Thanks for responding!`, tplVars));
           await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. ${cleaner.full_name}'s acceptance came in after it filled.`);
         } else {
-          await sendMessage(cleaner.phone, `Sorry, the shift offer for ${shiftPhrase} is no longer open.`);
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_offer_closed",
+            `Sorry, the shift offer for ${shiftPhrase} is no longer open.`, tplVars));
         }
         results.push({ id: r.providerMessageId, action: "accept", result: res });
         break;
@@ -228,13 +238,15 @@ Deno.serve(async (req) => {
       case "decline": {
         // Can't decline after accepting — give it up via Cancel instead.
         if (alreadyAccepted) {
-          await sendMessage(cleaner.phone, `You've already accepted the shift on ${shiftPhrase}. If you can't make it, tap the *Cancel* button on your confirmation message.`);
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_already_accepted",
+            `You've already accepted the shift on ${shiftPhrase}. If you can't make it, tap the *Cancel* button on your confirmation message.`, tplVars));
           results.push({ id: r.providerMessageId, action: "decline", result: "blocked_already_accepted" });
           break;
         }
         // Already declined — no confirmation loop, just say so.
         if (assn?.status === "declined") {
-          await sendMessage(cleaner.phone, "You've already declined this shift. No further action needed.");
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_already_declined",
+            "You've already declined this shift. No further action needed.", tplVars));
           results.push({ id: r.providerMessageId, action: "decline", result: "already_declined" });
           break;
         }
@@ -255,19 +267,22 @@ Deno.serve(async (req) => {
         break;
       }
       case "decline_cancel": { // tapped "No"
-        await sendMessage(cleaner.phone, "Not declined, please select accept above.");
+        await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_decline_kept",
+          "Not declined, please select accept above.", tplVars));
         results.push({ id: r.providerMessageId, action: "decline_cancel" });
         break;
       }
       case "cancel": {
         // Nothing to cancel if they already declined or cancelled this shift.
         if (assn?.status === "declined") {
-          await sendMessage(cleaner.phone, "You've already declined this shift, so there's nothing to cancel.");
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_declined_nothing_to_cancel",
+            "You've already declined this shift, so there's nothing to cancel.", tplVars));
           results.push({ id: r.providerMessageId, action: "cancel", result: "already_declined" });
           break;
         }
         if (assn?.status === "cancelled" || assn?.status === "no_response") {
-          await sendMessage(cleaner.phone, "You're not currently on this shift, so there's nothing to cancel.");
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_not_on_shift",
+            "You're not currently on this shift, so there's nothing to cancel.", tplVars));
           results.push({ id: r.providerMessageId, action: "cancel", result: "not_active" });
           break;
         }
@@ -283,7 +298,8 @@ Deno.serve(async (req) => {
       case "cancel_confirm": { // tapped "Yes"
         // Re-check: only an active (accepted/offered) row can be cancelled.
         if (assn?.status !== "accepted" && assn?.status !== "offered") {
-          await sendMessage(cleaner.phone, "You're not currently on this shift, so there's nothing to cancel.");
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_not_on_shift",
+            "You're not currently on this shift, so there's nothing to cancel.", tplVars));
           results.push({ id: r.providerMessageId, action: "cancel_confirm", result: "not_active" });
           break;
         }
@@ -303,12 +319,28 @@ Deno.serve(async (req) => {
             });
           }
         }
-        await logResponse("response.cancelled", "warning", `${cleaner.full_name} cancelled their spot on ${dateLabel}. Re-assignment triggered; admin alerted.`);
+        // The team lead runs the shift, so they're told immediately rather than
+        // waiting for tomorrow's roster summary.
+        const afterCancel = await shiftContext(sb, assignmentId);
+        await notifyLeadCancellation(sb, {
+          cleanerName: cleaner.full_name ?? "A cleaner",
+          shiftDate: ctx.shiftDate ?? "",
+          startTime: ctx.shiftTime ?? "",
+          shiftType: ctx.shiftType,
+          shiftId: ctx.shiftId,
+          cleanerId: cleaner.id,
+          remaining: afterCancel.accepted,
+          required: afterCancel.required ?? null,
+          source: SOURCE,
+          triggeredBy: "webhook",
+        });
+        await logResponse("response.cancelled", "warning", `${cleaner.full_name} cancelled their spot on ${dateLabel}. Re-assignment triggered; admin and team lead alerted.`);
         results.push({ id: r.providerMessageId, action: "cancel_confirm" });
         break;
       }
       case "cancel_cancel": { // tapped "No" on the cancel confirmation
-        await sendMessage(cleaner.phone, "No problem — nothing was cancelled. You're still on this shift.");
+        await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_cancel_kept",
+          "No problem — nothing was cancelled. You're still on this shift.", tplVars));
         results.push({ id: r.providerMessageId, action: "cancel_cancel" });
         break;
       }

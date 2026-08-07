@@ -8,23 +8,28 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 export interface OpsManager {
   name: string;
   email: string | null;
+  // WhatsApp destination for notices that go out on both channels. Null when the
+  // manager's profile has no phone — callers skip the WhatsApp leg rather than fail.
+  phone: string | null;
 }
 
 export async function opsManager(sb: SupabaseClient): Promise<OpsManager> {
   const { data: mgr } = await sb
     .from("profiles")
-    .select("full_name, email")
+    .select("full_name, email, phone")
     .eq("role", "operations_manager")
     .order("created_at")
     .limit(1)
     .maybeSingle();
-  if (mgr?.email) return { name: mgr.full_name ?? "Operations Manager", email: mgr.email };
+  if (mgr?.email) {
+    return { name: mgr.full_name ?? "Operations Manager", email: mgr.email, phone: mgr.phone ?? null };
+  }
 
   // Fallback: the configured alert inbox (and its profile name if it matches one).
   const inbox = Deno.env.get("ALERT_EMAIL_TO") ?? null;
   if (inbox) {
-    const { data } = await sb.from("profiles").select("full_name").eq("email", inbox).maybeSingle();
-    return { name: data?.full_name ?? "Operations Manager", email: inbox };
+    const { data } = await sb.from("profiles").select("full_name, phone").eq("email", inbox).maybeSingle();
+    return { name: data?.full_name ?? "Operations Manager", email: inbox, phone: data?.phone ?? null };
   }
-  return { name: "Operations Manager", email: null };
+  return { name: "Operations Manager", email: null, phone: null };
 }

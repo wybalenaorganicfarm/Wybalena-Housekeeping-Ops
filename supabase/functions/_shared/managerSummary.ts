@@ -9,6 +9,7 @@ import { sendMessage } from "./adapters/whatsapp.ts";
 import { sendEmail } from "./adapters/email.ts";
 import { opsManager } from "./admin.ts";
 import { prettyDate, prettyTime } from "./datetime.ts";
+import { renderTemplate } from "./templates.ts";
 import { writeAuditLog } from "./auditLog.ts";
 
 // One of tomorrow's shifts and the cleaners who accepted it.
@@ -33,19 +34,25 @@ function prettyType(t: string): string {
 // Build the day-before roster message: one block per shift with date/time, type
 // and every confirmed cleaner. Shifts with nobody confirmed are still listed so
 // the lead can chase them.
-export function buildLeadRoster(rosters: ShiftRoster[]): string {
-  const total = rosters.reduce((n, r) => n + r.names.length, 0);
-  const blocks = rosters.map((r) => {
+// The per-shift blocks — substituted into the editable `lead_roster` template as
+// {{shift_blocks}}. Kept separate so the wording around them stays editable
+// while the generated list itself remains code-owned.
+export function buildRosterBlocks(rosters: ShiftRoster[]): string {
+  return rosters.map((r) => {
     const time = r.startTime ? ` · ⏰ ${prettyTime(r.startTime)}` : "";
     const roster = r.names.length
       ? `👥 ${r.names.length} cleaner(s) confirmed:\n` +
         r.names.map((n) => `   • ${n}`).join("\n")
       : "⚠️ No cleaners confirmed yet.";
     return `📅 ${prettyDate(r.shiftDate)}${time}\n🧹 ${prettyType(r.shiftType)}\n${roster}`;
-  });
+  }).join("\n\n");
+}
+
+export function buildLeadRoster(rosters: ShiftRoster[]): string {
+  const total = rosters.reduce((n, r) => n + r.names.length, 0);
   return (
     `*Tomorrow's Roster* 📋\n\n` +
-    blocks.join("\n\n") +
+    buildRosterBlocks(rosters) +
     `\n\n_Total: ${total} cleaner(s) across ${rosters.length} shift(s)._`
   );
 }
@@ -113,7 +120,12 @@ export async function notifyLeadRoster(
   if (!lead?.phone) return;
 
   const total = rosters.reduce((n, r) => n + r.names.length, 0);
-  const sent = await sendMessage(lead.phone, buildLeadRoster(rosters));
+  const text = await renderTemplate(sb, "lead_roster", buildLeadRoster(rosters), {
+    shift_blocks: buildRosterBlocks(rosters),
+    total_cleaners: total,
+    total_shifts: rosters.length,
+  });
+  const sent = await sendMessage(lead.phone, text);
   await writeAuditLog(sb, {
     event_type: "notification.zara_summary",
     event_label: "Zara Shift Summary",
@@ -124,5 +136,65 @@ export async function notifyLeadRoster(
     detail: { shifts: rosters, cleaners: total },
     source,
     triggered_by: "cron",
+  });
+}
+
+// Tell the team lead a cleaner has dropped off one of their shifts, so they know
+// the roster changed without waiting for tomorrow's summary. Called whenever a
+// cancellation is confirmed — by the cleaner over WhatsApp, or by the office.
+// Silent no-op when there is no active team lead or they have no phone: the
+// admin alert and audit log already record the cancellation.
+export async function notifyLeadCancellation(
+  sb: SupabaseClient,
+  opts: {
+    cleanerName: string;
+    shiftDate: string;   // YYYY-MM-DD
+    startTime: string;   // HH:MM(:SS)
+    shiftType?: string | null;
+    shiftId?: string | null;
+    cleanerId?: string | null;
+    remaining?: number | null;  // cleaners still confirmed
+    required?: number | null;   // cleaners the shift needs
+    source: string;
+    triggeredBy?: "webhook" | "manual" | "cron";
+  },
+): Promise<void> {
+  const { data: lead } = await sb
+    .from("profiles").select("phone").eq("role", "team_leader").eq("is_active", true).limit(1).maybeSingle();
+  if (!lead?.phone) return;
+
+  const when = `${prettyDate(opts.shiftDate)} at ${prettyTime(opts.startTime)}`;
+  const type = opts.shiftType ? `${prettyType(opts.shiftType)} · ` : "";
+  const staffing = opts.remaining != null && opts.required != null
+    ? `\n👥 Now ${opts.remaining}/${opts.required} confirmed.`
+    : "";
+  const fallback =
+    `⚠️ *Cleaner cancelled*\n\n` +
+    `${opts.cleanerName} has cancelled their spot.\n` +
+    `📅 ${type}${when}${staffing}\n\n` +
+    `The office has been alerted and re-assignment is in progress.`;
+
+  const text = await renderTemplate(sb, "lead_cleaner_cancelled", fallback, {
+    cleaner_name: opts.cleanerName,
+    shift_date: prettyDate(opts.shiftDate),
+    start_time: prettyTime(opts.startTime),
+    shift_type: opts.shiftType ? prettyType(opts.shiftType) : "",
+    remaining: opts.remaining ?? "",
+    required: opts.required ?? "",
+  });
+
+  const sent = await sendMessage(lead.phone, text);
+  await writeAuditLog(sb, {
+    event_type: "notification.lead_cancellation",
+    event_label: "Team Lead Notified",
+    status: sent.ok ? "success" : "failed",
+    summary: sent.ok
+      ? `Team lead notified — ${opts.cleanerName} cancelled their spot on ${when}.`
+      : `Failed to notify the team lead that ${opts.cleanerName} cancelled their spot on ${when}.`,
+    detail: { cleaner: opts.cleanerName, shift_date: opts.shiftDate, remaining: opts.remaining, required: opts.required },
+    source: opts.source,
+    shift_id: opts.shiftId ?? undefined,
+    cleaner_id: opts.cleanerId ?? undefined,
+    triggered_by: opts.triggeredBy ?? "webhook",
   });
 }

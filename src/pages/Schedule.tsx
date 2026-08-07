@@ -5,7 +5,8 @@ import { PageHeader } from "../components/PageHeader";
 import { Button, Modal, Spinner } from "../components/ui";
 import {
   BOOKING_SYNC_RANGE_DEFAULT, BOOKING_SYNC_RANGE_LIMITS, getBookingSyncRange, getCronSchedules,
-  updateBookingSyncRange, updateCronSchedule, type BookingSyncRange, type CronJob,
+  getStaffingCatchup, STAFFING_CATCHUP_DEFAULT, STAFFING_CATCHUP_LIMITS, updateBookingSyncRange,
+  updateCronSchedule, updateStaffingCatchup, type BookingSyncRange, type CronJob, type StaffingCatchup,
 } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import {
@@ -21,10 +22,14 @@ const META: JobMeta[] = [
   { fn: "sync-bookings", label: "Weekly Booking Sync", desc: "Pulls new and cancelled bookings from the calendar and creates the week's shifts.", group: "weekly", order: 1 },
   { fn: "confirm-reminder", label: "Confirmation Reminder", desc: "Nudges admins to confirm shifts that are still pending.", group: "weekly", order: 2 },
   { fn: "offer-tier-1", label: "Tier 1 Offers", desc: "Sends the first round of shift offers to Tier 1 cleaners.", group: "weekly", order: 3 },
-  { fn: "remind-nonresponders", label: "Non-Responder Reminders", desc: "Re-pings cleaners who were offered a shift but haven't replied.", group: "weekly", order: 4 },
+  { fn: "remind-tier-1", label: "Tier 1 Non-Responder Reminders", desc: "Re-pings Tier 1 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 4 },
   { fn: "escalate-tier-2", label: "Tier 2 Escalation", desc: "Opens shifts still unfilled up to Tier 2 cleaners.", group: "weekly", order: 5 },
-  { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Opens shifts still unfilled up to Tier 3 cleaners.", group: "weekly", order: 6 },
-  { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 6.5 },
+  { fn: "remind-tier-2", label: "Tier 2 Non-Responder Reminders", desc: "Re-pings Tier 2 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 6 },
+  { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Opens shifts still unfilled up to Tier 3 cleaners.", group: "weekly", order: 7 },
+  { fn: "remind-tier-3", label: "Tier 3 Non-Responder Reminders", desc: "Re-pings Tier 3 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 8 },
+  // Sits after the tier sequence — it's independent of the offer/escalation flow.
+  { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 9 },
+  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Safety net: offers any shift confirmed too late for the weekly run, and escalates shifts whose tier wait has elapsed.", group: "daily", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
@@ -39,15 +44,18 @@ export function Schedule() {
   const [toggling, setToggling] = useState<string | null>(null);
   const [range, setRange] = useState<BookingSyncRange>(BOOKING_SYNC_RANGE_DEFAULT);
   const [editRange, setEditRange] = useState(false);
+  const [catchup, setCatchup] = useState<StaffingCatchup>(STAFFING_CATCHUP_DEFAULT);
+  const [editCatchup, setEditCatchup] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [list, r] = await Promise.all([getCronSchedules(), getBookingSyncRange()]);
+      const [list, r, cu] = await Promise.all([getCronSchedules(), getBookingSyncRange(), getStaffingCatchup()]);
       const map: Record<string, CronJob> = {};
       for (const j of list) map[j.fn] = j;
       setJobs(map);
       setRange(r);
+      setCatchup(cu);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Failed to load schedules");
     } finally {
@@ -85,6 +93,14 @@ export function Schedule() {
     const err = await updateBookingSyncRange(next);
     if (err) return err;
     toastOk("Booking sync date range updated.");
+    await load();
+    return null;
+  }
+
+  async function saveCatchup(next: StaffingCatchup) {
+    const err = await updateStaffingCatchup(next);
+    if (err) return err;
+    toastOk("Staffing catch-up timing updated.");
     await load();
     return null;
   }
@@ -127,8 +143,14 @@ export function Schedule() {
 
               <Section title="Daily jobs" hint="Run every day at a fixed time.">
                 {daily.map((r) => (
-                  <JobRow key={r.fn} row={r} busy={toggling === r.fn}
-                    onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />
+                  <div key={r.fn}>
+                    <JobRow row={r} busy={toggling === r.fn}
+                      onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />
+                    {/* The catch-up's wait sits with the job it governs. */}
+                    {r.fn === "staffing-catchup" && (
+                      <CatchupRow catchup={catchup} onEdit={() => setEditCatchup(true)} />
+                    )}
+                  </div>
                 ))}
               </Section>
             </>
@@ -141,6 +163,9 @@ export function Schedule() {
       )}
       {editRange && (
         <RangeModal range={range} onClose={() => setEditRange(false)} onSave={saveRange} />
+      )}
+      {editCatchup && (
+        <CatchupModal catchup={catchup} onClose={() => setEditCatchup(false)} onSave={saveCatchup} />
       )}
     </div>
   );
@@ -294,6 +319,103 @@ function RangeModal({ range, onClose, onSave }: {
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 18 }}>
         <Button kind="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={submit} loading={saving}>Save range</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CatchupRow({ catchup, onEdit }: { catchup: StaffingCatchup; onEdit: () => void }) {
+  const h = catchup.escalation_wait_hours;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px 14px 52px", borderTop: `1px dashed ${c.rowBd}`, background: "#fcfbf8" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tier wait</div>
+        <div style={{ fontSize: 12.5, color: c.body, marginTop: 4, lineHeight: 1.5 }}>
+          A shift escalates to the next tier <b>{h} hour{h === 1 ? "" : "s"}</b> after its last offer, if still short.
+        </div>
+        <div style={{ fontSize: 12, color: c.faint, marginTop: 3 }}>
+          Measured per shift, so one confirmed late still moves through the tiers on the same rhythm.
+        </div>
+      </div>
+      <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit timing</Button>
+    </div>
+  );
+}
+
+function CatchupModal({ catchup, onClose, onSave }: {
+  catchup: StaffingCatchup; onClose: () => void; onSave: (c: StaffingCatchup) => Promise<string | null>;
+}) {
+  const [wait, setWait] = useState(String(catchup.escalation_wait_hours));
+  const [grace, setGrace] = useState(String(catchup.offer_grace_hours));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const L = STAFFING_CATCHUP_LIMITS;
+  const waitN = Number(wait);
+  const graceN = Number(grace);
+  const waitOk = Number.isInteger(waitN) && waitN >= L.escalation_wait_hours.min && waitN <= L.escalation_wait_hours.max;
+  const graceOk = Number.isInteger(graceN) && graceN >= L.offer_grace_hours.min && graceN <= L.offer_grace_hours.max;
+
+  async function submit() {
+    if (!waitOk) { setErr(`Tier wait must be a whole number between ${L.escalation_wait_hours.min} and ${L.escalation_wait_hours.max} hours.`); return; }
+    if (!graceOk) { setErr(`Offer delay must be a whole number between ${L.offer_grace_hours.min} and ${L.offer_grace_hours.max} hours.`); return; }
+    setSaving(true); setErr(null);
+    const e = await onSave({ escalation_wait_hours: waitN, offer_grace_hours: graceN });
+    setSaving(false);
+    if (e) { setErr(e); return; }
+    onClose();
+  }
+
+  const field: React.CSSProperties = {
+    width: 90, boxSizing: "border-box", padding: "8px 10px", fontSize: 13,
+    border: `1px solid ${c.border3}`, borderRadius: 7, outline: "none", color: c.ink, background: "#fff",
+  };
+
+  return (
+    <Modal title="Staffing catch-up timing" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: c.muted, lineHeight: 1.55, marginBottom: 16 }}>
+        The catch-up runs daily and moves along any shift the weekly cycle has left behind —
+        one confirmed too late for its Tier 1 slot, or one sitting at a tier with nobody responding.
+      </div>
+
+      <div style={{ display: "flex", gap: 18, marginBottom: 16 }}>
+        <label style={{ display: "block" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Tier wait</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="number" min={L.escalation_wait_hours.min} max={L.escalation_wait_hours.max} value={wait}
+              onChange={(e) => setWait(e.target.value)} style={field} />
+            <span style={{ fontSize: 12.5, color: c.muted }}>hours</span>
+          </div>
+        </label>
+        <label style={{ display: "block" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Delay first offer</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="number" min={L.offer_grace_hours.min} max={L.offer_grace_hours.max} value={grace}
+              onChange={(e) => setGrace(e.target.value)} style={field} />
+            <span style={{ fontSize: 12.5, color: c.muted }}>hours</span>
+          </div>
+        </label>
+      </div>
+
+      <div style={{ background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        {waitOk ? (
+          <>
+            A shift confirmed late is offered to Tier 1 on the next daily run
+            {graceOk && graceN > 0 ? <> (after a {graceN}h delay)</> : null}, then escalates to
+            Tier 2 after <b>{waitN}h</b> without enough acceptances, and Tier 3 <b>{waitN}h</b> after that.
+          </>
+        ) : "Enter whole numbers to preview the timing."}
+      </div>
+
+      <div style={{ fontSize: 11.5, color: c.faint, marginTop: 10, lineHeight: 1.5 }}>
+        Leave "Delay first offer" at 0 to offer as soon as the catch-up next runs after confirmation.
+      </div>
+
+      {err && <div style={{ color: c.danger, fontSize: 12.5, marginTop: 12 }}>{err}</div>}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, marginTop: 18 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={submit} loading={saving}>Save timing</Button>
       </div>
     </Modal>
   );

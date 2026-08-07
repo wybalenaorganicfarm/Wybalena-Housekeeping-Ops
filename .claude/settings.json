@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "PowerShell(npx tsc --noEmit -p tsconfig.json)",
-      "PowerShell($d = \\(Get-Command deno -ErrorAction SilentlyContinue\\); if \\($d\\) { \"deno: $\\($d.Source\\)\" } else { \"deno not installed\" })"
+      "PowerShell($d = \\(Get-Command deno -ErrorAction SilentlyContinue\\); if \\($d\\) { \"deno: $\\($d.Source\\)\" } else { \"deno not installed\" })",
+      "Bash(cd /d/projects/Wybalena-Housekeeping-Ops *)",
+      "Read(//tmp/**)",
+      "Bash(grep -vE \"^\\\\s*--|^\\\\s*$\" supabase/migrations/20260625090400_shifts.sql)",
+      "Bash(grep -vE \"^\\\\s*--|^\\\\s*$\" supabase/migrations/20260625090500_shift_assignments.sql)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   }
 }

@@ -3,7 +3,7 @@
 // and the whatsapp-inbound webhook. All writes use the service-role client.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage } from "./adapters/whatsapp.ts";
-import { btnTitle, fillVars, loadTemplate } from "./templates.ts";
+import { btnTitle, fillVars, loadTemplate, renderTemplate } from "./templates.ts";
 import { prettyDate, prettyDateTime, prettyTime } from "./datetime.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
@@ -362,6 +362,10 @@ export async function markFullyStaffed(sb: SupabaseClient, shiftId: string): Pro
   // Name the shift being closed — a cleaner may hold offers on several.
   const closed = await loadShift(sb, shiftId);
   const phrase = closed ? ` on ${prettyDateTime(closed.shift_date, closed.start_time)}` : "";
+  const fullText = await renderTemplate(sb, "shift_full", `That shift${phrase} is now fully booked. Thanks!`, {
+    shift_date: closed ? prettyDate(closed.shift_date) : "",
+    start_time: closed ? prettyTime(closed.start_time) : "",
+  });
 
   const { data: leftover } = await sb
     .from("shift_assignments")
@@ -374,7 +378,7 @@ export async function markFullyStaffed(sb: SupabaseClient, shiftId: string): Pro
       .from("cleaners").select("phone, is_active").eq("id", a.cleaner_id).maybeSingle();
     // Don't message a cleaner who is currently Inactive; their offer is still
     // closed below.
-    if (cleaner?.phone && cleaner.is_active) await sendMessage(cleaner.phone, `That shift${phrase} is now fully booked. Thanks!`);
+    if (cleaner?.phone && cleaner.is_active) await sendMessage(cleaner.phone, fullText);
   }
   if ((leftover ?? []).length) {
     await sb

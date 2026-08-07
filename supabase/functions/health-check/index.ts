@@ -25,6 +25,7 @@ import { writeAuditLog } from "../_shared/auditLog.ts";
 import { checkHealth as checkWhapi, sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { checkHealth as checkGmail } from "../_shared/adapters/email.ts";
 import { checkHealth as checkCalendar } from "../_shared/adapters/calendar.ts";
+import { renderTemplate } from "../_shared/templates.ts";
 
 interface HealthResult {
   name: string;
@@ -213,10 +214,11 @@ Deno.serve(async (req) => {
         .in("role", ["admin", "super_admin", "operations_manager"])
         .eq("is_active", true)
         .not("phone", "is", null);
-      const waText =
+      const waText = await renderTemplate(sb, "connection_alert_whatsapp",
         `⚠️ *Wybalena system alert*\n\n${broken.length} connection(s) are not working: ${brokenLabels}.\n\n` +
         `Email alerts couldn't be sent${gmailBroken ? " (Gmail is one of the failures)" : ""}, ` +
-        `so you're getting this on WhatsApp. Please open the app to review.`;
+        `so you're getting this on WhatsApp. Please open the app to review.`,
+        { count: broken.length, connections: brokenLabels });
       for (const a of admins ?? []) {
         if (a.phone) { const r = await sendMessage(a.phone, waText); if (r.ok) whatsapped++; }
       }

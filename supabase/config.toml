@@ -10,9 +10,20 @@ verify_jwt = false
 verify_jwt = false
 [functions.offer-tier-1]
 verify_jwt = false
+# Per-tier non-responder reminders (replaced the single remind-nonresponders,
+# which stays deployed as a no-op stub).
 [functions.remind-nonresponders]
 verify_jwt = false
+[functions.remind-tier-1]
+verify_jwt = false
+[functions.remind-tier-2]
+verify_jwt = false
+[functions.remind-tier-3]
+verify_jwt = false
 [functions.escalate-tier-2]
+verify_jwt = false
+# Daily safety net that advances shifts the weekly chain left behind.
+[functions.staffing-catchup]
 verify_jwt = false
 [functions.escalate-tier-3]
 verify_jwt = false

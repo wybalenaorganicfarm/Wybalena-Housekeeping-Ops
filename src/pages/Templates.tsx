@@ -104,14 +104,37 @@ function EditField({ label, children }: { label: string; children: React.ReactNo
 }
 
 // ── Collapsed card (grid cell): display-only, opens the editor modal ──────────
+// Who each message goes to. Keyed by template key so the badge is right even
+// before a new template's migration has been applied. Anything unlisted falls
+// back to Cleaner — every template added so far is cleaner-facing unless it
+// sits in the staff/roster groups.
+interface Recipient { label: string; icon: string; bg: string; fg: string; hint: string }
+const R_CLEANER: Recipient = { label: "Cleaner", icon: "user", bg: "#eaf3ed", fg: "#2c6446", hint: "Sent to a cleaner" };
+const R_LEAD: Recipient = { label: "Team lead", icon: "users", bg: "#ECEEFB", fg: "#3B44A0", hint: "Sent to the team leader" };
+const R_OPS: Recipient = { label: "Ops manager", icon: "shield", bg: "#FBF1DF", fg: "#9a7320", hint: "Sent to the Operations Manager" };
+const R_ADMIN: Recipient = { label: "Admins", icon: "shield", bg: "#F8E5E1", fg: "#a8392b", hint: "Sent to all admins" };
+const RECIPIENT_DEFAULT = R_CLEANER;
+const RECIPIENT: Record<string, Recipient> = {
+  lead_roster: R_LEAD,
+  lead_cleaner_cancelled: R_LEAD,
+  mid_retreat_whatsapp: R_OPS,
+  connection_alert_whatsapp: R_ADMIN,
+};
+
 function TemplateCard({ t, onEdit }: { t: MessageTemplate; onEdit: () => void }) {
   const customised = isCustomised(t);
+  const to = RECIPIENT[t.key] ?? RECIPIENT_DEFAULT;
   return (
     <Card style={{ padding: 16, height: "100%", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div style={{ fontSize: 14.5, fontWeight: 700, color: c.ink }}>{t.label}</div>
+            {/* Who receives this message — the quickest way to find the right
+                template when several read similarly. */}
+            <span title={to.hint} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: to.fg, background: to.bg, borderRadius: 20, padding: "2px 8px" }}>
+              <Icon name={to.icon} size={10} strokeWidth={2.4} /> {to.label}
+            </span>
             {customised && (
               <span style={{ fontSize: 10, fontWeight: 700, color: "#5b3fa0", background: "#f2ecfb", borderRadius: 20, padding: "2px 8px" }}>Customised</span>
             )}
@@ -283,7 +306,7 @@ export function Templates() {
 
   return (
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
-      <PageHeader title="Message Templates" subtitle="Edit the WhatsApp messages cleaners receive" />
+      <PageHeader title="Message Templates" subtitle="Edit every WhatsApp message the system sends — each card shows who receives it" />
       <div style={{ flex: 1, overflowY: "auto", padding: "22px 24px 48px" }}>
         <div style={{ maxWidth: 1160, margin: "0 auto" }}>
           <div style={{ display: "flex", gap: 9, marginBottom: 20, padding: "12px 15px", background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 10 }}>

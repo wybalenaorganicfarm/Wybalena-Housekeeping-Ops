@@ -5,6 +5,7 @@ import { handleOptions, json } from "../_shared/http.ts";
 import { getCaller, isWriter } from "../_shared/authz.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
+import { renderTemplate } from "../_shared/templates.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const VALID_TIERS = ["tier_1", "tier_2", "tier_3"];
@@ -70,7 +71,9 @@ Deno.serve(async (req) => {
   try {
     const wa = await sendMessage(
       phone,
-      `Hi ${full_name}! You've been added to the Wybalena cleaning roster. You'll get shift offers here on WhatsApp — reply YES to accept or NO to decline. Welcome aboard! 🧹`,
+      await renderTemplate(sb, "cleaner_welcome",
+        `Hi ${full_name}! You've been added to the Wybalena cleaning roster. You'll get shift offers here on WhatsApp — reply YES to accept or NO to decline. Welcome aboard! 🧹`,
+        { cleaner_name: full_name }),
     );
     whatsapped = wa.ok;
   } catch (e) {

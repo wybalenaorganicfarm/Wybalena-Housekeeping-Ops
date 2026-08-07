@@ -13,11 +13,14 @@ import { handleOptions, json } from "../_shared/http.ts";
 import { getCaller, isWriter } from "../_shared/authz.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
-// The complete set of scheduled jobs (matches 20260625100100_cron.sql).
+// The complete set of scheduled jobs (matches 20260625100100_cron.sql and
+// 20260805160000_per_tier_reminders.sql). "remind-nonresponders" is retired and
+// deliberately absent — it is replaced by the three per-tier reminder jobs.
 const KNOWN_FNS = new Set([
-  "sync-bookings", "confirm-reminder", "offer-tier-1", "remind-nonresponders",
+  "sync-bookings", "confirm-reminder", "offer-tier-1",
+  "remind-tier-1", "remind-tier-2", "remind-tier-3",
   "escalate-tier-2", "escalate-tier-3", "pre-shift-reminder", "cancellation-followup",
-  "health-check", "wipeover-notify",
+  "health-check", "wipeover-notify", "staffing-catchup",
 ]);
 
 // Guard: "m h dom mon dow", each field digits / * / , / - / /. Keeps obviously

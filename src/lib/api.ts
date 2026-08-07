@@ -348,6 +348,35 @@ export async function updateBookingSyncRange(range: BookingSyncRange): Promise<s
   return error ? friendlyError(error.message) : null;
 }
 
+// ---- Staffing catch-up timing (app_settings) -------------------------------
+// How long a shift waits at one tier before the daily catch-up escalates it.
+// staffing-catchup falls back to 24h if the row is missing.
+
+export interface StaffingCatchup { escalation_wait_hours: number; offer_grace_hours: number }
+
+export const STAFFING_CATCHUP_DEFAULT: StaffingCatchup = { escalation_wait_hours: 24, offer_grace_hours: 0 };
+export const STAFFING_CATCHUP_LIMITS = {
+  escalation_wait_hours: { min: 1, max: 168 },
+  offer_grace_hours: { min: 0, max: 72 },
+};
+
+export async function getStaffingCatchup(): Promise<StaffingCatchup> {
+  const { data, error } = await supabase
+    .from("app_settings").select("value").eq("key", "staffing_catchup").maybeSingle();
+  if (error || !data) return STAFFING_CATCHUP_DEFAULT;
+  const v = (data as { value: Partial<StaffingCatchup> }).value ?? {};
+  return {
+    escalation_wait_hours: Number(v.escalation_wait_hours ?? STAFFING_CATCHUP_DEFAULT.escalation_wait_hours),
+    offer_grace_hours: Number(v.offer_grace_hours ?? STAFFING_CATCHUP_DEFAULT.offer_grace_hours),
+  };
+}
+
+export async function updateStaffingCatchup(next: StaffingCatchup): Promise<string | null> {
+  const { error } = await supabase
+    .from("app_settings").update({ value: next } as never).eq("key", "staffing_catchup");
+  return error ? friendlyError(error.message) : null;
+}
+
 // ---- Connections / integration health (admin) ------------------------------
 
 export interface ConnectionResult {

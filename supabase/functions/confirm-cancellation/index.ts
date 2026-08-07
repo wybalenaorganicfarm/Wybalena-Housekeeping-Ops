@@ -5,6 +5,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { getCaller, isWriter } from "../_shared/authz.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
+import { renderTemplate } from "../_shared/templates.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 Deno.serve(async (req) => {
@@ -33,7 +34,11 @@ Deno.serve(async (req) => {
       .from("shift_assignments").select("cleaner_id").eq("shift_id", s.id).eq("status", "accepted");
     for (const a of accepted ?? []) {
       const { data: c } = await sb.from("cleaners").select("phone").eq("id", a.cleaner_id).maybeSingle();
-      if (c?.phone) { await sendMessage(c.phone, "A shift you accepted has been cancelled. No action needed."); notified++; }
+      if (c?.phone) {
+        await sendMessage(c.phone, await renderTemplate(sb, "shift_cancelled_by_admin",
+          "A shift you accepted has been cancelled. No action needed."));
+        notified++;
+      }
     }
     await sb.from("shifts")
       .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
