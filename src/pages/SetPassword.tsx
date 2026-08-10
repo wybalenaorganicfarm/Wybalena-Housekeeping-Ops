@@ -27,10 +27,10 @@ export function SetPassword() {
   return (
     <div style={{ display: "flex", height: "100vh", width: "100%", color: c.ink, background: c.sand, alignItems: "center", justifyContent: "center", padding: 40 }}>
       <div style={{ width: "100%", maxWidth: 380 }}>
-        <div style={{ fontFamily: font.display, fontWeight: 700, fontSize: 22, color: c.green }}>Wybalena</div>
+        <div style={{ fontFamily: font.display, fontWeight: font.displayWeight, fontSize: 22, color: c.green }}>Wybalena</div>
         <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginTop: 3, marginBottom: 26 }}>Housekeeping Operations</div>
 
-        <h2 style={{ fontFamily: font.display, fontSize: 24, fontWeight: 700, margin: 0 }}>Accept your invitation</h2>
+        <h2 style={{ fontFamily: font.display, fontSize: 24, fontWeight: font.displayWeight, margin: 0 }}>Accept your invitation</h2>
         <p style={{ fontSize: 13.5, color: c.muted2, margin: "7px 0 26px" }}>Set a password to finish setting up your account.</p>
 
         <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 7 }}>New password</div>

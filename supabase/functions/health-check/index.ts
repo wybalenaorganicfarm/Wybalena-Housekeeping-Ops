@@ -12,15 +12,20 @@
 // as a failure (the adapter is intentionally stubbed until creds are wired).
 // Only configured-but-failing connections raise the alert.
 //
-// Recipient: HEALTHCHECK_ALERT_TO (set this to Yashasvi's address), falling back
-// to ALERT_EMAIL_TO (Ashleigh).
+// Recipient: the Operations Manager (see _shared/admin.ts), the same person who
+// receives every other notification in the system. HEALTHCHECK_ALERT_TO is the
+// email fallback for before one is designated.
 //
-// CAVEAT: if Gmail itself is the broken connection the alert email cannot be
-// delivered — the failure is also console.error'd and returned in the response
-// so it surfaces in Supabase function logs / log-based alerting.
+// If Gmail itself is the broken connection the alert email cannot be delivered,
+// so the notice falls back to WhatsApp — to her profile phone, or to
+// ALERT_WHATSAPP_TO. Set that env var: it is the only destination that does not
+// depend on profile data being filled in. When she cannot be reached at ALL the
+// run is logged as `failed` with the reason, because a warning that reaches no
+// one is worse than the outage it was reporting.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
+import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 import { checkHealth as checkWhapi, sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { checkHealth as checkGmail } from "../_shared/adapters/email.ts";
@@ -171,7 +176,9 @@ Deno.serve(async (req) => {
     // Surface in the in-app Alerts queue too, so a disconnect is visible in the
     // portal (not only by email/WhatsApp). Keep a single open alert at a time:
     // refresh the existing one if present, otherwise insert.
-    const alertTitle = `${broken.length} connection${broken.length === 1 ? "" : "s"} need attention`;
+    // Wording must match get-connection-status's reconcileAlert, which retitles
+    // this same alert as connections recover.
+    const alertTitle = `${broken.length} connection${broken.length === 1 ? "" : "s"} need${broken.length === 1 ? "s" : ""} attention`;
     const alertBody = `Not working: ${brokenLabels}. Open Connections (Administration) to reconnect.`;
     const { data: openConn } = await sb
       .from("alerts")
@@ -188,58 +195,75 @@ Deno.serve(async (req) => {
         .insert({ alert_type: "connection_down", title: alertTitle, body: alertBody });
     }
 
-    // Notify over a channel that actually WORKS. Prefer email; but if Gmail itself
-    // is one of the failures, email won't send — fall back to WhatsApp to the
-    // admins/ops managers who have a phone. (If both email and WhatsApp are down we
-    // can't reach anyone — the failure is still logged + console.error'd above.)
+    // Notify the Operations Manager — she runs the portal, and every other
+    // notification in the system goes to her. Prefer email; but if Gmail itself
+    // is one of the failures, email won't send, so fall back to WhatsApp. (If
+    // both are down we can't reach her — still logged + console.error'd above.)
     const gmailBroken = broken.some((b) => b.name === "gmail");
     const whatsappBroken = broken.some((b) => b.name === "whapi");
+    const ops = await opsManager(sb);
 
     let emailed = false;
     if (!gmailBroken) {
       const sent = await sendEmail(
         `Wybalena: ${broken.length} connection(s) need attention`,
         text,
-        Deno.env.get("HEALTHCHECK_ALERT_TO") ?? undefined,
+        // HEALTHCHECK_ALERT_TO stays as the fallback for before an operations
+        // manager is designated (or for routing a copy to the developer).
+        ops.email ?? Deno.env.get("HEALTHCHECK_ALERT_TO") ?? undefined,
         html,
       );
       emailed = sent.ok;
     }
 
-    let whatsapped = 0;
-    if (!emailed && !whatsappBroken) {
-      const { data: admins } = await sb
-        .from("profiles")
-        .select("full_name, phone")
-        .in("role", ["admin", "super_admin", "operations_manager"])
-        .eq("is_active", true)
-        .not("phone", "is", null);
+    let whatsapped = false;
+    // Why the WhatsApp leg didn't run / didn't reach her. Recorded verbatim so a
+    // silent non-delivery can never again look like a transient blip: this exact
+    // fallback sat broken for four days because the manager's profile had no
+    // phone saved, and the old log line ("Neither email nor WhatsApp could be
+    // used") gave no clue that a missing phone number was the reason.
+    let waSkipReason: string | null = null;
+    if (emailed) {
+      waSkipReason = null;
+    } else if (whatsappBroken) {
+      waSkipReason = "WhatsApp is one of the broken connections";
+    } else if (!ops.phone) {
+      waSkipReason = `${ops.name} has no WhatsApp number saved on her profile, and ALERT_WHATSAPP_TO is not set`;
+    } else {
       const waText = await renderTemplate(sb, "connection_alert_whatsapp",
         `⚠️ *Wybalena system alert*\n\n${broken.length} connection(s) are not working: ${brokenLabels}.\n\n` +
         `Email alerts couldn't be sent${gmailBroken ? " (Gmail is one of the failures)" : ""}, ` +
         `so you're getting this on WhatsApp. Please open the app to review.`,
         { count: broken.length, connections: brokenLabels });
-      for (const a of admins ?? []) {
-        if (a.phone) { const r = await sendMessage(a.phone, waText); if (r.ok) whatsapped++; }
-      }
+      const r = await sendMessage(ops.phone, waText);
+      whatsapped = r.ok;
+      if (!r.ok) waSkipReason = "WhatsApp rejected the message";
     }
 
+    // Nobody was reached at all — the check did its job but the warning went
+    // nowhere, which is strictly worse than a broken connection on its own.
+    // 'failed' (not 'warning') so it stands out in System Logs as needing action.
+    const unreachable = !emailed && !whatsapped;
+
     const channelNote = emailed
-      ? " An email with next steps was sent to the admin."
-      : whatsapped > 0
-        ? ` Email was unavailable, so ${whatsapped} admin(s) were notified on WhatsApp instead.`
-        : " Neither email nor WhatsApp could be used to notify the admins.";
+      ? ` An email with next steps was sent to ${ops.name}.`
+      : whatsapped
+        ? ` Email was unavailable, so ${ops.name} was notified on WhatsApp instead.`
+        : ` NOBODY WAS NOTIFIED — email was unavailable and the WhatsApp fallback could not be used: ${waSkipReason}.` +
+          ` Add a mobile number to the Operations Manager in Users so these alerts can reach her.`;
 
     await writeAuditLog(sb, {
       event_type: "health.check",
       event_label: "Connection Health Check",
-      status: "warning",
+      status: unreachable ? "failed" : "warning",
       summary: `Daily connection check found ${broken.length} connection(s) not working: ${brokenLabels}.${channelNote}`,
+      error_message: unreachable ? `No alert could be delivered: ${waSkipReason}` : undefined,
       detail: {
         not_working: broken.map((b) => SERVICE[b.name]?.label ?? b.name),
         not_configured: unconfigured,
-        notified_by: emailed ? "email" : whatsapped > 0 ? "whatsapp" : "none",
-        admins_whatsapped: whatsapped,
+        notified: ops.name,
+        notified_by: emailed ? "email" : whatsapped ? "whatsapp" : "none",
+        whatsapp_skip_reason: waSkipReason,
       },
       source: "health-check",
       triggered_by: "cron",

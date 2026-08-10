@@ -55,7 +55,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
             <div style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#F8E5E1", color: "#a8392b", fontSize: 10, letterSpacing: "0.05em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5, marginBottom: 8 }}>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: c.danger }} />Urgent · {shift.current_tier ? TIER_LABEL[shift.current_tier] : "Tier 3"}
             </div>
-            <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: 700, margin: "0 0 3px" }}>Assign manually</h2>
+            <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: font.displayWeight, margin: "0 0 3px" }}>Assign manually</h2>
             <div style={{ fontSize: 12.5, color: c.muted2 }}>{typeLabel(shift)} · <span style={{ color: c.danger, fontWeight: 600 }}>{openSlots} spot(s) still open</span></div>
           </div>
           <button onClick={onClose} style={{ width: 30, height: 30, border: `1px solid ${c.border3}`, background: "#fff", borderRadius: 7, color: c.muted2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="x" size={15} strokeWidth={2} /></button>

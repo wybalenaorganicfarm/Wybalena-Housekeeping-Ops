@@ -20,7 +20,7 @@ const KNOWN_FNS = new Set([
   "sync-bookings", "confirm-reminder", "offer-tier-1",
   "remind-tier-1", "remind-tier-2", "remind-tier-3",
   "escalate-tier-2", "escalate-tier-3", "pre-shift-reminder", "cancellation-followup",
-  "health-check", "wipeover-notify", "staffing-catchup",
+  "health-check", "wipeover-notify", "mid-retreat-notify", "staffing-catchup",
 ]);
 
 // Guard: "m h dom mon dow", each field digits / * / , / - / /. Keeps obviously

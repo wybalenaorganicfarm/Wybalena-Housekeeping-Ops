@@ -391,6 +391,9 @@ export interface ConnectionResult {
 export interface ConnectionStatus {
   results: ConnectionResult[];
   google: { email: string | null; connectedAt: string | null } | null;
+  // Set on the check that found everything healthy again and closed the open
+  // "connections need attention" alert. True once, not on every poll.
+  alertResolved?: boolean;
 }
 
 export async function getConnectionStatus(): Promise<ConnectionStatus> {

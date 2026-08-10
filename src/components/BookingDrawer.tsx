@@ -31,7 +31,7 @@ export function BookingDrawer({ booking, shifts, onClose, onViewShift }: {
                 </span>
                 <span style={{ background: "#f0eee9", color: "#6b665c", fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>Google Calendar</span>
               </div>
-              <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, margin: "0 0 2px" }}>{booking.guest_name || "Unnamed booking"}</h2>
+              <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: font.displayWeight, margin: "0 0 2px" }}>{booking.guest_name || "Unnamed booking"}</h2>
               <div style={{ fontSize: 12.5, color: c.muted2 }}>{booking.nights} night{booking.nights === 1 ? "" : "s"}{booking.guest_count != null ? ` · ${booking.guest_count} guest${booking.guest_count === 1 ? "" : "s"}` : ""}</div>
             </div>
             <button onClick={onClose} style={{ width: 30, height: 30, flex: "none", border: `1px solid ${c.border}`, background: "#fff", borderRadius: 6, color: c.muted2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="x" size={16} strokeWidth={1.8} /></button>

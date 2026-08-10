@@ -29,11 +29,11 @@ export function Login() {
       <div style={{ flex: "none", width: "46%", background: c.green, color: "#fff", padding: "48px 56px", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: c.greenMid }} />
         <div>
-          <div style={{ fontFamily: font.display, fontWeight: 700, fontSize: 23 }}>Wybalena</div>
+          <div style={{ fontFamily: font.display, fontWeight: font.displayWeight, fontSize: 23 }}>Wybalena</div>
           <div style={{ fontSize: 10, letterSpacing: "0.18em", textTransform: "uppercase", color: "#7fa491", fontWeight: 600, marginTop: 3 }}>Housekeeping Operations</div>
         </div>
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 420 }}>
-          <h1 style={{ fontFamily: font.display, fontSize: 38, fontWeight: 700, lineHeight: 1.1, margin: 0 }}>The cockpit for every clean between guests.</h1>
+          <h1 style={{ fontFamily: font.display, fontSize: 38, fontWeight: font.displayWeight, lineHeight: 1.1, margin: 0 }}>The cockpit for every clean between guests.</h1>
           <p style={{ fontSize: 15, color: "#bcd2c5", lineHeight: 1.6, margin: "20px 0 0" }}>See, confirm, override and monitor every cleaning shift. The automation handles the offers and reminders — you stay in control.</p>
         </div>
         <div style={{ fontSize: 11.5, color: "#5e7d6c" }}>Wybalena Organic Farm · BYRON BAY HINTERLAND</div>
@@ -41,7 +41,7 @@ export function Login() {
 
       <div style={{ flex: 1, background: c.sand, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
         <div style={{ width: "100%", maxWidth: 368 }}>
-          <h2 style={{ fontFamily: font.display, fontSize: 24, fontWeight: 700, margin: 0 }}>Sign in</h2>
+          <h2 style={{ fontFamily: font.display, fontSize: 24, fontWeight: font.displayWeight, margin: 0 }}>Sign in</h2>
           <p style={{ fontSize: 13.5, color: c.muted2, margin: "7px 0 26px" }}>Welcome back. Sign in to continue.</p>
 
           <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 7 }}>Email</div>

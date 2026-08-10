@@ -41,7 +41,7 @@ export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: 
   return (
     <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 10, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${c.border}` }}>
-        <h3 style={{ fontFamily: font.display, fontSize: 17, fontWeight: 700, margin: 0 }}>{monthLabel}</h3>
+        <h3 style={{ fontFamily: font.display, fontSize: 17, fontWeight: font.displayWeight, margin: 0 }}>{monthLabel}</h3>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={() => move(-1)} style={navBtn}><span style={{ display: "inline-flex", transform: "rotate(180deg)" }}><Icon name="chevronRight" size={15} strokeWidth={2.2} /></span></button>
           <button onClick={() => setCursor(new Date(today.getFullYear(), today.getMonth(), 1))} style={{ ...navBtn, width: "auto", padding: "0 12px", fontSize: 12.5, fontWeight: 600 }}>Today</button>

@@ -35,8 +35,11 @@ export const c = {
 } as const;
 
 export const font = {
-  display: "'Bricolage Grotesque', sans-serif",
+  // Headers / display text are Inter too — the only difference is weight.
+  display: "'Inter', sans-serif",
   body: "'Inter', sans-serif",
+  // Weight for headers and display text, in place of the old display typeface.
+  displayWeight: 800,
 };
 
 // Status -> badge styling

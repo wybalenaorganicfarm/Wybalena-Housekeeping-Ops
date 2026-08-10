@@ -40,7 +40,11 @@ export function Connections() {
       const s = await getConnectionStatus();
       setStatus(s);
       setCheckedAt(new Date());
-      if (announce) toastOk("Connection check complete.");
+      // The check itself closes the "connections need attention" alert once
+      // everything is healthy again — say so, so the admin doesn't go hunting
+      // for it on the Alerts page to clear it by hand.
+      if (s.alertResolved) toastOk("All connections working — the alert has been cleared.");
+      else if (announce) toastOk("Connection check complete.");
     } catch {
       setStatus(null);
     } finally {
@@ -116,10 +120,19 @@ export function Connections() {
 
           <div style={{ display: "flex", gap: 9, marginTop: 20, padding: "13px 15px", background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 10 }}>
             <Icon name="shield" size={16} color="#5e7a6a" strokeWidth={1.9} />
-            <div style={{ fontSize: 12, color: "#41604f", lineHeight: 1.5 }}>
-              Connections are checked automatically every day. If one drops unexpectedly, the system
-              raises an alert in the <strong>Alerts</strong> section (and emails the admin), so it
-              comes to your attention without checking this page.
+            <div style={{ fontSize: 12, color: "#41604f", lineHeight: 1.55 }}>
+              <strong>How this page works.</strong> The status above is checked live, right now — every
+              time you open this page or press Run Connection Check. The system also runs the same
+              check once a day on its own.
+              <div style={{ marginTop: 7 }}>
+                If a connection drops, you're told two ways: an alert appears in the{" "}
+                <strong>Alerts</strong> section, and a message goes out to the admins — by email
+                normally, or by WhatsApp if email itself is the connection that's down.
+              </div>
+              <div style={{ marginTop: 7, color: "#5e7a6a" }}>
+                For the WhatsApp fallback to work, at least one admin or operations manager must have a
+                mobile number saved in <strong>Users</strong>.
+              </div>
             </div>
           </div>
         </div>

@@ -3,18 +3,16 @@
 // the schedule shifts the window with it. How far ahead it starts (lead weeks)
 // and how long it runs (window days) are admin-editable from /schedule too —
 // stored in app_settings, defaulting to the original 5 weeks / 7 days.
-// Fetches the target booking window, dedupes on gcal_event_id,
-// stores bookings, creates shift(s) by the >=7-night rule, raises venue-gap
-// alerts for >3-day gaps, and detects calendar cancellations (Spec §2, §7.1, §7.2).
+// Fetches the target booking window, dedupes on gcal_event_id, stores bookings,
+// creates the checkout clean, and detects calendar cancellations (Spec §2, §7.1,
+// §7.2). Venue-gap (wipeover) and long-stay (mid-retreat) notices are separate
+// scheduled jobs — see wipeover-notify and mid-retreat-notify.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { fetchBookings } from "../_shared/adapters/calendar.ts";
 import { requiredForType } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
-import { confirmationEmail, midRetreatEmail, type ConfirmShift } from "../_shared/emailTemplates.ts";
-import { sendMessage } from "../_shared/adapters/whatsapp.ts";
-import { prettyDate } from "../_shared/datetime.ts";
-import { renderTemplate } from "../_shared/templates.ts";
+import { confirmationEmail, type ConfirmShift } from "../_shared/emailTemplates.ts";
 import { signShift } from "../_shared/confirmToken.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
@@ -22,10 +20,7 @@ import { loadBookingSyncRange } from "../_shared/settings.ts";
 
 const DAY = 86400000;
 const SOURCE = "sync-bookings";
-const SHIFT_LABEL: Record<string, string> = { standard: "Standard Clean", mid_retreat: "Mid-Retreat Clean" };
-// A stay this long needs a mid-retreat clean part-way through. The shift is NOT
-// created automatically — the Operations Manager is notified and schedules it.
-const MID_RETREAT_MIN_NIGHTS = 7;
+const SHIFT_LABEL: Record<string, string> = { standard: "Standard Clean" };
 
 // The venue's calendar day (Australia/Sydney, DST-aware) — the only day boundary
 // that matters here. Supabase runs UTC regardless of project region, and Sydney is
@@ -87,8 +82,6 @@ Deno.serve(async (req) => {
 
   const newShiftSummaries: string[] = [];
   const pendingForEmail: ConfirmShift[] = [];
-  // Long stays whose mid-retreat clean the manager must schedule by hand.
-  const midRetreatNeeded: { booking: typeof events[number]; bookingId: string; suggestedDate: string }[] = [];
   let createdBookings = 0;
   let createdShifts = 0;
   let cancellations = 0;
@@ -189,7 +182,8 @@ Deno.serve(async (req) => {
     // --- Create the checkout clean. Long stays (>=7 nights) ALSO need a
     // mid-retreat clean, but that one is no longer created automatically: its
     // date and crew are a judgement call, so the Operations Manager is notified
-    // (email + WhatsApp, like the wipeover notice) and schedules it by hand.
+    // (email + WhatsApp, like the wipeover notice) by mid-retreat-notify and
+    // schedules it by hand.
     const shiftRows = [
       {
         booking_id: bookingId,
@@ -201,10 +195,6 @@ Deno.serve(async (req) => {
         required_cleaners: requiredForType("standard"),
       },
     ];
-    if (ev.nights >= MID_RETREAT_MIN_NIGHTS) {
-      const mid = new Date(new Date(ev.checkIn).getTime() + Math.floor(ev.nights / 2) * DAY);
-      midRetreatNeeded.push({ booking: ev, bookingId, suggestedDate: localDateStr(mid) });
-    }
     const { data: insertedShifts } = await sb.from("shifts").insert(shiftRows).select("id, shift_type, shift_date, start_time, required_cleaners");
     createdShifts += (insertedShifts ?? []).length;
     for (const sh of insertedShifts ?? []) {
@@ -219,9 +209,7 @@ Deno.serve(async (req) => {
         check_in: ev.checkIn,
         check_out: ev.checkOut,
       });
-      const summary = sh.shift_type === "mid_retreat"
-        ? `Mid-Retreat Clean shift created for ${sh.shift_date} (long stay ≥7 nights).`
-        : `${SHIFT_LABEL[sh.shift_type] ?? sh.shift_type} shift created for ${sh.shift_date} from ${ev.guestName ?? "guest"}'s booking.`;
+      const summary = `${SHIFT_LABEL[sh.shift_type] ?? sh.shift_type} shift created for ${sh.shift_date} from ${ev.guestName ?? "guest"}'s booking.`;
       await writeAuditLog(sb, {
         event_type: "shift.created",
         event_label: "Shift Created",
@@ -279,85 +267,11 @@ Deno.serve(async (req) => {
     });
   }
 
-  // --- Mid-retreat notices ---------------------------------------------------
-  // The shifts themselves are deliberately NOT created (see above) — this tells
-  // the Operations Manager to schedule them. One ALERT per booking (so each can
-  // be actioned and dismissed on its own), but ONE email and ONE WhatsApp for
-  // the whole run: several long stays in a roster must not mean several
-  // near-identical messages to work through.
-  let midRetreatNotified = 0;
-  if (midRetreatNeeded.length) {
-    const ops = await opsManager(sb);
-    const fresh: typeof midRetreatNeeded = [];
-
-    // Skip any booking that already has an open notice — a re-run must not
-    // re-alert or re-email for one it has already flagged.
-    for (const item of midRetreatNeeded) {
-      const { data: dup } = await sb
-        .from("alerts")
-        .select("id")
-        .eq("alert_type", "mid_retreat_needed")
-        .eq("status", "open")
-        .eq("booking_id", item.bookingId)
-        .maybeSingle();
-      if (dup) continue;
-
-      await sb.from("alerts").insert({
-        alert_type: "mid_retreat_needed",
-        booking_id: item.bookingId,
-        title: "Mid-retreat clean needed",
-        body: `${item.booking.guestName ?? "A booking"} is ${item.booking.nights} nights — a mid-retreat clean is needed around ${prettyDate(item.suggestedDate)}. Create the shift manually.`,
-      });
-      fresh.push(item);
-    }
-
-    if (fresh.length) {
-      midRetreatNotified = fresh.length;
-
-      const mail = midRetreatEmail(fresh.map(({ booking: ev, suggestedDate }) => ({
-        booking: { guest_name: ev.guestName, gcal_event_id: ev.gcalEventId, check_in: ev.checkIn, check_out: ev.checkOut },
-        nights: ev.nights,
-        suggestedDate: prettyDate(suggestedDate),
-      })));
-      const sent = await sendEmail(mail.subject, mail.text, ops.email ?? undefined, mail.html);
-
-      // The same digest on WhatsApp. A missing manager phone is not a failure —
-      // the email and the alerts already carry it.
-      const many = fresh.length > 1;
-      const bookingList = fresh.map(({ booking: ev, suggestedDate }) =>
-        `• ${ev.guestName ?? "A booking"} — ${ev.nights} nights\n` +
-        `  📅 ${prettyDate(localDateStr(new Date(ev.checkIn)))} → ${prettyDate(localDateStr(new Date(ev.checkOut)))}\n` +
-        `  ⏰ Suggested mid-stay date: ${prettyDate(suggestedDate)}`).join("\n\n");
-      const waText = await renderTemplate(sb, "mid_retreat_whatsapp",
-        `🧹 *Mid-Retreat Clean${many ? "s" : ""} Required*\n\n` +
-        (many ? `${fresh.length} bookings in this roster are 7 nights or longer:\n\n` : "") +
-        bookingList +
-        `\n\n${many ? "These shifts are" : "This shift is"} not created automatically — please add ${many ? "them" : "it"} from the Shifts page.`,
-        { booking_list: bookingList, count: fresh.length });
-      const waSent = ops.phone ? await sendMessage(ops.phone, waText) : null;
-
-      const waWord = waSent === null ? "skipped (no manager phone)" : waSent.ok ? "sent" : "failed";
-      await writeAuditLog(sb, {
-        event_type: "mid_retreat.notified",
-        event_label: "Mid-Retreat Clean",
-        status: sent.ok ? "success" : "failed",
-        summary:
-          `${fresh.length} mid-retreat clean(s) need scheduling: ` +
-          fresh.map(({ booking: ev, suggestedDate }) => `${ev.guestName ?? "a booking"} (${ev.nights}n, suggested ${suggestedDate})`).join("; ") +
-          `. Alert(s) raised. Email ${sent.ok ? "sent" : "failed"}; WhatsApp ${waWord}.`,
-        error_message: sent.ok ? undefined : "email provider returned an error",
-        detail: {
-          count: fresh.length,
-          bookings: fresh.map(({ booking: ev, bookingId, suggestedDate }) =>
-            ({ booking_id: bookingId, guest: ev.guestName, nights: ev.nights, suggested_date: suggestedDate })),
-          emailed: sent.ok,
-          whatsapped: waSent?.ok ?? false,
-        },
-        source: SOURCE,
-        triggered_by: "cron",
-      });
-    }
-  }
+  // Long-stay (mid-retreat) detection and its email/WhatsApp notice now live in
+  // their own independently-schedulable function (mid-retreat-notify), so
+  // they're not run here — same split as the wipeover notice above. Detecting it
+  // here could only ever see bookings checking out in this week's window that
+  // had no shift yet; the standalone job re-scans every upcoming booking.
 
   // --- Run summary ---------------------------------------------------------
   if (createdBookings === 0 && cancellations === 0) {
@@ -375,9 +289,8 @@ Deno.serve(async (req) => {
       event_type: "sync.run",
       event_label: "Weekly Booking Sync",
       status: "success",
-      summary: `Weekly booking sync completed. ${createdBookings} new booking(s) found, ${createdShifts} shift(s) created`
-        + (midRetreatNotified ? `, ${midRetreatNotified} mid-retreat clean(s) flagged for manual scheduling.` : "."),
-      detail: { createdBookings, createdShifts, cancellations, midRetreatNotified, leadWeeks, windowDays, from: fromDate, to: lastDate },
+      summary: `Weekly booking sync completed. ${createdBookings} new booking(s) found, ${createdShifts} shift(s) created.`,
+      detail: { createdBookings, createdShifts, cancellations, leadWeeks, windowDays, from: fromDate, to: lastDate },
       source: SOURCE,
       triggered_by: "cron",
     });

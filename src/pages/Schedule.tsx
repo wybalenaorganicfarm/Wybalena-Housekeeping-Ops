@@ -27,8 +27,9 @@ const META: JobMeta[] = [
   { fn: "remind-tier-2", label: "Tier 2 Non-Responder Reminders", desc: "Re-pings Tier 2 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 6 },
   { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Opens shifts still unfilled up to Tier 3 cleaners.", group: "weekly", order: 7 },
   { fn: "remind-tier-3", label: "Tier 3 Non-Responder Reminders", desc: "Re-pings Tier 3 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 8 },
-  // Sits after the tier sequence — it's independent of the offer/escalation flow.
+  // Sit after the tier sequence — both are independent of the offer/escalation flow.
   { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 9 },
+  { fn: "mid-retreat-notify", label: "Mid-Retreat Cleaning Alert", desc: "Emails and WhatsApps Ashleigh when a stay of 7+ nights needs a mid-retreat clean scheduled by hand.", group: "weekly", order: 10 },
   { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Safety net: offers any shift confirmed too late for the weekly run, and escalates shifts whose tier wait has elapsed.", group: "daily", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
@@ -175,7 +176,7 @@ function Section({ title, hint, children }: { title: string; hint: string; child
   return (
     <div style={{ marginBottom: 26 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 10 }}>
-        <h2 style={{ margin: 0, fontFamily: font.display, fontSize: 15, fontWeight: 700, color: c.ink }}>{title}</h2>
+        <h2 style={{ margin: 0, fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight, color: c.ink }}>{title}</h2>
         <span style={{ fontSize: 11.5, color: c.faint }}>{hint}</span>
       </div>
       <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 10, overflow: "hidden" }}>{children}</div>

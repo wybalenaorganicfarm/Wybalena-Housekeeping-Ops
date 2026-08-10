@@ -27,7 +27,7 @@ export function ShiftConfirmed() {
           <div style={{ color: "#fff", fontSize: 46, lineHeight: 1 }}>{meta.ok ? "✓" : "⚠"}</div>
         </div>
         <div style={{ padding: "30px 28px 26px", textAlign: "center" }}>
-          <div style={{ fontFamily: font.display, fontSize: 21, fontWeight: 700, color: c.ink, marginBottom: 10 }}>{meta.title}</div>
+          <div style={{ fontFamily: font.display, fontSize: 21, fontWeight: font.displayWeight, color: c.ink, marginBottom: 10 }}>{meta.title}</div>
           <div style={{ fontSize: 14, color: c.muted, lineHeight: 1.6, marginBottom: 24 }}>{meta.body(label)}</div>
           <button onClick={() => window.close()} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 9, padding: "11px 22px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
             Close this window

@@ -55,7 +55,7 @@ export function Modal({ title, onClose, children, width = 460 }: {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(20,30,25,.34)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 24px 60px -20px rgba(20,30,25,.4)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px", borderBottom: `1px solid ${c.border2}` }}>
-          <h3 style={{ margin: 0, fontFamily: font.display, fontSize: 17, fontWeight: 700 }}>{title}</h3>
+          <h3 style={{ margin: 0, fontFamily: font.display, fontSize: 17, fontWeight: font.displayWeight }}>{title}</h3>
           <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 20, color: c.muted2, cursor: "pointer", lineHeight: 1 }}>✕</button>
         </div>
         <div style={{ padding: 20 }}>{children}</div>
@@ -70,7 +70,7 @@ export function ConfirmDialog({ title, message, confirmLabel = "Confirm", cancel
   return (
     <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: "rgba(20,30,25,.34)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 400, maxWidth: "100%", boxShadow: "0 24px 60px -20px rgba(20,30,25,.4)", padding: "22px 22px 18px" }}>
-        <h3 style={{ margin: 0, fontFamily: font.display, fontSize: 17, fontWeight: 700 }}>{title}</h3>
+        <h3 style={{ margin: 0, fontFamily: font.display, fontSize: 17, fontWeight: font.displayWeight }}>{title}</h3>
         <div style={{ fontSize: 13.5, color: c.muted, lineHeight: 1.5, margin: "10px 0 20px" }}>{message}</div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 9 }}>
           <Button kind="secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>

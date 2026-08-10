@@ -64,6 +64,7 @@ const SOURCE_LABEL: Record<string, string> = {
   "whatsapp-inbound": "WhatsApp Reply Received",
   "health-check": "Connection Health Check",
   "wipeover-notify": "Wipeover Cleaning",
+  "mid-retreat-notify": "Mid-Retreat Cleaning",
   "google-oauth-callback": "Google Reconnected",
   // Manual / admin actions
   "manual-assign": "Manual Assignment",

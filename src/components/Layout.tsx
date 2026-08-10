@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, ROLE_LABEL } from "../theme";
 import { Icon } from "./Icon";
@@ -45,15 +45,21 @@ function NavIcon({ to, icon, label, badge }: { to: string; icon: string; label: 
 export function Layout({ children }: { children: ReactNode }) {
   const { profile, role, canEdit, isTeamLead, signOut } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [openAlerts, setOpenAlerts] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
 
+  // Re-count on every navigation. The Layout itself never unmounts, so a count
+  // fetched once at login goes stale the moment anything resolves an alert —
+  // dismissing one on the Alerts page, or reconnecting an integration, which
+  // clears the connection alert server-side. Leaving the page you acted on is
+  // the natural moment to re-read it.
   useEffect(() => {
     // The team lead has no Alerts nav — don't fetch the count for them.
     if (isTeamLead) return;
     getAlerts().then((a) => setOpenAlerts(a.filter((x) => x.status === "open").length));
-  }, [isTeamLead]);
+  }, [isTeamLead, pathname]);
 
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: c.sand }}>

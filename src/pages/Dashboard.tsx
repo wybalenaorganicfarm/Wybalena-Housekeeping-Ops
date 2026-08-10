@@ -26,7 +26,7 @@ function Kpi({ icon, color, label, value, sub }: { icon: string; color: string; 
       <div style={{ display: "flex", alignItems: "center", gap: 7, color, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
         <Icon name={icon} size={14} strokeWidth={2.2} /> {label}
       </div>
-      <div style={{ fontFamily: font.display, fontSize: 32, fontWeight: 700, marginTop: 10, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontFamily: font.display, fontSize: 32, fontWeight: font.displayWeight, marginTop: 10, lineHeight: 1 }}>{value}</div>
       <div style={{ fontSize: 12, color: c.muted, marginTop: 4 }}>{sub}</div>
     </Card>
   );
@@ -148,7 +148,6 @@ export function Dashboard() {
     <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
       <PageHeader
         title={`Good morning, ${profile?.full_name?.split(" ")[0] ?? "there"}`}
-        titleStyle={{ fontFamily: font.body }}
         subtitle={`${longDateLabel(new Date())} · ${attention} shift${attention === 1 ? "" : "s"} need your attention this week`}
         right={canEdit ? (
           <>
@@ -168,7 +167,7 @@ export function Dashboard() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 16px" }}>
-            <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: 700, margin: 0 }}>Upcoming agenda</h2>
+            <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: font.displayWeight, margin: 0 }}>Upcoming agenda</h2>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <div style={{ display: "flex", background: "#ece8df", borderRadius: 8, padding: 2 }}>
                 {([["agenda", "Agenda"], ["calendar", "Calendar"]] as [View, string][]).map(([k, lbl]) => (
@@ -192,7 +191,7 @@ export function Dashboard() {
                 return (
                   <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: "15px 16px", marginBottom: 10, borderLeft: `3px solid ${status.dot}`, display: "flex", alignItems: "center", gap: 16, cursor: "pointer" }}>
                     <div style={{ flex: "none", width: 104, borderRight: `1px solid ${c.border2}`, paddingRight: 14 }}>
-                      <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: 700, lineHeight: 1.2 }}>{cardDate(s.shift_date)}</div>
+                      <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight, lineHeight: 1.2 }}>{cardDate(s.shift_date)}</div>
                       <div style={{ fontSize: 12.5, color: c.muted, marginTop: 3 }}>{cardTime(s.start_time)}</div>
                       <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
                     </div>
@@ -235,7 +234,7 @@ export function Dashboard() {
             <div style={{ marginBottom: 22 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: 700 }}>Shifts to be scheduled</div>
+                  <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight }}>Shifts to be scheduled</div>
                   <span style={{ background: "#FBF1DF", color: c.warn, fontSize: 11, fontWeight: 700, borderRadius: 20, padding: "1px 9px" }}>{pendingShifts.length}</span>
                 </div>
               </div>
@@ -262,7 +261,7 @@ export function Dashboard() {
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: 700 }}>Alerts</div>
+              <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight }}>Alerts</div>
               <span style={{ background: c.dangerBg, color: c.danger, fontSize: 11, fontWeight: 700, borderRadius: 20, padding: "1px 9px" }}>{openAlerts.length}</span>
             </div>
             <button onClick={() => navigate("/alerts")} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>View all</button>
@@ -293,6 +292,13 @@ export function Dashboard() {
                           </>
                         ) : a.alert_type === "venue_gap" || a.alert_type === "mid_retreat_needed" ? (
                           <button onClick={() => setShowNew(true)} style={{ background: "none", border: "none", color: c.teal, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Plan a clean <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
+                        ) : a.alert_type === "connection_down" ? (
+                          // Same route as the Alerts page: Connections re-probes on
+                          // open, which is what clears this alert once it's fixed.
+                          <>
+                            <button onClick={() => navigate("/connections")} style={{ background: "none", border: "none", color: c.danger, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Reconnect <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
+                            <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+                          </>
                         ) : (
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
                         )}

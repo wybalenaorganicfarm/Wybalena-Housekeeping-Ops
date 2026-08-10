@@ -122,7 +122,7 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
                 {/* Shown here only — the list views stay uncluttered. */}
                 {s.is_modified && <span style={{ background: "#f0eee9", color: "#6b665c", fontSize: 10, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 700, padding: "2px 8px", borderRadius: 5 }}>Edited</span>}
               </div>
-              <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, margin: "0 0 2px" }}>{typeLabel(s)}</h2>
+              <h2 style={{ fontFamily: font.display, fontSize: 22, fontWeight: font.displayWeight, margin: "0 0 2px" }}>{typeLabel(s)}</h2>
               <div style={{ fontSize: 12.5, color: c.muted2 }}>{typeLabel(s)} · {dateLabel(s.shift_date)}, {time} · {s.estimated_hours} hrs</div>
             </div>
             <button onClick={onClose} style={{ width: 30, height: 30, flex: "none", border: `1px solid ${c.border}`, background: "#fff", borderRadius: 6, color: c.muted2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="x" size={16} strokeWidth={1.8} /></button>

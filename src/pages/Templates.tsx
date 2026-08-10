@@ -318,7 +318,7 @@ export function Templates() {
 
           {groups.map(([category, items]) => (
             <div key={category} style={{ marginBottom: 26 }}>
-              <div style={{ fontFamily: font.display, fontSize: 13, fontWeight: 700, color: c.green, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{category}</div>
+              <div style={{ fontFamily: font.display, fontSize: 13, fontWeight: font.displayWeight, color: c.green, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{category}</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, alignItems: "stretch" }}>
                 {items.map((t) => <TemplateCard key={t.key} t={t} onEdit={() => setEditingKey(t.key)} />)}
               </div>
