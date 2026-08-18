@@ -26,15 +26,22 @@ function clampInt(v: unknown, min: number, max: number, dflt: number): number {
 }
 
 // How the daily catch-up decides a shift has waited long enough.
+//
+// The tier wait is in DAYS, not hours, and deliberately so. The catch-up runs on
+// one fixed daily slot, so an hours-based gate can never be cleared reliably: a
+// "24h" comparison against an offer stamped a fraction of a second into the
+// previous run always lands microscopically short and slips a whole extra day.
+// Counting calendar days makes Tier 1 Monday → Tier 2 Tuesday → Tier 3 Wednesday
+// exact, whatever the run latency.
 export interface StaffingCatchup {
-  escalationWaitHours: number;  // at one tier before escalating to the next
-  offerGraceHours: number;      // after confirmation before the first offer
+  escalationWaitDays: number;  // venue-local days at one tier before escalating
+  offerGraceHours: number;     // after confirmation before the first offer
 }
 
-export const DEFAULT_STAFFING_CATCHUP: StaffingCatchup = { escalationWaitHours: 24, offerGraceHours: 0 };
+export const DEFAULT_STAFFING_CATCHUP: StaffingCatchup = { escalationWaitDays: 1, offerGraceHours: 0 };
 
 export const CATCHUP_LIMITS = {
-  escalationWaitHours: { min: 1, max: 168 },  // 1 hour … 7 days
+  escalationWaitDays: { min: 1, max: 7 },
   offerGraceHours: { min: 0, max: 72 },
 };
 
@@ -44,8 +51,15 @@ export async function loadStaffingCatchup(sb: SupabaseClient): Promise<StaffingC
       .from("app_settings").select("value").eq("key", "staffing_catchup").maybeSingle();
     const v = (data as { value?: Record<string, unknown> } | null)?.value;
     if (!v) return DEFAULT_STAFFING_CATCHUP;
+    // Rows written before the switch to days stored escalation_wait_hours. Read
+    // those as whole days rather than falling back to the default, so the job
+    // keeps the admin's intent if it runs before the migration lands.
+    const legacy = v.escalation_wait_hours;
+    const legacyDays = legacy === undefined || legacy === null
+      ? undefined
+      : Math.max(1, Math.round(Number(legacy) / 24));
     return {
-      escalationWaitHours: clampInt(v.escalation_wait_hours, CATCHUP_LIMITS.escalationWaitHours.min, CATCHUP_LIMITS.escalationWaitHours.max, DEFAULT_STAFFING_CATCHUP.escalationWaitHours),
+      escalationWaitDays: clampInt(v.escalation_wait_days ?? legacyDays, CATCHUP_LIMITS.escalationWaitDays.min, CATCHUP_LIMITS.escalationWaitDays.max, DEFAULT_STAFFING_CATCHUP.escalationWaitDays),
       offerGraceHours: clampInt(v.offer_grace_hours, CATCHUP_LIMITS.offerGraceHours.min, CATCHUP_LIMITS.offerGraceHours.max, DEFAULT_STAFFING_CATCHUP.offerGraceHours),
     };
   } catch {

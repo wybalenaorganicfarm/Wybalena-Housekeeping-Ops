@@ -349,14 +349,16 @@ export async function updateBookingSyncRange(range: BookingSyncRange): Promise<s
 }
 
 // ---- Staffing catch-up timing (app_settings) -------------------------------
-// How long a shift waits at one tier before the daily catch-up escalates it.
-// staffing-catchup falls back to 24h if the row is missing.
+// How many days a shift waits at one tier before the daily catch-up escalates it.
+// Days, not hours: the job runs on one fixed daily slot, so an hours-based gate
+// always landed a fraction short of 24h and slipped an extra day. staffing-catchup
+// falls back to 1 day if the row is missing.
 
-export interface StaffingCatchup { escalation_wait_hours: number; offer_grace_hours: number }
+export interface StaffingCatchup { escalation_wait_days: number; offer_grace_hours: number }
 
-export const STAFFING_CATCHUP_DEFAULT: StaffingCatchup = { escalation_wait_hours: 24, offer_grace_hours: 0 };
+export const STAFFING_CATCHUP_DEFAULT: StaffingCatchup = { escalation_wait_days: 1, offer_grace_hours: 0 };
 export const STAFFING_CATCHUP_LIMITS = {
-  escalation_wait_hours: { min: 1, max: 168 },
+  escalation_wait_days: { min: 1, max: 7 },
   offer_grace_hours: { min: 0, max: 72 },
 };
 
@@ -364,9 +366,14 @@ export async function getStaffingCatchup(): Promise<StaffingCatchup> {
   const { data, error } = await supabase
     .from("app_settings").select("value").eq("key", "staffing_catchup").maybeSingle();
   if (error || !data) return STAFFING_CATCHUP_DEFAULT;
-  const v = (data as { value: Partial<StaffingCatchup> }).value ?? {};
+  const v = (data as { value: Partial<StaffingCatchup> & { escalation_wait_hours?: number } }).value ?? {};
+  // Read a pre-migration row (hours) as whole days so the page never shows a
+  // figure the job isn't actually using.
+  const legacyDays = v.escalation_wait_hours === undefined
+    ? undefined
+    : Math.max(1, Math.round(Number(v.escalation_wait_hours) / 24));
   return {
-    escalation_wait_hours: Number(v.escalation_wait_hours ?? STAFFING_CATCHUP_DEFAULT.escalation_wait_hours),
+    escalation_wait_days: Number(v.escalation_wait_days ?? legacyDays ?? STAFFING_CATCHUP_DEFAULT.escalation_wait_days),
     offer_grace_hours: Number(v.offer_grace_hours ?? STAFFING_CATCHUP_DEFAULT.offer_grace_hours),
   };
 }

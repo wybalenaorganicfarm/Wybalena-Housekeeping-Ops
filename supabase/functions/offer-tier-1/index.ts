@@ -18,7 +18,11 @@ Deno.serve(async (req) => {
   const { data: shifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type, start_time")
-    .eq("status", "confirmed");
+    .eq("status", "confirmed")
+    // Soonest shift first — this loop sends in sequence, and unordered rows come
+    // back in physical storage order, which is not chronological.
+    .order("shift_date")
+    .order("start_time");
 
   let offered = 0;
   // Shifts whose offers WhatsApp refused to deliver — emailed to Ashleigh below.

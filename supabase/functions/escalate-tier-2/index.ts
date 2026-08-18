@@ -21,7 +21,11 @@ Deno.serve(async (req) => {
     .from("shifts")
     .select("id, shift_date, shift_type, start_time")
     .eq("status", "staffing")
-    .eq("current_tier", "tier_1");
+    .eq("current_tier", "tier_1")
+    // Soonest shift first — this loop sends in sequence, and unordered rows come
+    // back in physical storage order, which is not chronological.
+    .order("shift_date")
+    .order("start_time");
 
   let escalated = 0;
   const failures: OfferFailure[] = [];

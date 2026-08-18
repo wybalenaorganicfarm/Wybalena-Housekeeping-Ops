@@ -43,6 +43,74 @@ export interface SendResult {
   ok: boolean;
   providerMessageId?: string;
   stubbed?: boolean;
+  // True when the interactive buttons could NOT be sent and the plain-text
+  // fallback was delivered in their place. The offer reached the cleaner, but
+  // with nothing to tap — callers log this so it's visible on the Audit page.
+  degraded?: boolean;
+  // The provider status behind a failure or degrade. 0 = the request never
+  // completed (network error).
+  status?: number;
+}
+
+// ── Transient-failure retry ──────────────────────────────────────────────────
+// Whapi rides a live WhatsApp Web socket, so a send can fail purely because that
+// socket dropped a moment earlier. Seen in production as
+// `428 {"message":"Internal Error","details":"Connection Closed"}` — the channel
+// reconnected and the very next send, 1.3s later, succeeded. Without a retry a
+// blip that short permanently downgrades an offer to plain text.
+//
+// Permanent rejections (bad token, malformed body, unknown recipient) are NOT
+// retried: they cannot fix themselves, and retrying only delays the fallback.
+const RETRY_DELAYS_MS = [1000, 3000];
+
+function isTransient(status: number): boolean {
+  return status === 408 || status === 425 || status === 428 || status === 429 || status >= 500;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function messageId(data: Record<string, unknown>): string | undefined {
+  const m = data?.message as Record<string, unknown> | undefined;
+  return (m?.id as string) ?? (data?.id as string) ?? undefined;
+}
+
+interface WhapiResponse {
+  ok: boolean;
+  status: number;  // 0 when the request threw before a response
+  data: Record<string, unknown>;
+}
+
+// POST to Whapi, retrying transient failures with a short backoff.
+async function postWhapi(
+  path: string,
+  token: string,
+  payload: unknown,
+  label: string,
+): Promise<WhapiResponse> {
+  const attempts = RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; ; attempt++) {
+    let status = 0;
+    try {
+      const res = await fetch(`${WHAPI_BASE}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      status = res.status;
+      if (res.ok) return { ok: true, status, data: await res.json().catch(() => ({})) };
+      console.error(
+        `[whatsapp] ${label} failed ${status} (attempt ${attempt + 1}/${attempts}): ${(await res.text()).slice(0, 300)}`,
+      );
+    } catch (e) {
+      console.error(`[whatsapp] ${label} threw (attempt ${attempt + 1}/${attempts}): ${String(e)}`);
+    }
+    // Give up on the last attempt, or as soon as the provider says no in a way
+    // that a retry cannot change. A thrown request (status 0) is always retried.
+    if (attempt >= RETRY_DELAYS_MS.length || (status !== 0 && !isTransient(status))) {
+      return { ok: false, status, data: {} };
+    }
+    await sleep(RETRY_DELAYS_MS[attempt]);
+  }
 }
 
 export async function sendMessage(
@@ -57,20 +125,9 @@ export async function sendMessage(
     return { ok: true, stubbed: true };
   }
 
-  const res = await fetch(`${WHAPI_BASE}/messages/text`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ to: toChatId(toPhone), body }),
-  });
-  if (!res.ok) {
-    console.error(`[whatsapp] send failed ${res.status}: ${await res.text()}`);
-    return { ok: false };
-  }
-  const data = await res.json().catch(() => ({}));
-  return { ok: true, providerMessageId: data?.message?.id ?? data?.id };
+  const r = await postWhapi("/messages/text", token, { to: toChatId(toPhone), body }, "text send");
+  if (!r.ok) return { ok: false, status: r.status };
+  return { ok: true, providerMessageId: messageId(r.data) };
 }
 
 // Quick-reply button. `id` is the machine payload echoed back on the inbound
@@ -80,9 +137,10 @@ export interface QuickReply {
   title: string;
 }
 
-// Send an interactive button message (Whapi /messages/interactive). Falls back
-// to a plain-text keyword message when buttons aren't available (stub or no
-// token), so the keyword path keeps working as a safety net.
+// Send an interactive button message (Whapi /messages/interactive), retrying
+// transient provider failures. Only once every attempt is exhausted does it fall
+// back to a plain-text keyword message, so the offer still reaches the cleaner —
+// flagged `degraded` so the caller can record that the buttons never arrived.
 export async function sendButtons(
   toPhone: string,
   body: string,
@@ -95,27 +153,24 @@ export async function sendButtons(
     return { ok: true, stubbed: true };
   }
 
-  const res = await fetch(`${WHAPI_BASE}/messages/interactive`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      to: toChatId(toPhone),
-      type: "button",
-      ...(opts.header ? { header: { text: opts.header } } : {}),
-      body: { text: body },
-      ...(opts.footer ? { footer: { text: opts.footer } } : {}),
-      action: {
-        buttons: buttons.slice(0, 3).map((b) => ({ type: "quick_reply", title: b.title, id: b.id })),
-      },
-    }),
-  });
-  if (!res.ok) {
-    console.error(`[whatsapp] interactive send failed ${res.status}: ${await res.text()}`);
-    // Fall back to a keyword text so the offer still reaches the cleaner.
-    return opts.fallbackText ? sendMessage(toPhone, opts.fallbackText) : { ok: false };
-  }
-  const data = await res.json().catch(() => ({}));
-  return { ok: true, providerMessageId: data?.message?.id ?? data?.id };
+  const r = await postWhapi("/messages/interactive", token, {
+    to: toChatId(toPhone),
+    type: "button",
+    ...(opts.header ? { header: { text: opts.header } } : {}),
+    body: { text: body },
+    ...(opts.footer ? { footer: { text: opts.footer } } : {}),
+    action: {
+      buttons: buttons.slice(0, 3).map((b) => ({ type: "quick_reply", title: b.title, id: b.id })),
+    },
+  }, "interactive send");
+  if (r.ok) return { ok: true, providerMessageId: messageId(r.data) };
+
+  // Every attempt exhausted. Fall back to a keyword text so the offer still
+  // reaches the cleaner, and mark it degraded — the message landed, but they
+  // have no buttons to tap and must reply with the keyword instead.
+  if (!opts.fallbackText) return { ok: false, status: r.status };
+  const fb = await sendMessage(toPhone, opts.fallbackText);
+  return { ...fb, degraded: fb.ok, status: r.status };
 }
 
 // Send the "Are you sure you want to decline?" confirmation with Yes/No buttons

@@ -30,7 +30,7 @@ const META: JobMeta[] = [
   // Sit after the tier sequence — both are independent of the offer/escalation flow.
   { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 9 },
   { fn: "mid-retreat-notify", label: "Mid-Retreat Cleaning Alert", desc: "Emails and WhatsApps Ashleigh when a stay of 7+ nights needs a mid-retreat clean scheduled by hand.", group: "weekly", order: 10 },
-  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Safety net: offers any shift confirmed too late for the weekly run, and escalates shifts whose tier wait has elapsed.", group: "daily", order: 6.5 },
+  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Safety net: offers any shift confirmed too late for the weekly run, and escalates a shift to the next tier the day after its last offer.", group: "daily", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
@@ -326,16 +326,17 @@ function RangeModal({ range, onClose, onSave }: {
 }
 
 function CatchupRow({ catchup, onEdit }: { catchup: StaffingCatchup; onEdit: () => void }) {
-  const h = catchup.escalation_wait_hours;
+  const d = catchup.escalation_wait_days;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px 14px 52px", borderTop: `1px dashed ${c.rowBd}`, background: "#fcfbf8" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tier wait</div>
         <div style={{ fontSize: 12.5, color: c.body, marginTop: 4, lineHeight: 1.5 }}>
-          A shift escalates to the next tier <b>{h} hour{h === 1 ? "" : "s"}</b> after its last offer, if still short.
+          A shift escalates to the next tier <b>{d === 1 ? "the next day" : `${d} days later`}</b>, at this job's run
+          time, if it's still short.
         </div>
         <div style={{ fontSize: 12, color: c.faint, marginTop: 3 }}>
-          Measured per shift, so one confirmed late still moves through the tiers on the same rhythm.
+          Counted in whole days, so Tier 1 on a Monday means Tier 2 on the Tuesday and Tier 3 on the Wednesday.
         </div>
       </div>
       <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit timing</Button>
@@ -346,7 +347,7 @@ function CatchupRow({ catchup, onEdit }: { catchup: StaffingCatchup; onEdit: () 
 function CatchupModal({ catchup, onClose, onSave }: {
   catchup: StaffingCatchup; onClose: () => void; onSave: (c: StaffingCatchup) => Promise<string | null>;
 }) {
-  const [wait, setWait] = useState(String(catchup.escalation_wait_hours));
+  const [wait, setWait] = useState(String(catchup.escalation_wait_days));
   const [grace, setGrace] = useState(String(catchup.offer_grace_hours));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -354,14 +355,14 @@ function CatchupModal({ catchup, onClose, onSave }: {
   const L = STAFFING_CATCHUP_LIMITS;
   const waitN = Number(wait);
   const graceN = Number(grace);
-  const waitOk = Number.isInteger(waitN) && waitN >= L.escalation_wait_hours.min && waitN <= L.escalation_wait_hours.max;
+  const waitOk = Number.isInteger(waitN) && waitN >= L.escalation_wait_days.min && waitN <= L.escalation_wait_days.max;
   const graceOk = Number.isInteger(graceN) && graceN >= L.offer_grace_hours.min && graceN <= L.offer_grace_hours.max;
 
   async function submit() {
-    if (!waitOk) { setErr(`Tier wait must be a whole number between ${L.escalation_wait_hours.min} and ${L.escalation_wait_hours.max} hours.`); return; }
+    if (!waitOk) { setErr(`Tier wait must be a whole number between ${L.escalation_wait_days.min} and ${L.escalation_wait_days.max} days.`); return; }
     if (!graceOk) { setErr(`Offer delay must be a whole number between ${L.offer_grace_hours.min} and ${L.offer_grace_hours.max} hours.`); return; }
     setSaving(true); setErr(null);
-    const e = await onSave({ escalation_wait_hours: waitN, offer_grace_hours: graceN });
+    const e = await onSave({ escalation_wait_days: waitN, offer_grace_hours: graceN });
     setSaving(false);
     if (e) { setErr(e); return; }
     onClose();
@@ -383,9 +384,9 @@ function CatchupModal({ catchup, onClose, onSave }: {
         <label style={{ display: "block" }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Tier wait</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="number" min={L.escalation_wait_hours.min} max={L.escalation_wait_hours.max} value={wait}
+            <input type="number" min={L.escalation_wait_days.min} max={L.escalation_wait_days.max} value={wait}
               onChange={(e) => setWait(e.target.value)} style={field} />
-            <span style={{ fontSize: 12.5, color: c.muted }}>hours</span>
+            <span style={{ fontSize: 12.5, color: c.muted }}>days</span>
           </div>
         </label>
         <label style={{ display: "block" }}>
@@ -403,7 +404,9 @@ function CatchupModal({ catchup, onClose, onSave }: {
           <>
             A shift confirmed late is offered to Tier 1 on the next daily run
             {graceOk && graceN > 0 ? <> (after a {graceN}h delay)</> : null}, then escalates to
-            Tier 2 after <b>{waitN}h</b> without enough acceptances, and Tier 3 <b>{waitN}h</b> after that.
+            Tier 2 <b>{waitN === 1 ? "the next day" : `${waitN} days later`}</b> without enough
+            acceptances, and Tier 3 {waitN === 1 ? "the day after that" : `a further ${waitN} days later`}.
+            Only the day is compared, never the time — the run time is this job's schedule above.
           </>
         ) : "Enter whole numbers to preview the timing."}
       </div>

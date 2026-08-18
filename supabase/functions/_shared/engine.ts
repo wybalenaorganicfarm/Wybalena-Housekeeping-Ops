@@ -5,6 +5,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage } from "./adapters/whatsapp.ts";
 import { btnTitle, fillVars, loadTemplate, renderTemplate } from "./templates.ts";
 import { prettyDate, prettyDateTime, prettyTime } from "./datetime.ts";
+import { writeAuditLog } from "./auditLog.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -52,12 +53,19 @@ async function sendOfferMessage(
   phone: string,
   shift: ShiftRow,
   assignmentId: string | undefined,
+  offerCode: string | null | undefined,
 ) {
   // Cleaners read these — spell the day out and use am/pm, never raw ISO.
   const date = prettyDate(shift.shift_date);
   const time = prettyTime(shift.start_time);
   const t = await loadTemplate(sb, "shift_offer");
-  const vars = { shift_date: date, start_time: time };
+  // The fallback text is what a cleaner gets when the buttons could not be sent,
+  // so it must never tell them to tap one. It asks for a keyword reply carrying
+  // the offer code, which is how whatsapp-inbound pins a typed reply to this
+  // exact offer — without it a cleaner holding more than one open offer is
+  // deliberately ignored, and their reply goes nowhere.
+  const codeSuffix = offerCode ? ` ${offerCode}` : "";
+  const vars = { shift_date: date, start_time: time, offer_code: offerCode ?? "" };
   const body = t?.body
     ? fillVars(t.body, vars)
     : `*SHIFT DETAILS*\n\n📅 Date: ${date}\n⏰ Time: ${time}\n\n` +
@@ -74,8 +82,9 @@ async function sendOfferMessage(
       footer: t?.footer ?? "Wybalena Organic Farm",
       fallbackText: t?.fallback
         ? fillVars(t.fallback, vars)
-        : `New cleaning shift on ${date} at ${time}. ` +
-          `Please open WhatsApp and tap Accept or Decline on the offer.`,
+        : `New cleaning shift on ${date} at ${time}.\n\n` +
+          `The Accept/Decline buttons didn't come through this time. ` +
+          `Please reply ACCEPT${codeSuffix} to take this shift, or DECLINE${codeSuffix} to pass.`,
     },
   );
 }
@@ -90,14 +99,36 @@ async function sendAndRecordOffer(
   phone: string | null,
   shift: ShiftRow,
   assignmentId: string | undefined,
+  cleaner: { id: string; full_name: string; offer_code?: string | null },
 ): Promise<boolean> {
   if (!phone || !assignmentId) return false;
-  const res = await sendOfferMessage(sb, phone, shift, assignmentId);
+  const res = await sendOfferMessage(sb, phone, shift, assignmentId, cleaner.offer_code);
   if (!res.ok) return false;
   if (res.providerMessageId) {
     await sb.from("shift_assignments")
       .update({ offer_message_id: res.providerMessageId })
       .eq("id", assignmentId);
+  }
+  // The offer landed, but as plain text — WhatsApp refused the buttons on every
+  // attempt. Recorded here, at the one point every send path passes through, so
+  // a downgraded offer is visible on the Audit page instead of reading as a
+  // clean success (which is exactly how the 24 September offer was logged).
+  if (res.degraded) {
+    const code = cleaner.offer_code;
+    await writeAuditLog(sb, {
+      event_type: "offer.sent_without_buttons",
+      event_label: "Offer Sent Without Buttons",
+      status: "warning",
+      summary: `Offer for the shift on ${prettyDate(shift.shift_date)} reached ${cleaner.full_name} as a plain text message — WhatsApp refused the Accept/Decline buttons on every attempt. ` +
+        (code
+          ? `They can still reply ACCEPT ${code} or DECLINE ${code}.`
+          : `They can still reply ACCEPT or DECLINE.`),
+      detail: { shift_id: shift.id, assignment_id: assignmentId, offer_code: code, provider_status: res.status },
+      source: "engine",
+      shift_id: shift.id,
+      cleaner_id: cleaner.id,
+      triggered_by: "system",
+    });
   }
   return true;
 }
@@ -115,7 +146,7 @@ export async function offerToCleaner(
   if (!shift || shift.status === "cancelled") return "error";
 
   const { data: cleaner } = await sb
-    .from("cleaners").select("id, phone, tier, is_team_leader, is_active").eq("id", cleanerId).maybeSingle();
+    .from("cleaners").select("id, full_name, phone, tier, is_team_leader, is_active").eq("id", cleanerId).maybeSingle();
   if (!cleaner) return "error";
   // The team lead is auto-assigned to every shift and is never offered/re-offered.
   if (cleaner.is_team_leader) return "error";
@@ -141,7 +172,11 @@ export async function offerToCleaner(
   // If the WhatsApp channel rejects the send, roll the offer back so we don't
   // report a phantom "offered" the cleaner never received, and don't flip the
   // shift into staffing off the back of a message that never went out.
-  const ok = await sendAndRecordOffer(sb, cleaner.phone, shift, row?.id);
+  const ok = await sendAndRecordOffer(sb, cleaner.phone, shift, row?.id, {
+    id: cleaner.id,
+    full_name: cleaner.full_name,
+    offer_code: row?.offer_code ?? code,
+  });
   if (!ok) {
     if (row?.id) await sb.from("shift_assignments").delete().eq("id", row.id);
     return "send_failed";
@@ -185,7 +220,7 @@ async function deliverOffers(
   sb: SupabaseClient,
   shift: ShiftRow,
   candidates: { id: string; full_name: string; phone: string | null }[],
-  inserted: { id: string; cleaner_id: string }[],
+  inserted: { id: string; cleaner_id: string; offer_code?: string | null }[],
 ): Promise<{ offered: { id: string; full_name: string }[]; failedIds: string[]; failedNames: string[] }> {
   const byId = new Map(inserted.map((r) => [r.cleaner_id, r]));
   const offered: { id: string; full_name: string }[] = [];
@@ -193,7 +228,11 @@ async function deliverOffers(
   const failedNames: string[] = [];
   for (const c of candidates) {
     const row = byId.get(c.id);
-    const ok = await sendAndRecordOffer(sb, c.phone, shift, row?.id);
+    const ok = await sendAndRecordOffer(sb, c.phone, shift, row?.id, {
+      id: c.id,
+      full_name: c.full_name,
+      offer_code: row?.offer_code,
+    });
     if (ok) offered.push({ id: c.id, full_name: c.full_name });
     else {
       if (row?.id) failedIds.push(row.id);
@@ -257,7 +296,9 @@ export async function offerTier(
   const { data: inserted } = await sb
     .from("shift_assignments")
     .insert(rows)
-    .select("id, cleaner_id");
+    // offer_code comes back so the plain-text fallback can quote it if the
+    // buttons don't send — it's the only way a typed reply resolves to this offer.
+    .select("id, cleaner_id, offer_code");
 
   // Outbound offers: interactive Accept/Decline buttons whose payload carries the
   // assignment id, so the inbound webhook maps the tap straight to this row.
@@ -334,7 +375,7 @@ export async function offerAllRemaining(
   const { data: inserted } = await sb
     .from("shift_assignments")
     .insert(rows)
-    .select("id, cleaner_id");
+    .select("id, cleaner_id, offer_code");
 
   const { offered, failedNames } = await deliverOffers(sb, shift, candidates, inserted ?? []);
 

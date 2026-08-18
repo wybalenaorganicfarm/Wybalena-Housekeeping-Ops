@@ -27,6 +27,10 @@ function isGoogleFailure(log: AuditLogResolved): boolean {
 // flagged the messaging channel. Fixed by re-scanning the Whapi QR.
 function isWhatsAppFailure(log: AuditLogResolved): boolean {
   if (log.status !== "failed" && log.status !== "warning") return false;
+  // A buttons-only degrade is not a broken channel: the offer WAS delivered, as
+  // plain text, after a momentary provider dropout. Re-scanning the QR fixes
+  // nothing, so this row must not raise the reconnect prompt.
+  if (log.event_type === "offer.sent_without_buttons") return false;
   return /whatsapp|whapi|messaging channel|channel needs reconnect|channel authorization/.test(failureHaystack(log));
 }
 

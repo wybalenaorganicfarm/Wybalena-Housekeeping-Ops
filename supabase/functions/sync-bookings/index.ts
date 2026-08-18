@@ -232,6 +232,13 @@ Deno.serve(async (req) => {
 
   // --- Confirmation email to Ashleigh: one email, every pending shift, per-shift
   //     Confirm/Edit buttons (Confirm = signed one-click link; Edit = app deep-link).
+  //     Sorted first: the list is built in Google Calendar's event order, which is
+  //     not guaranteed to be chronological by check-out date.
+  pendingForEmail.sort((a, b) =>
+    a.shift_date === b.shift_date
+      ? (a.start_time ?? "").localeCompare(b.start_time ?? "")
+      : a.shift_date.localeCompare(b.shift_date)
+  );
   if (pendingForEmail.length) {
     const base = Deno.env.get("SUPABASE_URL") ?? "";
     const appUrl = Deno.env.get("APP_URL") ?? "";

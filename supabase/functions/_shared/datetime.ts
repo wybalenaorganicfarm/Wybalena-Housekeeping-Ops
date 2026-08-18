@@ -41,3 +41,23 @@ export function prettyTime(timeStr: string | null | undefined): string {
 export function prettyDateTime(dateStr: string, timeStr: string): string {
   return `${prettyDate(dateStr)} at ${prettyTime(timeStr)}`;
 }
+
+// The venue's calendar day (Australia/Sydney, DST-aware) as YYYY-MM-DD. Supabase
+// runs UTC regardless of project region and Sydney is +10/+11, so the 06:00 UTC
+// cron slot is already 4pm the SAME local day. Same idiom as sync-bookings.
+export function venueDay(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(d);
+}
+
+// Whole calendar days from one YYYY-MM-DD to another. Both parsed at UTC midnight
+// so a DST changeover — which makes a local day 23 or 25 hours long — can't nudge
+// the count across a boundary.
+export function daysBetweenDays(from: string, to: string): number {
+  const a = Date.parse(`${from}T00:00:00Z`);
+  const b = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86400000);
+}

@@ -21,7 +21,8 @@ Deno.serve(async (req) => {
   const { data: pending } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type")
-    .eq("status", "pending_confirmation");
+    .eq("status", "pending_confirmation")
+    .order("shift_date");
 
   let raised = 0;
   for (const s of pending ?? []) {

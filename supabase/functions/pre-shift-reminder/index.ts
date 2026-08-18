@@ -30,7 +30,9 @@ Deno.serve(async (req) => {
     .from("shifts")
     .select("id, shift_date, start_time, shift_type")
     .eq("shift_date", tomorrow)
-    .in("status", ["staffing", "fully_staffed", "confirmed"]);
+    .in("status", ["staffing", "fully_staffed", "confirmed"])
+    // All on one date, so earliest start first.
+    .order("start_time");
 
   if ((shifts ?? []).length === 0) {
     await writeAuditLog(sb, {
