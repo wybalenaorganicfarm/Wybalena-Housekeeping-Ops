@@ -9,6 +9,13 @@ import { writeAuditLog } from "./auditLog.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
+// Which automation chain owns a shift. Decided at the first delivered offer and
+// never changed — see supabase/migrations/20260819120000_staffing_track.sql.
+export type StaffingTrack = "weekly" | "catchup";
+
+// Tier order, for "has this shift escalated PAST that offer?" comparisons.
+const TIER_RANK: Record<Tier, number> = { tier_1: 1, tier_2: 2, tier_3: 3 };
+
 // Resource formula (Spec §2): standard = Zara + 5 = 6; deep/full venue = Zara + 6 = 7.
 // mid_retreat & other default to the standard size. required_cleaners is stored
 // on the shift so manual overrides persist — this is only used at creation time.
@@ -24,6 +31,7 @@ interface ShiftRow {
   shift_type: string;
   shift_date: string;
   start_time: string;
+  staffing_track: StaffingTrack | null;
 }
 
 async function loadShift(sb: SupabaseClient, shiftId: string): Promise<ShiftRow | null> {
@@ -185,7 +193,13 @@ export async function offerToCleaner(
   // Reflect that the shift is actively being staffed (only once delivered).
   if (shift.status === "pending_confirmation" || shift.status === "confirmed") {
     await sb.from("shifts")
-      .update({ status: "staffing", current_tier: shift.current_tier ?? cleaner.tier })
+      .update({
+        status: "staffing",
+        current_tier: shift.current_tier ?? cleaner.tier,
+        // An admin has taken this shift in hand, so put it on the weekly chain
+        // rather than leaving it untracked for staffing-catchup to adopt.
+        staffing_track: shift.staffing_track ?? "weekly",
+      })
       .eq("id", shiftId);
   }
   return "offered";
@@ -247,12 +261,44 @@ async function deliverOffers(
   return { offered, failedIds, failedNames };
 }
 
+// Close every offer still sitting `offered` at a tier this shift has now
+// escalated PAST. The cleaner didn't answer and the shift has moved on, so the
+// offer is dead — leaving it open queued it for a non-responder reminder that
+// would go out days or weeks later, which is exactly what produced the burst of
+// duplicate reminders on 17 August.
+//
+// Two guards keep this to offers that are genuinely finished with:
+//   • strictly earlier tiers — a cancellation re-offer (offerAllRemaining)
+//     deliberately opens LATER tiers while the shift sits at an earlier one;
+//   • already reminded — the offer went through its full chase and got no
+//     answer. A cancellation re-offer made minutes ago has not been reminded
+//     yet, so escalating the shift can't silently retire it.
+// A late "Accept" still works either way: acceptOffer reads the row by id and
+// doesn't require it to still be `offered`.
+async function closeSupersededOffers(sb: SupabaseClient, shiftId: string, tier: Tier): Promise<void> {
+  const passed = (Object.keys(TIER_RANK) as Tier[]).filter((t) => TIER_RANK[t] < TIER_RANK[tier]);
+  if (passed.length === 0) return;
+  await sb
+    .from("shift_assignments")
+    .update({ status: "no_response" })
+    .eq("shift_id", shiftId)
+    .eq("status", "offered")
+    .in("tier_at_offer", passed)
+    .not("reminder_sent_at", "is", null);
+}
+
 // Offer a shift to up to `openSpots` available cleaners in the given tier.
 // Returns the offered cleaners. Sets the shift to staffing/current_tier.
+//
+// `track` is passed ONLY by the two jobs that make a shift's FIRST offer —
+// offer-tier-1 ("weekly") and staffing-catchup's adoption branch ("catchup").
+// It is stamped on the shift only if the shift has no track yet, so escalations
+// (which never pass it) can't move a shift between chains.
 export async function offerTier(
   sb: SupabaseClient,
   shiftId: string,
   tier: Tier,
+  track?: StaffingTrack,
 ): Promise<OfferResult> {
   const shift = await loadShift(sb, shiftId);
   if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") {
@@ -308,10 +354,12 @@ export async function offerTier(
   // Only flag the shift as being staffed once at least one offer actually landed;
   // if every send failed the shift stays put so the next run retries cleanly.
   if (offered.length > 0) {
-    await sb
-      .from("shifts")
-      .update({ status: "staffing", current_tier: tier })
-      .eq("id", shiftId);
+    const patch: Record<string, unknown> = { status: "staffing", current_tier: tier };
+    // First delivered offer decides the chain; after that the track is fixed.
+    if (track && !shift.staffing_track) patch.staffing_track = track;
+    await sb.from("shifts").update(patch).eq("id", shiftId);
+    // The shift has moved on — retire any unanswered offer at a tier it passed.
+    await closeSupersededOffers(sb, shiftId, tier);
   }
   return {
     count: offered.length,

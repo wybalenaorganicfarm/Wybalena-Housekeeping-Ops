@@ -54,7 +54,7 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
       id, booking_id: null, shift_type: type as Shift["shift_type"], shift_date: date,
       start_time: time, estimated_hours: hours, status: "staffing", source: "manual",
       required_cleaners: required, venue_scope: scope, buildings, is_modified: false,
-      special_instructions: notes || null, special_instructions_by: null, special_instructions_at: null, current_tier: null,
+      special_instructions: notes || null, special_instructions_by: null, special_instructions_at: null, current_tier: null, staffing_track: null,
       confirmed_at: null, cancelled_at: null, created_at: "",
     };
   }

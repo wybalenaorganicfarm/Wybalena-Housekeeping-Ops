@@ -15,10 +15,15 @@ Deno.serve(async (req) => {
   if (pre) return pre;
 
   const sb = serviceClient();
+  // Confirmed and not yet on either chain. A shift confirmed too late for this
+  // weekly slot is adopted by staffing-catchup instead and stamped 'catchup' —
+  // filtering on a null track is what keeps the two chains from driving the same
+  // shift (see 20260819120000_staffing_track.sql).
   const { data: shifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type, start_time")
     .eq("status", "confirmed")
+    .is("staffing_track", null)
     // Soonest shift first — this loop sends in sequence, and unordered rows come
     // back in physical storage order, which is not chronological.
     .order("shift_date")
@@ -29,7 +34,9 @@ Deno.serve(async (req) => {
   const failures: OfferFailure[] = [];
   for (const s of shifts ?? []) {
     try {
-      const res = await offerTier(sb, s.id, "tier_1");
+      // "weekly" puts the shift on this chain for good — every later step comes
+      // from the /schedule cron jobs, never from staffing-catchup.
+      const res = await offerTier(sb, s.id, "tier_1", "weekly");
       if (res.count > 0) {
         offered += res.count;
         const names = res.offered.map((c) => c.full_name).join(", ");
@@ -91,7 +98,8 @@ Deno.serve(async (req) => {
       .from("shifts")
       .select("id", { count: "exact", head: true })
       .eq("status", "staffing")
-      .eq("current_tier", "tier_1");
+      .eq("current_tier", "tier_1")
+      .eq("staffing_track", "weekly");
     const confirmedRemaining = shifts?.length ?? 0;
 
     let summary: string;

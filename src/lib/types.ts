@@ -3,6 +3,7 @@
 export type UserRole = "super_admin" | "admin" | "operations_manager" | "team_leader";
 export type UserStatus = "invite_sent" | "active" | "inactive";
 export type CleanerTier = "tier_1" | "tier_2" | "tier_3";
+export type StaffingTrack = "weekly" | "catchup";
 export type CleanerStatus = "active" | "inactive";
 export type ShiftType = "standard" | "deep_full_venue" | "mid_retreat" | "wipeover" | "other";
 export type ShiftStatus =
@@ -70,6 +71,10 @@ export interface Shift {
   special_instructions_by: string | null;
   special_instructions_at: string | null;
   current_tier: CleanerTier | null;
+  // Which automation chain owns this shift: "weekly" = the /schedule cron chain,
+  // "catchup" = staffing-catchup's own 24h chain for shifts confirmed after the
+  // weekly Tier 1 slot. Null until the first offer is delivered.
+  staffing_track: StaffingTrack | null;
   confirmed_at: string | null;
   cancelled_at: string | null;
   created_at: string;

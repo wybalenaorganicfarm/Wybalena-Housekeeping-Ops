@@ -15,13 +15,16 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
 
-  // Every shift still in Tier-1 staffing. No internal age gate — the admin decides
-  // when to escalate purely through this job's schedule.
+  // Every WEEKLY-track shift still in Tier-1 staffing. No internal age gate — the
+  // admin decides when to escalate purely through this job's schedule. Shifts on
+  // the 'catchup' track are escalated by staffing-catchup on its own 24h clock
+  // and must not be touched here, or both chains drive the same shift.
   const { data: shifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type, start_time")
     .eq("status", "staffing")
     .eq("current_tier", "tier_1")
+    .eq("staffing_track", "weekly")
     // Soonest shift first — this loop sends in sequence, and unordered rows come
     // back in physical storage order, which is not chronological.
     .order("shift_date")

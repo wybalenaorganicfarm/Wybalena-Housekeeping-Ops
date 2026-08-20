@@ -21,16 +21,19 @@ interface JobMeta { fn: string; label: string; desc: string; group: "weekly" | "
 const META: JobMeta[] = [
   { fn: "sync-bookings", label: "Weekly Booking Sync", desc: "Pulls new and cancelled bookings from the calendar and creates the week's shifts.", group: "weekly", order: 1 },
   { fn: "confirm-reminder", label: "Confirmation Reminder", desc: "Nudges admins to confirm shifts that are still pending.", group: "weekly", order: 2 },
-  { fn: "offer-tier-1", label: "Tier 1 Offers", desc: "Sends the first round of shift offers to Tier 1 cleaners.", group: "weekly", order: 3 },
-  { fn: "remind-tier-1", label: "Tier 1 Non-Responder Reminders", desc: "Re-pings Tier 1 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 4 },
+  // The five jobs below are one chain, in order. Each acts only on shifts this
+  // chain started — a shift confirmed too late for the Tier 1 slot is handled
+  // end to end by Staffing Catch-Up instead, so the two never drive the same shift.
+  { fn: "offer-tier-1", label: "Tier 1 Offers", desc: "Sends the first round of shift offers to Tier 1 cleaners, for every shift confirmed since the last run.", group: "weekly", order: 3 },
+  { fn: "remind-tier-1", label: "Tier 1 Non-Responder Reminders", desc: "Re-pings Tier 1 cleaners who were offered a shift on this schedule and haven't replied.", group: "weekly", order: 4 },
   { fn: "escalate-tier-2", label: "Tier 2 Escalation", desc: "Opens shifts still unfilled up to Tier 2 cleaners.", group: "weekly", order: 5 },
-  { fn: "remind-tier-2", label: "Tier 2 Non-Responder Reminders", desc: "Re-pings Tier 2 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 6 },
+  { fn: "remind-tier-2", label: "Tier 2 Non-Responder Reminders", desc: "Re-pings Tier 2 cleaners who were offered a shift on this schedule and haven't replied.", group: "weekly", order: 6 },
   { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Opens shifts still unfilled up to Tier 3 cleaners.", group: "weekly", order: 7 },
-  { fn: "remind-tier-3", label: "Tier 3 Non-Responder Reminders", desc: "Re-pings Tier 3 cleaners who were offered a shift but haven't replied.", group: "weekly", order: 8 },
+  { fn: "remind-tier-3", label: "Tier 3 Non-Responder Reminders", desc: "Re-pings Tier 3 cleaners who were offered a shift on this schedule and haven't replied.", group: "weekly", order: 8 },
   // Sit after the tier sequence — both are independent of the offer/escalation flow.
   { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 9 },
   { fn: "mid-retreat-notify", label: "Mid-Retreat Cleaning Alert", desc: "Emails and WhatsApps Ashleigh when a stay of 7+ nights needs a mid-retreat clean scheduled by hand.", group: "weekly", order: 10 },
-  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Safety net: offers any shift confirmed too late for the weekly run, and escalates a shift to the next tier the day after its last offer.", group: "daily", order: 6.5 },
+  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Adopts any shift confirmed too late for the weekly Tier 1 slot, then runs that shift's whole sequence itself — offer, reminder, next tier — one step per day. Shifts already on the weekly schedule are left alone.", group: "daily", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
