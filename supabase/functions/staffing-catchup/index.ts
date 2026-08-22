@@ -43,7 +43,7 @@
 // step wrote, and each shift advances at most one step per run.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { offerTier, type Tier } from "../_shared/engine.ts";
+import { nextOfferableTier, offerTier, type Tier } from "../_shared/engine.ts";
 import { remindShiftsAtTier } from "../_shared/remindTier.ts";
 import { raiseTier3Alert } from "../_shared/tier3Alert.ts";
 import { loadStaffingCatchup } from "../_shared/settings.ts";
@@ -55,8 +55,11 @@ const SOURCE = "staffing-catchup";
 const LABEL = "Staffing Catch-Up";
 const HOUR = 3600000;
 
-const NEXT_TIER: Record<string, Tier> = { tier_1: "tier_2", tier_2: "tier_3" };
+// Display names only. The chain itself is NOT hard-coded — the next tier comes
+// from nextOfferableTier, which reads the roster. An unknown tier falls back to
+// its raw value so adding one can't break the messaging.
 const TIER_WORD: Record<string, string> = { tier_1: "Tier 1", tier_2: "Tier 2", tier_3: "Tier 3" };
+const word = (t: string) => TIER_WORD[t] ?? t;
 
 const SHIFT_COLS =
   "id, shift_date, shift_type, start_time, status, current_tier, staffing_track, confirmed_at, created_at";
@@ -195,9 +198,9 @@ Deno.serve(async (req) => {
       const t = (tier ?? "tier_1") as Tier;
       return { kind: "offer", tier: t, track: "catchup", reason: `on the catch-up chain at ${TIER_WORD[t]} with no offer on record` };
     }
-    // No tier but offers on record: a cleaner cancelled after the shift was full,
-    // and cancelOffer already re-offered the freed spot to every available
-    // cleaner across all tiers. There is no tier left to step to.
+    // Offers on record but no tier. cancelOffer restores the tier it reached, so
+    // this is now only reachable for legacy rows nulled before that change (or a
+    // manual edit). Nothing to step from, so leave it to the admin.
     if (!tier) return SKIP;
 
     // Anyone at this tier still owed a nudge? The reminder is always the next
@@ -210,8 +213,11 @@ Deno.serve(async (req) => {
 
     // Everyone at this tier has been reminded (or has already replied) — the next
     // step is opening the shift to the tier below.
-    const next = NEXT_TIER[tier];
-    if (!next) return SKIP;  // Tier 3, fully chased. Nothing left to automate.
+    // Next tier with someone free for THIS shift, stepping over any that is
+    // empty or already entirely on the shift. Null = chain spent, nothing left
+    // to automate.
+    const next = await nextOfferableTier(sb, s.id, tier as Tier);
+    if (!next) return SKIP;
     // Whichever came last — the reminder if one went out, otherwise the offer.
     // That is the last thing these cleaners heard from us, so that is what they
     // have had a full day to answer. A reminder at an EARLIER tier must not be
@@ -298,6 +304,7 @@ Deno.serve(async (req) => {
       const res = await offerTier(sb, s.id, p.tier, p.kind === "offer" ? p.track : undefined);
       if (p.kind === "offer") adopted += res.count;
       else escalations += res.count;
+
 
       if (res.count > 0) {
         const names = res.offered.map((c) => c.full_name).join(", ");

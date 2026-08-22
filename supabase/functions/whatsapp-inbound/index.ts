@@ -303,7 +303,13 @@ Deno.serve(async (req) => {
           results.push({ id: r.providerMessageId, action: "cancel_confirm", result: "not_active" });
           break;
         }
-        await cancelOffer(sb, assignmentId);
+        // What Ashleigh is told has to match what the system actually did.
+        // "Re-assignment in progress" is wrong when the shift has tiers left to
+        // escalate through and is simply waiting its turn.
+        const outcome = await cancelOffer(sb, assignmentId);
+        const outcomeNote = outcome === "reoffered"
+          ? "All tiers had already been offered, so the shift has been re-offered to everyone still available."
+          : "The shift has not reached Tier 3 yet, so the freed spot is included in the next scheduled escalation. You can also assign a cleaner manually.";
         await sendOutcome(cleaner.phone, "cancelled_confirmation", "Shift Cancelled", sb, shiftRef);
         // Raise an alert so the admin sees it on the Dashboard + Alerts and can
         // step in / assign manually. Dedupe one open alert per shift.
@@ -315,7 +321,7 @@ Deno.serve(async (req) => {
               alert_type: "cleaner_cancelled",
               shift_id: ctx.shiftId,
               title: "Cleaner cancelled",
-              body: `${cleaner.full_name} cancelled their spot on ${dateLabel}. Re-assignment is in progress — you can also assign a cleaner manually.`,
+              body: `${cleaner.full_name} cancelled their spot on ${dateLabel}. ${outcomeNote}`,
             });
           }
         }
@@ -334,7 +340,7 @@ Deno.serve(async (req) => {
           source: SOURCE,
           triggeredBy: "webhook",
         });
-        await logResponse("response.cancelled", "warning", `${cleaner.full_name} cancelled their spot on ${dateLabel}. Re-assignment triggered; admin and team lead alerted.`);
+        await logResponse("response.cancelled", "warning", `${cleaner.full_name} cancelled their spot on ${dateLabel}. ${outcomeNote} Admin and team lead alerted.`);
         results.push({ id: r.providerMessageId, action: "cancel_confirm" });
         break;
       }

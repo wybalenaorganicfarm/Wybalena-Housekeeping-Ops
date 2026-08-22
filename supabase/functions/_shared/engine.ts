@@ -229,12 +229,14 @@ function emptyOffer(shiftDate: string, openSpots: number, fullyStaffed: boolean)
 
 // Send every pending offer, roll back the ones the WhatsApp channel rejected, and
 // report who was delivered vs who couldn't be reached. Shared by offerTier and
-// offerAllRemaining. `inserted` maps cleaner_id -> the assignment row just created.
+// reofferToUnaccepted. `inserted` maps cleaner_id -> that cleaner's offer row.
 async function deliverOffers(
   sb: SupabaseClient,
   shift: ShiftRow,
   candidates: { id: string; full_name: string; phone: string | null }[],
   inserted: { id: string; cleaner_id: string; offer_code?: string | null }[],
+  // Assignment ids that already existed and were re-opened rather than created.
+  reopenedIds?: Set<string>,
 ): Promise<{ offered: { id: string; full_name: string }[]; failedIds: string[]; failedNames: string[] }> {
   const byId = new Map(inserted.map((r) => [r.cleaner_id, r]));
   const offered: { id: string; full_name: string }[] = [];
@@ -255,8 +257,16 @@ async function deliverOffers(
   }
   // Undeliverable offers must not linger as "offered" — they'd block the cleaner
   // from being re-offered next run and hold the shift in a false "staffing" state.
+  // Rows this run CREATED are deleted; rows it merely re-opened are put back to
+  // no_response, because deleting them would destroy the cleaner's real history
+  // on the shift (their earlier decline, their earlier offer).
   if (failedIds.length) {
-    await sb.from("shift_assignments").delete().in("id", failedIds);
+    const created = failedIds.filter((id) => !reopenedIds?.has(id));
+    const reopened = failedIds.filter((id) => reopenedIds?.has(id));
+    if (created.length) await sb.from("shift_assignments").delete().in("id", created);
+    if (reopened.length) {
+      await sb.from("shift_assignments").update({ status: "no_response" }).in("id", reopened);
+    }
   }
   return { offered, failedIds, failedNames };
 }
@@ -268,7 +278,7 @@ async function deliverOffers(
 // duplicate reminders on 17 August.
 //
 // Two guards keep this to offers that are genuinely finished with:
-//   • strictly earlier tiers — a cancellation re-offer (offerAllRemaining)
+//   • strictly earlier tiers — a cancellation re-offer (reofferToUnaccepted)
 //     deliberately opens LATER tiers while the shift sits at an earlier one;
 //   • already reminded — the offer went through its full chase and got no
 //     answer. A cancellation re-offer made minutes ago has not been reminded
@@ -372,11 +382,73 @@ export async function offerTier(
   };
 }
 
-// Re-offer a freed spot to ALL remaining available cleaners, across every tier
-// (not just the shift's current tier) and without capping to open spots. Used
-// when a cleaner cancels: we blast the offer wide so the gap fills fast, and the
-// first accept that reaches the target auto-closes the rest via markFullyStaffed.
-export async function offerAllRemaining(
+// The tier chain, read from the roster instead of hard-coded. `.order("tier")`
+// sorts by the cleaner_tier enum's declaration order, so adding a tier_4 to the
+// enum and putting a cleaner in it extends the chain with no code change. A tier
+// with nobody offerable in it simply never appears.
+export async function tierChain(sb: SupabaseClient): Promise<Tier[]> {
+  const { data } = await sb
+    .from("cleaners")
+    .select("tier")
+    .eq("is_active", true)
+    .eq("is_team_leader", false)
+    .order("tier");
+  const chain: Tier[] = [];
+  for (const r of data ?? []) {
+    const t = r.tier as Tier;
+    if (t && !chain.includes(t)) chain.push(t);
+  }
+  return chain;
+}
+
+// The next tier after `after` with at least one cleaner free to take THIS shift.
+// Walks straight past a tier that is empty, or whose cleaners are all already on
+// the shift: an empty middle tier must not stall the chain, and nothing here
+// assumes there are exactly three tiers.
+//
+// `after` = null starts at the top. A null RESULT means the chain is exhausted —
+// every tier has been through and there is nobody new left to ask.
+export async function nextOfferableTier(
+  sb: SupabaseClient,
+  shiftId: string,
+  after: Tier | null,
+): Promise<Tier | null> {
+  const chain = await tierChain(sb);
+  const from = after ? chain.indexOf(after) + 1 : 0;
+  if (after && from <= 0) return null;  // the shift's tier is no longer in the chain
+
+  const { data: rows } = await sb
+    .from("shift_assignments")
+    .select("cleaner_id")
+    .eq("shift_id", shiftId);
+  const taken = new Set((rows ?? []).map((r) => r.cleaner_id));
+
+  for (let i = from; i < chain.length; i++) {
+    const { data: pool } = await sb
+      .from("cleaners")
+      .select("id")
+      .eq("is_active", true)
+      .eq("is_team_leader", false)
+      .eq("tier", chain[i]);
+    if ((pool ?? []).some((c) => !taken.has(c.id))) return chain[i];
+  }
+  return null;
+}
+
+// Last-resort re-offer after a cancellation, once the tier chain is exhausted.
+//
+// Unlike offerTier this ignores tiers entirely and re-asks EVERY offerable
+// cleaner who has not accepted this shift — the ones who declined, the ones who
+// never replied, and the one whose cancellation triggered it. By the time the
+// chain is spent everyone already has a row on the shift, so an
+// only-people-never-asked rule would find nobody and the fallback would be a
+// no-op. A decline three weeks ago is not a decline today; asking again is the
+// entire point of this step.
+//
+// shift_assignments is UNIQUE (shift_id, cleaner_id), so an existing row is
+// RE-OPENED in place — fresh offer code, reminder stamp cleared so the reminder
+// chain can chase it again — rather than duplicated.
+export async function reofferToUnaccepted(
   sb: SupabaseClient,
   shiftId: string,
 ): Promise<OfferResult> {
@@ -396,9 +468,11 @@ export async function offerAllRemaining(
   // regardless of tier. No slice — everyone available gets the offer.
   const { data: existing } = await sb
     .from("shift_assignments")
-    .select("cleaner_id")
+    .select("id, cleaner_id, status")
     .eq("shift_id", shiftId);
-  const taken = new Set((existing ?? []).map((r) => r.cleaner_id));
+  const rows = existing ?? [];
+  const onShift = new Set(rows.filter((r) => r.status === "accepted").map((r) => r.cleaner_id));
+  const rowByCleaner = new Map(rows.map((r) => [r.cleaner_id, r]));
 
   const { data: pool } = await sb
     .from("cleaners")
@@ -408,24 +482,57 @@ export async function offerAllRemaining(
     .order("tier")
     .order("full_name");
 
-  const candidates = (pool ?? []).filter((c) => !taken.has(c.id));
+  // Everyone not currently ON the shift. No slice to openSpots — this is the
+  // last ask, so it goes wide, and the accepts that reach the target close the
+  // rest via markFullyStaffed.
+  const candidates = (pool ?? []).filter((c) => !onShift.has(c.id));
   if (candidates.length === 0) {
     return emptyOffer(shift.shift_date, openSpots, false);
   }
 
-  const rows = candidates.map((c) => ({
-    shift_id: shiftId,
-    cleaner_id: c.id,
-    tier_at_offer: c.tier,
-    status: "offered",
-    offer_code: gen4(),
-  }));
-  const { data: inserted } = await sb
-    .from("shift_assignments")
-    .insert(rows)
-    .select("id, cleaner_id, offer_code");
+  const now = new Date().toISOString();
+  const reopenedIds = new Set<string>();
+  const assignments: { id: string; cleaner_id: string; offer_code?: string | null }[] = [];
+  const fresh: typeof candidates = [];
 
-  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, inserted ?? []);
+  for (const c of candidates) {
+    const row = rowByCleaner.get(c.id);
+    if (!row) {
+      fresh.push(c);
+      continue;
+    }
+    const offer_code = gen4();
+    await sb.from("shift_assignments")
+      .update({
+        status: "offered",
+        offer_code,
+        offered_at: now,
+        tier_at_offer: c.tier,
+        // Cleared so this re-offer gets a reminder of its own; the old stamp
+        // belonged to the offer this one supersedes.
+        reminder_sent_at: null,
+        responded_at: null,
+      })
+      .eq("id", row.id);
+    reopenedIds.add(row.id);
+    assignments.push({ id: row.id, cleaner_id: c.id, offer_code });
+  }
+
+  if (fresh.length) {
+    const { data: inserted } = await sb
+      .from("shift_assignments")
+      .insert(fresh.map((c) => ({
+        shift_id: shiftId,
+        cleaner_id: c.id,
+        tier_at_offer: c.tier,
+        status: "offered",
+        offer_code: gen4(),
+      })))
+      .select("id, cleaner_id, offer_code");
+    assignments.push(...(inserted ?? []));
+  }
+
+  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, assignments, reopenedIds);
 
   if (offered.length > 0) {
     await sb.from("shifts").update({ status: "staffing" }).eq("id", shiftId);
@@ -529,10 +636,49 @@ export async function declineOffer(sb: SupabaseClient, assignmentId: string): Pr
     .eq("id", assignmentId);
 }
 
-// Cancel an accepted/offered assignment and re-offer the freed spot to ALL
-// remaining available cleaners (every tier). The first accept that hits the
-// target auto-closes the rest via markFullyStaffed.
-export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Promise<void> {
+// The deeper of two tiers, either of which may be absent.
+function maxTier(a: Tier | null, b: Tier | null): Tier | null {
+  if (!a) return b;
+  if (!b) return a;
+  return TIER_RANK[a] >= TIER_RANK[b] ? a : b;
+}
+
+// Deepest tier this shift has ever had an offer at, read off the assignment
+// rows. NOT from shifts.current_tier alone: markFullyStaffed nulls that field
+// when a shift fills, so once a shift has been full the tier it reached is only
+// recoverable from the offers themselves — and that is exactly the moment a
+// cancellation needs to know it.
+async function deepestTierOffered(sb: SupabaseClient, shiftId: string): Promise<Tier | null> {
+  const { data } = await sb
+    .from("shift_assignments")
+    .select("tier_at_offer")
+    .eq("shift_id", shiftId)
+    .not("tier_at_offer", "is", null);
+  let best: Tier | null = null;
+  for (const r of data ?? []) {
+    const t = r.tier_at_offer as Tier;
+    if (!TIER_RANK[t]) continue;
+    best = maxTier(best, t);
+  }
+  return best;
+}
+
+// Cancel an accepted/offered assignment and decide what the shift is owed next.
+//
+// The decision ignores staffing status entirely — fully_staffed, staffing and
+// understaffed all behave the same. What it asks is whether the OFFER CHAIN has
+// anywhere left to go:
+//
+//   • a tier still has someone free -> "waiting". Free the spot and stop. Every
+//     escalation recomputes openSpots when it runs, so the next one covers the
+//     freed spot on its own. Blasting now would jump those cleaners' turn and
+//     defeat the tiering.
+//   • no tier has anyone left     -> "reoffered". Everyone has been asked once
+//     and there is no later tier to fall back on, so re-ask everyone who is not
+//     on the shift.
+export type CancelOutcome = "reoffered" | "waiting" | "closed";
+
+export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Promise<CancelOutcome> {
   const { data: a } = await sb
     .from("shift_assignments")
     .select("shift_id")
@@ -541,13 +687,26 @@ export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Pro
   await sb.from("shift_assignments")
     .update({ status: "cancelled", responded_at: new Date().toISOString() })
     .eq("id", assignmentId);
-  if (!a) return;
+  if (!a) return "closed";
 
   const shift = await loadShift(sb, a.shift_id);
-  if (!shift || shift.status === "cancelled") return;
-  // Reopen if it had been marked full.
+  if (!shift || shift.status === "cancelled") return "closed";
+
+  // Where the shift is up to. Read from the offer rows as well as current_tier,
+  // because markFullyStaffed nulls current_tier when a shift fills — so once a
+  // shift has been full, the rows are the only record of the tier it reached.
+  const reached = maxTier(await deepestTierOffered(sb, a.shift_id), shift.current_tier ?? null);
+
+  // Reopen a filled shift, restoring that tier. current_tier is how the
+  // escalation jobs FIND a shift; left null, a reopened shift is invisible to
+  // them and stalls in `staffing` with the spot open.
   if (shift.status === "fully_staffed") {
-    await sb.from("shifts").update({ status: "staffing" }).eq("id", a.shift_id);
+    await sb.from("shifts")
+      .update({ status: "staffing", current_tier: reached })
+      .eq("id", a.shift_id);
   }
-  await offerAllRemaining(sb, a.shift_id);
+
+  if (await nextOfferableTier(sb, a.shift_id, reached)) return "waiting";
+  await reofferToUnaccepted(sb, a.shift_id);
+  return "reoffered";
 }
