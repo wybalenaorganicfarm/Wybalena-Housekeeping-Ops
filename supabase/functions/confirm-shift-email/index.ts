@@ -23,8 +23,14 @@ const SHIFT_LABEL: Record<string, string> = {
 // "Standard Clean on 6 August 2026" — human label for the confirmation page.
 function shiftLabel(shiftType: string, shiftDate: string): string {
   const type = SHIFT_LABEL[shiftType] ?? shiftType;
-  const d = new Date(shiftDate);
-  const when = isNaN(+d) ? shiftDate : d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+  // shift_date is a plain YYYY-MM-DD and carries no timezone. Parsed at UTC
+  // midnight and formatted in UTC so the runtime's own zone can never nudge it
+  // across midnight — the off-by-one that made a 4 October check-out read as
+  // 3 October in the confirmation email.
+  const d = new Date(`${shiftDate}T00:00:00Z`);
+  const when = isNaN(+d)
+    ? shiftDate
+    : d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   return `${type} on ${when}`;
 }
 

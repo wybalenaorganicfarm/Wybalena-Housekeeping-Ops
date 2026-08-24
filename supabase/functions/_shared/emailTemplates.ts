@@ -10,6 +10,10 @@ const SHIFT_LABEL: Record<string, string> = {
   other: "Other Clean",
 };
 
+// The venue's timezone. Every instant an email renders is a venue-local moment,
+// so it must be formatted here — never left to the runtime's zone (UTC).
+const VENUE_TZ = "Australia/Sydney";
+
 const GREEN = "#1F4D3A";
 const AMBER = "#E08A1E";
 const INK = "#1c241f";
@@ -39,10 +43,31 @@ function esc(s: unknown): string {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ESC_MAP[c] ?? c);
 }
 
+// Two shapes arrive here and they must be handled differently:
+//
+//   • a plain YYYY-MM-DD (shift_date) — carries no timezone, so it is formatted
+//     by hand. Pushing it through Date would invent an instant and let the
+//     runtime's zone move it across midnight.
+//   • an ISO timestamp (check_in / check_out) — a real instant, formatted in
+//     VENUE-LOCAL time. Without the explicit timeZone this rendered the UTC
+//     date: Edge Functions run in UTC, and a 10:00 AEDT check-out is 23:00 the
+//     PREVIOUS day in UTC, so every morning check-out printed a day early
+//     (Amanda's 4 October check-out read as 3 October). shift_date, derived
+//     from the same value via a Sydney-pinned formatter, was correct — which is
+//     exactly why the two disagreed inside one email.
+const MONTHS_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 function fmtDate(iso?: string | null): string {
   if (!iso) return "—";
+  const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (plain) return `${Number(plain[3])} ${MONTHS_LONG[Number(plain[2]) - 1]} ${plain[1]}`;
   const d = new Date(iso);
-  return isNaN(+d) ? esc(iso.slice(0, 10)) : d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" });
+  return isNaN(+d)
+    ? esc(iso.slice(0, 10))
+    : d.toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric", timeZone: VENUE_TZ });
 }
 
 function fmtTime(t?: string | null): string {
@@ -126,11 +151,20 @@ export interface GapBooking {
   check_out: string;  // ISO
 }
 
-// "11 May 2026, 3:00 AM" from an ISO timestamp; falls back to the raw string.
+// "11 May 2026, 3:00 PM" from an ISO timestamp; falls back to the raw string.
+//
+// Venue-local, like every other date in these emails. It used to render UTC and
+// say so — honest, but it put a 10:00 AEDT check-out on screen as "3 October,
+// 11:00 PM UTC", which reads as a day early at a glance and is the same
+// off-by-one the confirmation email had. The reader is at the venue; give them
+// the venue's clock.
 function fmtDateTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(+d)) return esc(iso);
-  return d.toLocaleString("en-AU", { day: "numeric", month: "long", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" }) + " UTC";
+  return d.toLocaleString("en-AU", {
+    day: "numeric", month: "long", year: "numeric",
+    hour: "numeric", minute: "2-digit", timeZone: VENUE_TZ,
+  });
 }
 
 function gapRow(label: string, value: string): string {
