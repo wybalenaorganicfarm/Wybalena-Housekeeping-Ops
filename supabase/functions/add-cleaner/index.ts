@@ -1,9 +1,9 @@
 // add-cleaner — app-facing. An ops manager (admin/super_admin) adds a cleaner.
-// Inserts the roster row, then welcomes the cleaner by email AND WhatsApp.
+// Inserts the roster row, then welcomes the cleaner on WhatsApp (the only channel
+// cleaners are contacted on — see the note above the send below).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { getCaller, isWriter } from "../_shared/authz.ts";
-import { sendEmail } from "../_shared/adapters/email.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { renderTemplate } from "../_shared/templates.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
@@ -52,21 +52,18 @@ Deno.serve(async (req) => {
     triggered_by: "manual",
   });
 
-  // Notify the new cleaner. Both adapters are stubbed (log only) until creds set.
-  // A notification failure must NEVER fail creation — the row already exists.
-  let emailed = false;
-  if (email) {
-    try {
-      const r = await sendEmail(
-        "Welcome to the Wybalena cleaning roster",
-        `Hi ${full_name},\n\nYou've been added to the Wybalena cleaning roster. You'll receive shift offers via WhatsApp on this number — reply YES to accept or NO to decline.\n\nWelcome aboard!\n— The Wybalena operations team`,
-        email,
-      );
-      emailed = r.ok;
-    } catch (e) {
-      console.error(`[add-cleaner] email notify failed: ${e}`);
-    }
-  }
+  // Notify the new cleaner — WhatsApp ONLY.
+  //
+  // There used to be a welcome EMAIL here as well, with its wording hardcoded in
+  // this file. It was invisible from /templates, so editing the `cleaner_welcome`
+  // template changed the WhatsApp message while every new cleaner kept receiving
+  // the old hardcoded email — which is exactly what happened when the real
+  // cleaning team was onboarded. WhatsApp is the channel cleaners actually work
+  // on, so the email is gone rather than templated: one channel, one wording,
+  // edited in one place.
+  //
+  // The adapter is stubbed (log only) until creds are set, and a notification
+  // failure must NEVER fail creation — the row already exists.
   let whatsapped = false;
   try {
     const wa = await sendMessage(
@@ -80,5 +77,5 @@ Deno.serve(async (req) => {
     console.error(`[add-cleaner] whatsapp notify failed: ${e}`);
   }
 
-  return json({ ok: true, id: created?.id, emailed, whatsapped });
+  return json({ ok: true, id: created?.id, whatsapped });
 });
