@@ -31,6 +31,7 @@ import { checkHealth as checkWhapi, sendMessage } from "../_shared/adapters/what
 import { checkHealth as checkGmail } from "../_shared/adapters/email.ts";
 import { checkHealth as checkCalendar } from "../_shared/adapters/calendar.ts";
 import { renderTemplate } from "../_shared/templates.ts";
+import { describeError } from "../_shared/describeError.ts";
 
 interface HealthResult {
   name: string;
@@ -85,27 +86,50 @@ function diagnose(label: string, detail: string): { problem: string; steps: stri
     };
   }
   return {
-    problem: `${label} reported an unexpected error.`,
+    problem: detail.trim()
+      ? `${label} reported an unexpected error.`
+      : `${label} failed a check but reported no error message — this is usually a brief network glitch rather than a real outage.`,
     steps: [`Please forward this email to your developer/administrator to look into the ${label} connection.`],
   };
 }
 
 async function checkSupabase(): Promise<HealthResult> {
-  try {
-    const sb = serviceClient();
-    // Trivial read — confirms DB + service-role key are working. No writes.
-    const { error } = await sb
-      .from("cleaners")
-      .select("id", { count: "exact", head: true });
-    return {
-      name: "supabase",
-      configured: true,
-      ok: !error,
-      detail: error ? error.message : "database reachable, service role valid",
-    };
-  } catch (e) {
-    return { name: "supabase", configured: true, ok: false, detail: String(e) };
+  // A single failed probe is not an outage. The DB is the one connection we can
+  // cheaply verify twice, and a transient blip on one request has already
+  // produced a false "App Database is down" alert (28 Aug 2026) — that same run
+  // then wrote its own warning row to this very database, proving it was up.
+  // Two failures a few seconds apart is the bar for waking anyone.
+  let last = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const sb = serviceClient();
+      // Trivial read — confirms DB + service-role key are working. No writes.
+      // Deliberately not head:true — a HEAD response carries no body, so a
+      // failure can surface as an error object with an empty message, and the
+      // alert email's "Technical detail" line then renders blank.
+      const { error } = await sb.from("cleaners").select("id").limit(1);
+      if (!error) {
+        return {
+          name: "supabase",
+          configured: true,
+          ok: true,
+          detail: attempt === 1
+            ? "database reachable, service role valid"
+            : "database reachable, service role valid (recovered on retry)",
+        };
+      }
+      last = describeError(error);
+    } catch (e) {
+      last = describeError(e);
+    }
+    if (attempt === 1) await new Promise((r) => setTimeout(r, 3000));
   }
+  return {
+    name: "supabase",
+    configured: true,
+    ok: false,
+    detail: `${last} (failed twice, 3s apart)`,
+  };
 }
 
 Deno.serve(async (req) => {

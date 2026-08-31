@@ -1,8 +1,12 @@
 // mid-retreat-notify — cron. Scans upcoming bookings for long stays (>= 7 nights)
 // whose mid-retreat clean has not been scheduled yet, raises a mid_retreat_needed
-// alert per booking, and sends the Operations Manager ONE email + ONE WhatsApp
-// digest for the run. Independently schedulable from the /schedule page — the
-// same shape as wipeover-notify.
+// alert per booking, and sends the Operations Manager ONE email digest for the
+// run. Independently schedulable from the /schedule page — the same shape as
+// wipeover-notify.
+//
+// Email only, by request (Aug 2026): mid-retreat and wipeover are plan-ahead
+// prompts, not time-critical dispatch, so they don't warrant a WhatsApp ping.
+// The in-app alert per booking remains the durable record.
 //
 // Why this is its own job rather than a step inside sync-bookings (where it used
 // to live): the sync only considers bookings whose CHECK-OUT falls in the target
@@ -17,9 +21,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
-import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { midRetreatEmail } from "../_shared/emailTemplates.ts";
-import { renderTemplate } from "../_shared/templates.ts";
 import { prettyDate } from "../_shared/datetime.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
@@ -133,8 +135,8 @@ Deno.serve(async (req) => {
   }
 
   // One ALERT per booking above (each is actioned and dismissed on its own), but
-  // ONE email and ONE WhatsApp for the run: several long stays in a roster must
-  // not mean several near-identical messages to work through.
+  // ONE email for the run: several long stays in a roster must not mean several
+  // near-identical messages to work through.
   const mail = midRetreatEmail(fresh.map(({ booking: b, suggestedDate }) => ({
     booking: { guest_name: b.guest_name, gcal_event_id: b.gcal_event_id, check_in: b.check_in, check_out: b.check_out },
     nights: b.nights,
@@ -142,22 +144,6 @@ Deno.serve(async (req) => {
   })));
   const sent = await sendEmail(mail.subject, mail.text, ops.email ?? undefined, mail.html);
 
-  // The same digest on WhatsApp. A missing manager phone is not a failure — the
-  // email and the alerts already carry it.
-  const many = fresh.length > 1;
-  const bookingList = fresh.map(({ booking: b, suggestedDate }) =>
-    `• ${b.guest_name ?? "A booking"} — ${b.nights} nights\n` +
-    `  📅 ${prettyDate(localDateStr(new Date(b.check_in)))} → ${prettyDate(localDateStr(new Date(b.check_out)))}\n` +
-    `  ⏰ Suggested mid-stay date: ${prettyDate(suggestedDate)}`).join("\n\n");
-  const waText = await renderTemplate(sb, "mid_retreat_whatsapp",
-    `🧹 *Mid-Retreat Clean${many ? "s" : ""} Required*\n\n` +
-    (many ? `${fresh.length} bookings are 7 nights or longer:\n\n` : "") +
-    bookingList +
-    `\n\n${many ? "These shifts are" : "This shift is"} not created automatically — please add ${many ? "them" : "it"} from the Shifts page.`,
-    { booking_list: bookingList, count: fresh.length });
-  const waSent = ops.phone ? await sendMessage(ops.phone, waText) : null;
-
-  const waWord = waSent === null ? "skipped (no manager phone)" : waSent.ok ? "sent" : "failed";
   await writeAuditLog(sb, {
     event_type: "mid_retreat.notified",
     event_label: "Mid-Retreat Clean",
@@ -165,14 +151,13 @@ Deno.serve(async (req) => {
     summary:
       `${fresh.length} mid-retreat clean(s) need scheduling: ` +
       fresh.map(({ booking: b, suggestedDate }) => `${b.guest_name ?? "a booking"} (${b.nights}n, suggested ${suggestedDate})`).join("; ") +
-      `. Alert(s) raised. Email ${sent.ok ? "sent" : "failed"}; WhatsApp ${waWord}.`,
+      `. Alert(s) raised. Email ${sent.ok ? "sent" : "failed"}.`,
     error_message: sent.ok ? undefined : "email provider returned an error",
     detail: {
       count: fresh.length,
       bookings: fresh.map(({ booking: b, suggestedDate }) =>
         ({ booking_id: b.id, guest: b.guest_name, nights: b.nights, suggested_date: suggestedDate })),
       emailed: sent.ok,
-      whatsapped: waSent?.ok ?? false,
     },
     source: SOURCE,
     triggered_by: "cron",

@@ -17,6 +17,7 @@ import { checkHealth as checkWhapi } from "../_shared/adapters/whatsapp.ts";
 import { checkHealth as checkGmail } from "../_shared/adapters/email.ts";
 import { checkHealth as checkCalendar } from "../_shared/adapters/calendar.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { describeError } from "../_shared/describeError.ts";
 
 // Friendly labels mirror health-check so the UI and emails read the same.
 const LABEL: Record<string, string> = {
@@ -39,10 +40,20 @@ Deno.serve(async (req) => {
 
   async function checkSupabase() {
     try {
-      const { error } = await sb.from("cleaners").select("id", { count: "exact", head: true });
-      return { name: "supabase", configured: true, ok: !error, detail: error ? error.message : "reachable" };
+      // Not head:true — a HEAD response carries no body, so a failure can come
+      // back as an error object with an empty message and the Connections page
+      // then shows "not working" with no reason. Single attempt (unlike
+      // health-check's retry): this runs on page load, so a retry delay would
+      // stall the UI, and the operator can simply refresh.
+      const { error } = await sb.from("cleaners").select("id").limit(1);
+      return {
+        name: "supabase",
+        configured: true,
+        ok: !error,
+        detail: error ? describeError(error) : "reachable",
+      };
     } catch (e) {
-      return { name: "supabase", configured: true, ok: false, detail: String(e) };
+      return { name: "supabase", configured: true, ok: false, detail: describeError(e) };
     }
   }
 

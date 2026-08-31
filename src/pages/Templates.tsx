@@ -117,7 +117,6 @@ const RECIPIENT_DEFAULT = R_CLEANER;
 const RECIPIENT: Record<string, Recipient> = {
   lead_roster: R_LEAD,
   lead_cleaner_cancelled: R_LEAD,
-  mid_retreat_whatsapp: R_OPS,
   connection_alert_whatsapp: R_ADMIN,
 };
 
