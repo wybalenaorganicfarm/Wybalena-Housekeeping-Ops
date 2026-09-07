@@ -9,6 +9,7 @@ const labelStyle = { fontSize: 11, letterSpacing: "0.05em", textTransform: "uppe
 const fieldStyle = { border: `1px solid ${c.border3}`, borderRadius: 8, padding: "10px 12px", fontSize: 14, background: "#fff", color: c.ink, outline: "none", width: "100%" } as const;
 
 export function EditShiftModal({ shift, onClose, onSaved }: { shift: Shift; onClose: () => void; onSaved: () => void }) {
+  const [date, setDate] = useState(shift.shift_date.slice(0, 10));
   const [time, setTime] = useState(shift.start_time.slice(0, 5));
   const [hours, setHours] = useState(shift.estimated_hours);
   const [type, setType] = useState(shift.shift_type);
@@ -20,7 +21,7 @@ export function EditShiftModal({ shift, onClose, onSaved }: { shift: Shift; onCl
   async function save() {
     setBusy(true);
     const e = await updateShift(shift.id, {
-      start_time: time, estimated_hours: hours, shift_type: type as Shift["shift_type"],
+      shift_date: date, start_time: time, estimated_hours: hours, shift_type: type as Shift["shift_type"],
       required_cleaners: required, special_instructions: instr || null,
     });
     setBusy(false);
@@ -40,10 +41,14 @@ export function EditShiftModal({ shift, onClose, onSaved }: { shift: Shift; onCl
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "22px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
           <div style={{ display: "flex", gap: 14 }}>
+            {/* A booking that moves to another day has to be editable here —
+                without this the only way to correct the date was to delete the
+                shift and rebuild it, losing its link to the booking. */}
+            <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Date</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={fieldStyle} /></label>
             <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Start time</span><input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={fieldStyle} /></label>
-            <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Duration (hrs)</span><input type="number" min={1} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value))} style={fieldStyle} /></label>
           </div>
           <div style={{ display: "flex", gap: 14 }}>
+            <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Duration (hrs)</span><input type="number" min={1} step={0.5} value={hours} onChange={(e) => setHours(Number(e.target.value))} style={fieldStyle} /></label>
             <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Clean type</span>
               <select value={type} onChange={(e) => setType(e.target.value as Shift["shift_type"])} style={fieldStyle}>
                 <option value="standard">Standard Clean</option>

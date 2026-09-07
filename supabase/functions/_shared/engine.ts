@@ -2,7 +2,7 @@
 // Reused by the cron jobs (offer-tier-1, escalate-tier-2/3, remind-nonresponders)
 // and the whatsapp-inbound webhook. All writes use the service-role client.
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { sendButtons, sendMessage } from "./adapters/whatsapp.ts";
+import { sendButtons, sendMessage, titleWithCode } from "./adapters/whatsapp.ts";
 import { btnTitle, fillVars, loadTemplate, renderTemplate } from "./templates.ts";
 import { prettyDate, prettyDateTime, prettyTime } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
@@ -48,8 +48,29 @@ async function acceptedCount(sb: SupabaseClient, shiftId: string): Promise<numbe
   return count ?? 0;
 }
 
-function gen4(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
+// The reference a cleaner sees on the offer buttons and in the message body:
+// "0409" for a shift on 4 September, "0409-2" for a second shift the same day.
+//
+// Per-SHIFT, not per-assignment — every cleaner offered the same shift sees the
+// same code, which is what makes it meaningful to the team ("the 0409 shift").
+// Correlation is still exact because the webhook matches code AND cleaner
+// together (ownedById filters by cleaner_id), so one code resolves to one row.
+//
+// Derived and stored by assign_shift_offer_code() in Postgres, which allocates
+// the -N suffix under a uniqueness constraint. Doing it in the database rather
+// than here means two shifts created concurrently on the same date can't be
+// handed the same code. Idempotent: once issued, a code never changes, because
+// it appears in messages already sent.
+async function shiftOfferCode(sb: SupabaseClient, shiftId: string): Promise<string | null> {
+  const { data, error } = await sb.rpc("assign_shift_offer_code", { p_shift_id: shiftId });
+  if (error) {
+    // Never block an offer on the reference. The message still carries the date
+    // and time, and the button payload still carries the assignment id — the code
+    // is a fallback for when that payload is stripped, not the primary path.
+    console.error(`[engine] offer code lookup failed for shift ${shiftId}: ${error.message}`);
+    return null;
+  }
+  return (data as string | null) ?? null;
 }
 
 // Send the interactive Accept/Decline offer to one cleaner. Button payloads carry
@@ -76,14 +97,20 @@ async function sendOfferMessage(
   const vars = { shift_date: date, start_time: time, offer_code: offerCode ?? "" };
   const body = t?.body
     ? fillVars(t.body, vars)
-    : `*SHIFT DETAILS*\n\n📅 Date: ${date}\n⏰ Time: ${time}\n\n` +
+    : `*SHIFT DETAILS*\n\n📅 Date: ${date}\n⏰ Time: ${time}` +
+      (offerCode ? `\n🔖 Ref: ${offerCode}` : "") + `\n\n` +
       `Tap *Accept* to take this shift, or *Decline* to pass.`;
   return await sendButtons(
     phone,
     body,
     [
-      { id: `accept:${assignmentId}`, title: btnTitle(t, "accept", "✅ Accept") },
-      { id: `decline:${assignmentId}`, title: btnTitle(t, "decline", "❌ Decline") },
+      // The code rides in the visible TITLE as well as the payload id. WhatsApp
+      // sometimes delivers a tap stripped of its interactive payload and with no
+      // quoted-message context; the title survives that, so the reply still says
+      // which offer it answers and the cleaner needs to do nothing differently.
+      // Dropped automatically if it would exceed WhatsApp's 20-char title limit.
+      { id: `accept:${assignmentId}`, title: titleWithCode(btnTitle(t, "accept", "✅ Accept"), offerCode) },
+      { id: `decline:${assignmentId}`, title: titleWithCode(btnTitle(t, "decline", "❌ Decline"), offerCode) },
     ],
     {
       header: t?.header ?? "🧹 New Cleaning Shift Available",
@@ -162,7 +189,7 @@ export async function offerToCleaner(
   // this is the server-side guard for manual assign / any direct call.
   if (!cleaner.is_active) return "inactive";
 
-  const code = gen4();
+  const code = await shiftOfferCode(sb, shiftId);
   const { data: row } = await sb
     .from("shift_assignments")
     .upsert({
@@ -342,12 +369,14 @@ export async function offerTier(
     return emptyOffer(shift.shift_date, openSpots, false);
   }
 
+  // One code for the shift, shared by every cleaner offered it.
+  const shiftCode = await shiftOfferCode(sb, shiftId);
   const rows = candidates.map((c) => ({
     shift_id: shiftId,
     cleaner_id: c.id,
     tier_at_offer: tier,
     status: "offered",
-    offer_code: gen4(),
+    offer_code: shiftCode,
   }));
   const { data: inserted } = await sb
     .from("shift_assignments")
@@ -494,6 +523,10 @@ export async function reofferToUnaccepted(
   const reopenedIds = new Set<string>();
   const assignments: { id: string; cleaner_id: string; offer_code?: string | null }[] = [];
   const fresh: typeof candidates = [];
+  // One code for the shift, reused by re-offers and fresh offers alike. A
+  // re-offer keeps the same reference as the original — it is the same shift, and
+  // the code is what the cleaner reads on the button.
+  const shiftCode = await shiftOfferCode(sb, shiftId);
 
   for (const c of candidates) {
     const row = rowByCleaner.get(c.id);
@@ -501,7 +534,7 @@ export async function reofferToUnaccepted(
       fresh.push(c);
       continue;
     }
-    const offer_code = gen4();
+    const offer_code = shiftCode;
     await sb.from("shift_assignments")
       .update({
         status: "offered",
@@ -526,7 +559,7 @@ export async function reofferToUnaccepted(
         cleaner_id: c.id,
         tier_at_offer: c.tier,
         status: "offered",
-        offer_code: gen4(),
+        offer_code: shiftCode,
       })))
       .select("id, cleaner_id, offer_code");
     assignments.push(...(inserted ?? []));

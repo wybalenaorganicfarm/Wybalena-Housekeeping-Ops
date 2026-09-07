@@ -137,6 +137,42 @@ export interface QuickReply {
   title: string;
 }
 
+// WhatsApp rejects a quick-reply title longer than 20 characters, and rejects the
+// WHOLE message with it — so one over-long title means the offer never arrives.
+// Titles are admin-editable from the Message Templates page, so this cannot be
+// left to a comment: clamp at the send boundary, where every button passes.
+const BUTTON_TITLE_MAX = 20;
+
+// Count what WhatsApp counts. A 4-digit code is plain ASCII, but titles carry
+// emoji, so measure by code points rather than UTF-16 units — "🚫 Cancel" is 9
+// units but 8 characters, and truncating mid-surrogate would corrupt the emoji.
+function titleLength(s: string): number {
+  return [...s].length;
+}
+
+function clampTitle(s: string): string {
+  const chars = [...s];
+  return chars.length <= BUTTON_TITLE_MAX ? s : chars.slice(0, BUTTON_TITLE_MAX).join("");
+}
+
+// Append the offer code to a button title so a tap that comes back as a bare
+// text echo still says WHICH offer it belongs to ("❌ Decline 4823").
+//
+// WhatsApp/Whapi sometimes deliver a tap with no interactive payload and no
+// quoted-message context. When that happened the reply carried nothing to
+// correlate on, so a cleaner holding several open offers had their response
+// dropped — see whatsapp-inbound step (c). The code travels in the one field
+// that survives that stripping: the visible title.
+//
+// Skipped silently when it would exceed the limit (a long custom title) or when
+// there is no code — the button then behaves exactly as before rather than
+// risking a rejected send.
+export function titleWithCode(title: string, code?: string | null): string {
+  if (!code) return clampTitle(title);
+  const withCode = `${title} ${code}`;
+  return titleLength(withCode) <= BUTTON_TITLE_MAX ? withCode : clampTitle(title);
+}
+
 // Send an interactive button message (Whapi /messages/interactive), retrying
 // transient provider failures. Only once every attempt is exhausted does it fall
 // back to a plain-text keyword message, so the offer still reaches the cleaner —
@@ -160,7 +196,10 @@ export async function sendButtons(
     body: { text: body },
     ...(opts.footer ? { footer: { text: opts.footer } } : {}),
     action: {
-      buttons: buttons.slice(0, 3).map((b) => ({ type: "quick_reply", title: b.title, id: b.id })),
+      // clampTitle is the last line of defence: an over-long title (an admin edit,
+      // or a code appended to one) would otherwise have WhatsApp reject the entire
+      // message, and the cleaner would never receive the offer at all.
+      buttons: buttons.slice(0, 3).map((b) => ({ type: "quick_reply", title: clampTitle(b.title), id: b.id })),
     },
   }, "interactive send");
   if (r.ok) return { ok: true, providerMessageId: messageId(r.data) };
@@ -195,7 +234,15 @@ export async function sendDeclineConfirm(
       { id: `declineyes:${assignmentId}`, title: btnTitle(t, "declineyes", "✅ Yes, decline") },
       { id: `declineno:${assignmentId}`, title: btnTitle(t, "declineno", "↩️ No, keep offer") },
     ],
-    { footer: t?.footer ?? "Wybalena Organic Farm" },
+    {
+      footer: t?.footer ?? "Wybalena Organic Farm",
+      // Without this, a prompt whose buttons fail to send left the cleaner with no
+      // way to answer at all. The wording must stay an exact match for
+      // strictTextAction's accepted titles, so a typed reply still resolves.
+      fallbackText: `Are you sure you want to decline the shift on ${v.shift_date} at ${v.start_time}?\n\n` +
+        `The buttons didn't come through this time. Reply "Yes decline" to decline it, ` +
+        `or "No keep offer" to keep it.`,
+    },
   );
 }
 
@@ -221,7 +268,13 @@ export async function sendCancelConfirm(
       { id: `cancelyes:${assignmentId}`, title: btnTitle(t, "cancelyes", "✅ Yes, cancel") },
       { id: `cancelno:${assignmentId}`, title: btnTitle(t, "cancelno", "↩️ No, keep shift") },
     ],
-    { footer: t?.footer ?? "Wybalena Organic Farm" },
+    {
+      footer: t?.footer ?? "Wybalena Organic Farm",
+      // Wording must stay an exact match for strictTextAction's accepted titles.
+      fallbackText: `Are you sure you want to cancel the shift on ${v.shift_date} at ${v.start_time}?\n\n` +
+        `The buttons didn't come through this time. Reply "Yes cancel" to give up the shift, ` +
+        `or "No keep shift" to stay on it.`,
+    },
   );
 }
 
@@ -329,6 +382,18 @@ function buttonTitle(m: Record<string, unknown>): string {
   );
 }
 
+// An offer code is the shift date as DDMM ("0409" = 4 September), with a -N
+// suffix when several shifts fall on the same day ("0409-2"). Defined once and
+// reused by both readers below so the two can never drift apart.
+const OFFER_CODE = /^[0-9]{3,6}(-[0-9]{1,2})?$/;
+
+// First standalone offer code in a string, e.g. "❌ Decline 0409-2" -> "0409-2".
+// Anchored to whole tokens so a time ("10:00") or a date never reads as a code.
+function firstCode(s: string): string | null {
+  if (!s) return null;
+  return s.toUpperCase().trim().split(/\s+/).find((t) => OFFER_CODE.test(t)) ?? null;
+}
+
 // The id of the message this reply quotes/replies to. Whapi surfaces it under a
 // `context` object (shapes vary by plan); we check the common fields.
 function quotedMessageId(m: Record<string, unknown>): string | null {
@@ -371,7 +436,15 @@ function actionFromText(s: string): InboundReply["action"] {
 // and the webhook stays silent.
 function strictTextAction(s: string): InboundReply["action"] {
   // Drop emoji/punctuation, collapse whitespace: "✅ Yes, decline" -> "YES DECLINE".
-  const u = s.toUpperCase().replace(/[^A-Z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  //
+  // A hyphen BETWEEN DIGITS is kept, so a same-day offer code survives intact
+  // ("❌ Decline 0409-2" -> "DECLINE 0409-2"). Stripping it split the code in two
+  // and the reply stopped being recognised at all. Every other hyphen, and all
+  // other punctuation, still becomes a space.
+  const u = s.toUpperCase()
+    .replace(/[^A-Z0-9\s-]/g, " ")             // emoji & punctuation -> space, keep "-"
+    .replace(/(?<![0-9])-|-(?![0-9])/g, " ")   // ...but only an inter-digit "-" survives
+    .replace(/\s+/g, " ").trim();
   // A button title is short; anything longer is conversation.
   if (!u || u.length > 20) return "unknown";
   // "Are you sure?" confirmation titles — verb-tagged, so Yes/No are unambiguous.
@@ -382,7 +455,7 @@ function strictTextAction(s: string): InboundReply["action"] {
   // Offer button titles, optionally with a legacy offer code ("ACCEPT 4823").
   // Note: bare YES/NO/Y/N/1/2/3 are deliberately NOT accepted — they collide with
   // ordinary conversation.
-  const m = u.match(/^(ACCEPT|DECLINE|CANCEL)( [0-9]{3,6})?$/);
+  const m = u.match(/^(ACCEPT|DECLINE|CANCEL)( [0-9]{3,6}(-[0-9]{1,2})?)?$/);
   if (!m) return "unknown";
   return m[1].toLowerCase() as InboundReply["action"];
 }
@@ -474,10 +547,19 @@ export function parseInbound(payload: unknown): InboundReply[] {
       // button-title echo counts — ordinary conversation stays "unknown" so the
       // webhook never replies to it.
       action = strictTextAction(text);
-      if (action !== "unknown") {
-        const tokens = text.trim().toUpperCase().split(/\s+/);
-        offerCode = tokens.find((t) => /^[0-9]{3,6}$/.test(t)) ?? null;
-      }
+    }
+
+    // Offer code — read from the button title as well as the message text, and on
+    // BOTH paths. Offer buttons carry it in their visible title ("❌ Decline 4823"),
+    // which is the one field that survives a tap arriving without a usable
+    // interactive payload. Extracting it here means the webhook can still pin the
+    // reply to the right offer when the payload is missing or unrecognised, with
+    // nothing extra asked of the cleaner.
+    //
+    // Only read a code once the message is a recognised action, so a stray number
+    // in ordinary conversation is never treated as one.
+    if (action !== "unknown") {
+      offerCode = firstCode(buttonTitle(m)) ?? firstCode(text);
     }
 
     out.push({

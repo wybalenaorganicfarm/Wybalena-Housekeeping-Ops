@@ -85,9 +85,24 @@ Deno.serve(async (req) => {
   let createdBookings = 0;
   let createdShifts = 0;
   let cancellations = 0;
+  // Calendar entries skipped as operational blocks rather than guest bookings.
+  const skippedBlocks: string[] = [];
 
   for (const ev of events) {
     if (!ev.gcalEventId) continue;
+
+    // The bookings calendar also carries operational blocks — "UNAVAILABLE",
+    // owner stays, maintenance. These are not guest stays: they must never
+    // become a booking, and must never generate a cleaning shift. One reached
+    // production and produced a shift for a day the venue was closed.
+    //
+    // Skipped before ANY write, so a block that was previously synced is not
+    // resurrected either. Collected for the run summary rather than logged one
+    // by one — these recur every week and would otherwise flood System Logs.
+    if (ev.nonBooking) {
+      skippedBlocks.push(`${ev.guestName ?? "(untitled)"} (${ev.checkIn.slice(0, 10)})`);
+      continue;
+    }
 
     const { data: existing } = await sb
       .from("bookings")
@@ -281,13 +296,18 @@ Deno.serve(async (req) => {
   // had no shift yet; the standalone job re-scans every upcoming booking.
 
   // --- Run summary ---------------------------------------------------------
+  // Name the blocks that were skipped, so "why didn't the 18th sync?" is
+  // answerable from the log without opening the calendar.
+  const blockNote = skippedBlocks.length
+    ? ` ${skippedBlocks.length} non-booking calendar entr${skippedBlocks.length === 1 ? "y" : "ies"} skipped: ${skippedBlocks.join("; ")}.`
+    : "";
   if (createdBookings === 0 && cancellations === 0) {
     await writeAuditLog(sb, {
       event_type: "sync.run",
       event_label: "Weekly Booking Sync",
       status: "skipped",
-      summary: `Weekly booking sync ran. No new bookings found for ${fmtWeek(fromDate)} – ${fmtWeek(lastDate)}.`,
-      detail: { leadWeeks, windowDays, from: fromDate, to: lastDate },
+      summary: `Weekly booking sync ran. No new bookings found for ${fmtWeek(fromDate)} – ${fmtWeek(lastDate)}.${blockNote}`,
+      detail: { leadWeeks, windowDays, from: fromDate, to: lastDate, skipped_blocks: skippedBlocks },
       source: SOURCE,
       triggered_by: "cron",
     });
@@ -296,8 +316,8 @@ Deno.serve(async (req) => {
       event_type: "sync.run",
       event_label: "Weekly Booking Sync",
       status: "success",
-      summary: `Weekly booking sync completed. ${createdBookings} new booking(s) found, ${createdShifts} shift(s) created.`,
-      detail: { createdBookings, createdShifts, cancellations, leadWeeks, windowDays, from: fromDate, to: lastDate },
+      summary: `Weekly booking sync completed. ${createdBookings} new booking(s) found, ${createdShifts} shift(s) created.${blockNote}`,
+      detail: { createdBookings, createdShifts, cancellations, leadWeeks, windowDays, from: fromDate, to: lastDate, skipped_blocks: skippedBlocks },
       source: SOURCE,
       triggered_by: "cron",
     });

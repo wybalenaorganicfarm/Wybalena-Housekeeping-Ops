@@ -131,33 +131,91 @@ Deno.serve(async (req) => {
     if (!assignmentId && r.quotedMessageId) assignmentId = await ownedById("confirm_message_id", r.quotedMessageId);
     // (c) explicit offer code in the text.
     if (!assignmentId && r.offerCode) assignmentId = await ownedById("offer_code", r.offerCode);
+
+    // (c2) A Yes/No answer to an "Are you sure?" prompt, where the tap arrived as a
+    //      plain-text echo of the button title (no interactive payload) and WhatsApp
+    //      attached no quoted-message context. Steps (a)-(c) all need one of those
+    //      signals, so before this step such an answer fell through to (d) and was
+    //      dropped whenever the cleaner had more than one open offer — the reply was
+    //      never sent and the decline was never recorded, so the shift was chased
+    //      again the next morning.
+    //
+    //      These actions are unambiguous by construction: they are only ever a reply
+    //      to a confirmation prompt we ourselves just sent, and we stamped that
+    //      prompt's message id on the assignment. So resolve to the cleaner's most
+    //      recently prompted row. Restricted to rows still awaiting the answer, and
+    //      to the status the answer can actually apply to, so a stale prompt from an
+    //      already-resolved offer is never picked up.
+    if (!assignmentId) {
+      const CONFIRM_ANSWER: Record<string, string[]> = {
+        decline_confirm: ["offered"],
+        decline_cancel: ["offered"],
+        cancel_confirm: ["accepted", "offered"],
+        cancel_cancel: ["accepted", "offered"],
+      };
+      const wantStatus = CONFIRM_ANSWER[r.action];
+      if (wantStatus) {
+        const { data } = await sb
+          .from("shift_assignments")
+          .select("id")
+          .eq("cleaner_id", cleaner.id)
+          .in("status", wantStatus)
+          .not("confirm_message_id", "is", null)
+          // By confirm_sent_at, NOT offered_at: the prompt we sent most recently is
+          // the one being answered, which is not necessarily the newest offer.
+          .order("confirm_sent_at", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        assignmentId = data?.id ?? null;
+      }
+    }
+
     // (d) last resort: the cleaner's single open offer.
     if (!assignmentId) {
       const { data: open } = await sb
         .from("shift_assignments")
-        .select("id")
+        .select("id, offer_code, shifts!inner(shift_date, start_time)")
         .eq("cleaner_id", cleaner.id)
         .in("status", ["offered", "accepted"])
         .order("offered_at", { ascending: false });
       if ((open ?? []).length === 1) assignmentId = open![0].id;
       else if ((open ?? []).length > 1) {
-        // Stay silent — never send the cleaner an error. Log it internally only so
-        // the admin can see the tap didn't correlate and follow up in the portal.
-        // DIAGNOSTIC: the tap didn't carry a button payload or a matchable quoted id,
-        // so we couldn't pin it to one of several open offers. Capture the raw webhook
-        // shape + what we parsed, so the correlation fields can be fixed precisely.
+        // AMBIGUOUS: an Accept/Decline tap that carried no button payload, no
+        // matchable quoted id and no offer code, while the cleaner holds several
+        // open offers. Nothing in the word "Decline" alone says WHICH shift.
+        //
+        // We do NOT ask the cleaner which one they meant, and we do NOT guess.
+        // Asking puts the work of a correlation failure onto the team; guessing
+        // could decline a shift they meant to keep. Instead the offer buttons now
+        // carry the code in their visible title ("❌ Decline 4823"), which is the
+        // one field that survives a stripped payload — so a tap should resolve at
+        // step (c) long before reaching here, with nothing asked of the cleaner.
+        //
+        // Reaching this point means even that failed, so it is a real defect to be
+        // investigated, not a routine outcome. Stay silent to the cleaner and
+        // capture the raw webhook shape so the cause is diagnosable.
+        const rows = (open ?? []) as Record<string, any>[];
+        const openList = rows
+          .sort((a, b) => {
+            const ad = a.shifts?.shift_date ?? "", bd = b.shifts?.shift_date ?? "";
+            if (ad !== bd) return ad < bd ? -1 : 1;
+            return String(a.shifts?.start_time ?? "").localeCompare(String(b.shifts?.start_time ?? ""));
+          })
+          .map((o) => `${prettyDateTime(o.shifts?.shift_date ?? "", String(o.shifts?.start_time ?? "").slice(0, 5))} (code ${o.offer_code ?? "—"})`)
+          .join("; ");
         await writeAuditLog(sb, {
           event_type: "response.unresolved",
           event_label: "WhatsApp Reply Received",
           status: "warning",
-          summary: `Couldn't match ${cleaner.full_name}'s reply to a specific offer (${(open ?? []).length} open). Diagnostics captured.`,
+          summary: `Couldn't match ${cleaner.full_name}'s "${r.action}" reply to a specific offer — ${rows.length} open and the reply carried no offer code. Their open offers: ${openList}. Needs manual follow-up in the portal.`,
           detail: {
             parsed: { action: r.action, assignment_id: r.assignmentId, quoted_message_id: r.quotedMessageId, offer_code: r.offerCode, raw_text: r.rawText },
+            open_offers: rows.length,
             raw_payload: JSON.stringify(payload).slice(0, 4000),
           },
           source: SOURCE, cleaner_id: cleaner.id, triggered_by: "webhook",
         });
-        results.push({ id: r.providerMessageId, skipped: "ambiguous, nudged" });
+        results.push({ id: r.providerMessageId, skipped: "ambiguous, logged for follow-up" });
         continue;
       }
     }
@@ -217,7 +275,7 @@ Deno.serve(async (req) => {
           const conf = await sendAcceptConfirm(cleaner.phone, assignmentId, sb, shiftRef);
           // Store the confirmation's message id so a later Cancel tap on it resolves.
           if (conf?.providerMessageId) {
-            await sb.from("shift_assignments").update({ confirm_message_id: conf.providerMessageId }).eq("id", assignmentId);
+            await sb.from("shift_assignments").update({ confirm_message_id: conf.providerMessageId, confirm_sent_at: new Date().toISOString() }).eq("id", assignmentId);
           }
           const after = await shiftContext(sb, assignmentId);
           await logResponse("response.accepted", "success", `${cleaner.full_name} accepted the shift on ${dateLabel}. Assigned count: ${after.accepted}/${after.required ?? "?"}.`);
@@ -254,16 +312,28 @@ Deno.serve(async (req) => {
         // reply to the original offer still resolves.
         const res = await sendDeclineConfirm(cleaner.phone, assignmentId, sb, shiftRef);
         if (res?.providerMessageId) {
-          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
+          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString() }).eq("id", assignmentId);
         }
         results.push({ id: r.providerMessageId, action: "decline", result: "confirm_requested" });
         break;
       }
       case "decline_confirm": { // tapped "Yes"
+        // Record the decline FIRST, then acknowledge. If the acknowledgement send
+        // fails the response is still logged, so the offer is never chased again as
+        // though the cleaner had stayed silent.
         await declineOffer(sb, assignmentId);
-        await sendOutcome(cleaner.phone, "declined_confirmation", "Shift Declined", sb, shiftRef);
-        await logResponse("response.declined", "success", `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list.`);
-        results.push({ id: r.providerMessageId, action: "decline_confirm" });
+        const ack = await sendOutcome(cleaner.phone, "declined_confirmation", "Shift Declined", sb, shiftRef);
+        // Surface a failed acknowledgement instead of logging a clean success: the
+        // cleaner declined but never saw "you've declined", so they may well tap
+        // again. The admin needs to see that from the log.
+        await logResponse(
+          "response.declined",
+          ack?.ok === false ? "warning" : "success",
+          ack?.ok === false
+            ? `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list, but the WhatsApp confirmation to them FAILED to send.`
+            : `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list.`,
+        );
+        results.push({ id: r.providerMessageId, action: "decline_confirm", ack_sent: ack?.ok !== false });
         break;
       }
       case "decline_cancel": { // tapped "No"
@@ -290,7 +360,7 @@ Deno.serve(async (req) => {
         // Yes/No reply resolves back to this assignment.
         const res = await sendCancelConfirm(cleaner.phone, assignmentId, sb, shiftRef);
         if (res?.providerMessageId) {
-          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId }).eq("id", assignmentId);
+          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString() }).eq("id", assignmentId);
         }
         results.push({ id: r.providerMessageId, action: "cancel", result: "confirm_requested" });
         break;

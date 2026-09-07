@@ -62,7 +62,21 @@ interface PendingRow {
   id: string;
   cleaner_id: string;
   shift_id: string;
-  shifts?: { shift_date?: string } | null;
+  shifts?: { shift_date?: string; start_time?: string } | null;
+}
+
+// Soonest shift first, by date then start time.
+//
+// This MUST be done here rather than with `.order(..., { referencedTable: "shifts" })`:
+// that emits `shifts.order=shift_date`, which orders rows WITHIN each embedded
+// `shifts` resource. `shifts` is a to-one relation — exactly one row per
+// assignment — so it sorts nothing and the parent rows come back in arbitrary
+// order. That is why the multi-shift reminder listed dates out of sequence.
+function byShiftDateTime(a: PendingRow, b: PendingRow): number {
+  const ad = a.shifts?.shift_date ?? "";
+  const bd = b.shifts?.shift_date ?? "";
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  return (a.shifts?.start_time ?? "").localeCompare(b.shifts?.start_time ?? "");
 }
 
 export interface ReminderResult {
@@ -81,9 +95,13 @@ async function sendReminders(
 ): Promise<ReminderResult> {
   if (pending.length === 0) return { reminded: 0, names: [] };
 
+  // Sort before grouping, so every cleaner's list — and the audit trail that
+  // echoes it — reads chronologically regardless of the order the rows arrived in.
+  const ordered = [...pending].sort(byShiftDateTime);
+
   // Group first, send second — this grouping is the whole point of rule 3.
   const byCleaner = new Map<string, PendingRow[]>();
-  for (const a of pending) {
+  for (const a of ordered) {
     const list = byCleaner.get(a.cleaner_id);
     if (list) list.push(a);
     else byCleaner.set(a.cleaner_id, [a]);
@@ -101,8 +119,8 @@ async function sendReminders(
     // stamp) so the offer can still be reminded if they reactivate later.
     if (!cleaner?.is_active) continue;
 
-    // `rows` arrives soonest-shift-first and Map preserves insertion order, so
-    // the list reads chronologically.
+    // `rows` was sorted soonest-shift-first above and Map preserves insertion
+    // order, so the bulleted list reads chronologically.
     const dates = rows.map((r) => prettyDate(r.shifts?.shift_date ?? ""));
     const body = rows.length > 1
       ? fillVars(many?.body ?? DEFAULT_MANY, { shift_dates: dates.map((d) => `• ${d}`).join("\n") })
@@ -161,9 +179,9 @@ export async function remindTier(
     .eq("tier_at_offer", tier)
     .is("reminder_sent_at", null)
     .eq("shifts.current_tier", tier)
-    .eq("shifts.staffing_track", track)
-    // Soonest shift first — keeps the audit trail chronological.
-    .order("shift_date", { referencedTable: "shifts" });
+    .eq("shifts.staffing_track", track);
+  // Ordering is applied in sendReminders (byShiftDateTime) — see the note there
+  // for why it cannot be done with an embedded .order() on a to-one relation.
 
   const { reminded, names } = await sendReminders(sb, (pending ?? []) as PendingRow[], tier, source, label);
 
@@ -223,8 +241,8 @@ export async function remindShiftsAtTier(
     .eq("status", "offered")
     .eq("tier_at_offer", tier)
     .is("reminder_sent_at", null)
-    .eq("shifts.current_tier", tier)
-    .order("shift_date", { referencedTable: "shifts" });
+    .eq("shifts.current_tier", tier);
+  // Ordering is applied in sendReminders (byShiftDateTime).
 
   return await sendReminders(sb, (pending ?? []) as PendingRow[], tier, source, label);
 }

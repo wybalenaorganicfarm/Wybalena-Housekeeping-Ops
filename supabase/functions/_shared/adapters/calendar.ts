@@ -20,6 +20,10 @@ export interface CalendarBooking {
   guestCount: number | null;
   raw: unknown;
   cancelled: boolean; // true when the event is marked cancelled/removed
+  // True when the event title marks it as an operational block (UNAVAILABLE,
+  // owner stay, maintenance...) rather than a guest booking. Such events must
+  // never create a booking or a cleaning shift.
+  nonBooking: boolean;
 }
 
 export interface HealthResult {
@@ -54,6 +58,39 @@ export async function checkHealth(): Promise<HealthResult> {
   } catch (e) {
     return { name: "google_calendar", configured: true, ok: false, detail: String(e) };
   }
+}
+
+// Calendar entries that are NOT guest bookings and must never become a booking
+// or a cleaning shift. The bookings calendar also carries operational blocks —
+// "UNAVAILABLE" being the one that reached production and generated a shift for
+// a day the venue was closed.
+//
+// Matched on the event title, case-insensitively, as a WHOLE WORD anywhere in
+// it: "UNAVAILABLE", "Unavailable - maintenance" and "OWNER STAY - unavailable"
+// all match, while a genuine guest booking called "Ravenna family" does not.
+// Whole-word matching is deliberate — a substring test would swallow a guest
+// surname that merely contains one of these words.
+const NON_BOOKING_TITLES = [
+  "unavailable",
+  "not available",
+  "blocked",
+  "block out",
+  "blockout",
+  "owner stay",
+  "maintenance",
+  "closed",
+  "do not book",
+];
+
+// True when a calendar event is an operational block rather than a guest stay.
+// Exported so sync-bookings can report what it skipped, and so this rule has one
+// definition rather than being restated at each call site.
+export function isNonBookingEvent(title: string | null | undefined): boolean {
+  if (!title) return false;
+  // Collapse punctuation to spaces so "UNAVAILABLE-maintenance" and
+  // "Unavailable/blocked" still separate into words.
+  const norm = ` ${title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  return NON_BOOKING_TITLES.some((t) => norm.includes(` ${t} `));
 }
 
 // Fetch events overlapping [timeMin, timeMax] (ISO strings, UTC).
@@ -107,6 +144,7 @@ export async function fetchBookings(
       guestCount: null,
       raw: ev,
       cancelled: ev.status === "cancelled",
+      nonBooking: isNonBookingEvent((ev.summary as string) ?? null),
     };
   });
 }

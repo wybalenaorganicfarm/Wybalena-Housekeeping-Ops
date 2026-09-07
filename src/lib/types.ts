@@ -14,7 +14,7 @@ export type AssignmentStatus =
   | "offered" | "accepted" | "declined" | "cancelled" | "no_response" | "team_lead";
 export type AlertType =
   | "venue_gap" | "unconfirmed_shifts" | "booking_cancelled" | "understaffed_urgent" | "cleaner_cancelled"
-  | "connection_down" | "mid_retreat_needed";
+  | "connection_down" | "mid_retreat_needed" | "shift_moved";
 export type AlertStatus = "open" | "actioned" | "dismissed";
 
 export interface Profile {

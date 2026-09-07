@@ -62,6 +62,7 @@ const ALERT_ICON: Record<string, string> = {
   unconfirmed_shifts: "clock",
   cleaner_cancelled: "user",
   connection_down: "cloud",
+  shift_moved: "calendar",
 };
 const ALERT_COLOR: Record<string, string> = {
   understaffed_urgent: c.danger,
@@ -70,6 +71,7 @@ const ALERT_COLOR: Record<string, string> = {
   mid_retreat_needed: c.warn,
   unconfirmed_shifts: c.warn,
   cleaner_cancelled: c.danger,
+  shift_moved: c.warn,
   connection_down: c.danger,
 };
 

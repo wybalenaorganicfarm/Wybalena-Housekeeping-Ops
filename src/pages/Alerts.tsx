@@ -19,6 +19,9 @@ const META: Record<AlertType, { icon: string; accent: string; iconBg: string; ba
   cleaner_cancelled: { icon: "user", accent: c.danger, iconBg: "#F8E5E1", badge: "Urgent", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
   connection_down: { icon: "cloud", accent: c.danger, iconBg: "#F8E5E1", badge: "Connection", badgeBg: "#F8E5E1", badgeFg: "#a8392b" },
   mid_retreat_needed: { icon: "sunrise", accent: c.warn, iconBg: "#FBF1DF", badge: "Plan ahead", badgeBg: "#FBF1DF", badgeFg: "#9a7320" },
+  // A shift whose date/time changed while cleaners were already committed —
+  // they've been messaged, but someone has to confirm they still hold.
+  shift_moved: { icon: "calendar", accent: c.warn, iconBg: "#FBF1DF", badge: "Needs review", badgeBg: "#FBF1DF", badgeFg: "#9a7320" },
 };
 
 export function Alerts() {
@@ -59,7 +62,7 @@ export function Alerts() {
     if (filter === "understaffed_urgent") return a.alert_type === "understaffed_urgent";
     if (filter === "booking_cancelled") return a.alert_type === "booking_cancelled";
     if (filter === "venue_gap") return a.alert_type === "venue_gap";
-    if (filter === "reminders") return a.alert_type === "unconfirmed_shifts" || a.alert_type === "cleaner_cancelled";
+    if (filter === "reminders") return a.alert_type === "unconfirmed_shifts" || a.alert_type === "cleaner_cancelled" || a.alert_type === "shift_moved";
     return true;
   }), [open, filter]);
 

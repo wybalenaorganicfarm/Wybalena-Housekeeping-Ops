@@ -1,0 +1,14 @@
+-- shift_moved alert type — raised when a shift's date/time changes under cleaners.
+-- ============================================================================
+-- The Edit Shift modal can now change a shift's DATE. When it moves while
+-- cleaners are already accepted or holding an open offer, they are messaged
+-- automatically — but their acceptance was for the OLD date. Someone has to
+-- confirm they still hold for the new one, so update-shift raises an alert.
+--
+-- alert_type is an enum, so the value has to exist before the Edge Function can
+-- insert it; without this the insert throws and the whole edit fails.
+--
+-- Note: 'alter type ... add value' cannot run inside a transaction block in older
+-- Postgres. Supabase migrations run each file in one, so this is written as the
+-- idempotent form which is permitted from PG12 onward.
+alter type alert_type add value if not exists 'shift_moved';
