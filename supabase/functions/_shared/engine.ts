@@ -298,31 +298,28 @@ async function deliverOffers(
   return { offered, failedIds, failedNames };
 }
 
-// Close every offer still sitting `offered` at a tier this shift has now
-// escalated PAST. The cleaner didn't answer and the shift has moved on, so the
-// offer is dead — leaving it open queued it for a non-responder reminder that
-// would go out days or weeks later, which is exactly what produced the burst of
-// duplicate reminders on 17 August.
+// When a shift escalates PAST an earlier tier, the unanswered offers still open
+// at that earlier tier are NOT closed. They stay `offered` on purpose:
 //
-// Two guards keep this to offers that are genuinely finished with:
-//   • strictly earlier tiers — a cancellation re-offer (reofferToUnaccepted)
-//     deliberately opens LATER tiers while the shift sits at an earlier one;
-//   • already reminded — the offer went through its full chase and got no
-//     answer. A cancellation re-offer made minutes ago has not been reminded
-//     yet, so escalating the shift can't silently retire it.
-// A late "Accept" still works either way: acceptOffer reads the row by id and
-// doesn't require it to still be `offered`.
-async function closeSupersededOffers(sb: SupabaseClient, shiftId: string, tier: Tier): Promise<void> {
-  const passed = (Object.keys(TIER_RANK) as Tier[]).filter((t) => TIER_RANK[t] < TIER_RANK[tier]);
-  if (passed.length === 0) return;
-  await sb
-    .from("shift_assignments")
-    .update({ status: "no_response" })
-    .eq("shift_id", shiftId)
-    .eq("status", "offered")
-    .in("tier_at_offer", passed)
-    .not("reminder_sent_at", "is", null);
-}
+//   • the cleaner can still accept — they were sent a real offer they never
+//     replied to, and a late Accept must still fill the spot (acceptOffer reads
+//     the row by id and doesn't require any particular status). Closing the row
+//     to `no_response` didn't stop that accept working, but it DID hide the
+//     offer from the shift drawer (which filters out no_response), so an offer
+//     the cleaner could still take appeared nowhere in Supabase while it sat
+//     live in their WhatsApp — the 9 October / Karin Gisler report.
+//
+//   • it is not re-reminded regardless. The per-tier reminder jobs
+//     (remindTier) select only offers whose shift is STILL at that tier
+//     (`shifts.current_tier = tier`) and whose reminder_sent_at is null, so an
+//     offer the shift has escalated past can never be chased again. That gate —
+//     not a status sweep — is what prevents the 17 August duplicate-reminder
+//     burst; the old single remind-nonresponders job that lacked it is retired.
+//
+// The offer is finally closed, and the cleaner told, only when the shift fills:
+// markFullyStaffed messages every remaining `offered` cleaner ("now fully
+// booked") and closes their rows in one place. That is the correct moment to
+// retire Karin's offer — not the moment an unrelated later tier opened.
 
 // Offer a shift to up to `openSpots` available cleaners in the given tier.
 // Returns the offered cleaners. Sets the shift to staffing/current_tier.
@@ -397,8 +394,10 @@ export async function offerTier(
     // First delivered offer decides the chain; after that the track is fixed.
     if (track && !shift.staffing_track) patch.staffing_track = track;
     await sb.from("shifts").update(patch).eq("id", shiftId);
-    // The shift has moved on — retire any unanswered offer at a tier it passed.
-    await closeSupersededOffers(sb, shiftId, tier);
+    // Offers still open at a tier this shift has now passed are LEFT open — see
+    // the note above the (removed) closeSupersededOffers: they stay acceptable
+    // and visible, and are never re-reminded because remindTier gates on
+    // current_tier. They close only when the shift fills (markFullyStaffed).
   }
   return {
     count: offered.length,
