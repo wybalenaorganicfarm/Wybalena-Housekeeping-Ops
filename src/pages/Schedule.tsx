@@ -141,6 +141,14 @@ export function Schedule() {
                     {r.fn === "sync-bookings" && (
                       <RangeRow range={range} schedule={r.schedule} onEdit={() => setEditRange(true)} />
                     )}
+                    {/* A shift confirmed AFTER this weekly slot is not sent by this
+                        job — it is picked up by the daily Staffing Catch-Up (in the
+                        Daily jobs section below). Spelled out here because that is
+                        exactly where an admin looks when offers for a late-confirmed
+                        shift went out a day later, at the catch-up's time, not 3pm. */}
+                    {r.fn === "offer-tier-1" && (
+                      <CatchupNote schedule={jobs["staffing-catchup"]?.schedule ?? null} />
+                    )}
                   </div>
                 ))}
               </Section>
@@ -325,6 +333,28 @@ function RangeModal({ range, onClose, onSave }: {
         <Button onClick={submit} loading={saving}>Save range</Button>
       </div>
     </Modal>
+  );
+}
+
+// Sits under "Tier 1 Offers". A shift confirmed after this weekly slot is not
+// sent by it — the daily Staffing Catch-Up picks it up and offers Tier 1 at ITS
+// run time (one hour after the weekly slot), which is why a late-confirmed
+// shift's offers go out a day later, at 4pm rather than 3pm. The time is read
+// from the catch-up's own schedule so it stays right if that job is rescheduled.
+function CatchupNote({ schedule }: { schedule: string | null }) {
+  const form = schedule ? parseCron(schedule) : null;
+  // "Every day at 4:00 PM AEST" -> "4:00 PM AEST" so it reads naturally after "at".
+  const when = form ? describe(form).replace(/^Every day at /, "") : "its next daily run";
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 16px 12px 52px", borderTop: `1px dashed ${c.rowBd}`, background: "#fcfbf8" }}>
+      <span style={{ color: c.green, flex: "none", marginTop: 1 }}><Icon name="info" size={14} /></span>
+      <div style={{ fontSize: 12, color: c.body, lineHeight: 1.5 }}>
+        Confirmed a shift <b>after</b> this run? It does not wait for next week —
+        the daily <b>Staffing Catch-Up</b> job (see “Daily jobs” below) picks it up and sends its
+        Tier 1 offers at <b>{when}</b>. That is why offers for a late-confirmed shift go out the
+        following day at the catch-up's time, not at this 3pm slot.
+      </div>
+    </div>
   );
 }
 
