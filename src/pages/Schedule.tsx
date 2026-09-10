@@ -33,7 +33,7 @@ const META: JobMeta[] = [
   // Sit after the tier sequence — both are independent of the offer/escalation flow.
   { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 9 },
   { fn: "mid-retreat-notify", label: "Mid-Retreat Cleaning Alert", desc: "Emails Ashleigh when a stay of 7+ nights needs a mid-retreat clean scheduled by hand.", group: "weekly", order: 10 },
-  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Adopts any shift confirmed too late for the weekly Tier 1 slot, then runs that shift's whole sequence itself — offer, reminder, next tier — one step per day. Shifts already on the weekly schedule are left alone.", group: "daily", order: 6.5 },
+  { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Sends the first Tier 1 offer for any shift confirmed too late for the weekly Tier 1 slot. Its reminders and escalations then follow at the same scheduled per-tier times as every other shift. Shifts already on the weekly schedule are left alone.", group: "daily", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
@@ -350,9 +350,11 @@ function CatchupNote({ schedule }: { schedule: string | null }) {
       <span style={{ color: c.green, flex: "none", marginTop: 1 }}><Icon name="info" size={14} /></span>
       <div style={{ fontSize: 12, color: c.body, lineHeight: 1.5 }}>
         Confirmed a shift <b>after</b> this run? It does not wait for next week —
-        the daily <b>Staffing Catch-Up</b> job (see “Daily jobs” below) picks it up and sends its
-        Tier 1 offers at <b>{when}</b>. That is why offers for a late-confirmed shift go out the
-        following day at the catch-up's time, not at this 3pm slot.
+        the daily <b>Staffing Catch-Up</b> job (see “Daily jobs” below) sends its first Tier 1
+        offer at <b>{when}</b>. From there its reminders and escalations run at the same
+        scheduled times as every other shift (the Tier 1/2/3 reminder and escalation jobs above),
+        so a late-confirmed shift is chased on the same clock as the rest — only its first offer
+        goes out at the catch-up's time rather than this 3pm slot.
       </div>
     </div>
   );
@@ -363,13 +365,15 @@ function CatchupRow({ catchup, onEdit }: { catchup: StaffingCatchup; onEdit: () 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px 14px 52px", borderTop: `1px dashed ${c.rowBd}`, background: "#fcfbf8" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tier wait</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.muted2, textTransform: "uppercase", letterSpacing: "0.05em" }}>First-offer wait</div>
         <div style={{ fontSize: 12.5, color: c.body, marginTop: 4, lineHeight: 1.5 }}>
-          A shift escalates to the next tier <b>{d === 1 ? "the next day" : `${d} days later`}</b>, at this job's run
-          time, if it's still short.
+          A late-confirmed shift waits <b>{d === 1 ? "one day" : `${d} days`}</b> after confirmation
+          before this job sends its first Tier 1 offer — long enough that the weekly slot claims it
+          first if that slot is still coming.
         </div>
         <div style={{ fontSize: 12, color: c.faint, marginTop: 3 }}>
-          Counted in whole days, so Tier 1 on a Monday means Tier 2 on the Tuesday and Tier 3 on the Wednesday.
+          After that first offer, reminders and escalations follow at the scheduled per-tier times
+          above, the same as every other shift.
         </div>
       </div>
       <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit timing</Button>

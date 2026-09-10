@@ -1,13 +1,13 @@
 // Non-responder reminders.
 //
-// Two callers, one send path:
-//   • remindTier()         — the weekly cron jobs (remind-tier-1/2/3). Reminds
-//                            every open offer at one tier across the WEEKLY track.
-//   • remindShiftsAtTier() — staffing-catchup, for the catchup-track shifts whose
-//                            own 24h clock says they are due.
-//
-// A shift belongs to exactly one track (shifts.staffing_track), so the two
-// callers can never remind the same offer. See
+// One caller: remindTier(), the per-tier cron jobs (remind-tier-1/2/3), each
+// fired at the admin's Schedule-tab time for that tier. It reminds every open,
+// unreminded offer at one tier whose shift is still at that tier — on BOTH the
+// weekly and the catchup track. A catch-up shift's reminder therefore goes out
+// at the same admin-set time as a weekly shift's, not on the daily
+// staffing-catchup slot. staffing-catchup no longer sends reminders of its own,
+// so this is the single actor for every reminder at a given tier and the two
+// chains can never remind the same offer. See
 // supabase/migrations/20260819120000_staffing_track.sql.
 //
 // Three rules keep this from flooding a cleaner:
@@ -42,7 +42,6 @@ import { sendMessage } from "./adapters/whatsapp.ts";
 import { fillVars, loadTemplate } from "./templates.ts";
 import { prettyDate } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
-import type { StaffingTrack } from "./engine.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -158,28 +157,36 @@ async function sendReminders(
   return { reminded, names };
 }
 
-// Weekly cron pass: every unanswered, unreminded offer at `tier`, on the weekly
-// track, for shifts still sitting at that tier.
+// Cron pass for a single tier: every unanswered, unreminded offer at `tier`,
+// for shifts still sitting at that tier — on EITHER track.
+//
+// This job fires at the admin's configured Schedule-tab time (e.g. Tier 1 at
+// 9am). It reminds weekly-track AND catchup-track shifts, so a catch-up shift's
+// reminder goes out at the SAME admin-set time as a weekly shift's, rather than
+// on the daily staffing-catchup slot. staffing-catchup no longer sends its own
+// reminders — this job is the single actor for every reminder at this tier, so
+// the two chains cannot both chase one offer.
 export async function remindTier(
   sb: SupabaseClient,
   tier: Tier,
-  track: StaffingTrack = "weekly",
 ): Promise<number> {
   const source = `remind-${tier.replace("_", "-")}`;
   const label = `${TIER_WORD[tier]} Non-Responder Reminders`;
 
   // No age filter — this job's cron slot decides WHEN reminders go out. What it
-  // does filter is RELEVANCE: the shift must still be at this tier, and must be
-  // on this chain. Without those two, offers the shift escalated past weeks ago
-  // stayed queued and all fired together on the next weekly run.
+  // does filter is RELEVANCE: the shift must still be at this tier. Without that,
+  // offers the shift escalated past weeks ago stayed queued and all fired
+  // together on the next run. The track is deliberately NOT filtered: both
+  // chains are reminded here, and the current_tier + reminder_sent_at gates
+  // (each offer reminded at most once, only while its shift is still at this
+  // tier) prevent the duplicate-reminder flood on either track.
   const { data: pending } = await sb
     .from("shift_assignments")
     .select(PENDING_COLS)
     .eq("status", "offered")
     .eq("tier_at_offer", tier)
     .is("reminder_sent_at", null)
-    .eq("shifts.current_tier", tier)
-    .eq("shifts.staffing_track", track);
+    .eq("shifts.current_tier", tier);
   // Ordering is applied in sendReminders (byShiftDateTime) — see the note there
   // for why it cannot be done with an embedded .order() on a to-one relation.
 
@@ -190,11 +197,10 @@ export async function remindTier(
     // but were all already reminded" — same scope as the send query above.
     const { data: open } = await sb
       .from("shift_assignments")
-      .select("id, shifts!inner(current_tier, staffing_track)")
+      .select("id, shifts!inner(current_tier)")
       .eq("status", "offered")
       .eq("tier_at_offer", tier)
-      .eq("shifts.current_tier", tier)
-      .eq("shifts.staffing_track", track);
+      .eq("shifts.current_tier", tier);
     const openOffers = (open ?? []).length;
     const summary = openOffers === 0
       ? `No ${TIER_WORD[tier]} cleaners have an open offer awaiting a reply. No reminders needed.`
@@ -204,7 +210,7 @@ export async function remindTier(
       event_label: label,
       status: "skipped",
       summary,
-      detail: { open_offers: openOffers, tier, track },
+      detail: { open_offers: openOffers, tier },
       source,
       triggered_by: "cron",
     });
@@ -214,35 +220,11 @@ export async function remindTier(
       event_label: label,
       status: "success",
       summary: `${reminded} unanswered ${TIER_WORD[tier]} offer(s) chased in ${names.length} message(s) to: ${names.join(", ")}.`,
-      detail: { reminded, cleaners: names, tier, track },
+      detail: { reminded, cleaners: names, tier },
       source,
       triggered_by: "cron",
     });
   }
 
   return reminded;
-}
-
-// staffing-catchup pass: the reminder step for the catchup-track shifts that are
-// due today at `tier`. Takes them all at once so a cleaner owed reminders on
-// several of those shifts still receives ONE message.
-export async function remindShiftsAtTier(
-  sb: SupabaseClient,
-  shiftIds: string[],
-  tier: Tier,
-  source: string,
-  label: string,
-): Promise<ReminderResult> {
-  if (shiftIds.length === 0) return { reminded: 0, names: [] };
-  const { data: pending } = await sb
-    .from("shift_assignments")
-    .select(PENDING_COLS)
-    .in("shift_id", shiftIds)
-    .eq("status", "offered")
-    .eq("tier_at_offer", tier)
-    .is("reminder_sent_at", null)
-    .eq("shifts.current_tier", tier);
-  // Ordering is applied in sendReminders (byShiftDateTime).
-
-  return await sendReminders(sb, (pending ?? []) as PendingRow[], tier, source, label);
 }

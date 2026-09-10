@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage, titleWithCode } from "./adapters/whatsapp.ts";
 import { btnTitle, fillVars, loadTemplate, renderTemplate } from "./templates.ts";
-import { prettyDate, prettyDateTime, prettyTime } from "./datetime.ts";
+import { daysBetweenDays, prettyDate, prettyDateTime, prettyTime, venueDay } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
@@ -461,6 +461,32 @@ export async function nextOfferableTier(
     if ((pool ?? []).some((c) => !taken.has(c.id))) return chain[i];
   }
   return null;
+}
+
+// Whole venue-local days since the shift's most recent offer AT ITS CURRENT
+// TIER. Used by the escalation jobs to hold a shift at its tier for at least a
+// day before moving on — so a catch-up shift adopted and first-offered on the
+// very day an escalation job runs is not escalated hours later, before its
+// cleaners (or the reminder) have had a fair chance. Weekly-track shifts are
+// always older than this, so the gate never delays them. Null offered_at (no
+// offer on record at this tier) returns a large number so it never blocks.
+export async function daysSinceCurrentTierOffer(
+  sb: SupabaseClient,
+  shiftId: string,
+  tier: Tier,
+): Promise<number> {
+  const { data } = await sb
+    .from("shift_assignments")
+    .select("offered_at")
+    .eq("shift_id", shiftId)
+    .eq("tier_at_offer", tier)
+    .not("offered_at", "is", null)
+    .order("offered_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const at = (data as { offered_at?: string } | null)?.offered_at;
+  if (!at) return Number.MAX_SAFE_INTEGER;
+  return daysBetweenDays(venueDay(new Date(at)), venueDay(new Date()));
 }
 
 // Last-resort re-offer after a cancellation, once the tier chain is exhausted.

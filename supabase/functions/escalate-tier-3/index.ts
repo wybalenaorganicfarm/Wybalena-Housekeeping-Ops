@@ -4,7 +4,7 @@
 // schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
+import { daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
 import { sendEmail } from "../_shared/adapters/email.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
@@ -25,14 +25,17 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
 
-  // Every WEEKLY-track shift that has moved PAST the first tier and still has
-  // somewhere to go. Not hard-coded to 'tier_2': this job means "take the next
-  // step", so with a fourth tier on the roster it advances tier_3 -> tier_4 as
-  // well, without a fourth cron job.
+  // Every shift that has moved PAST the first tier and still has somewhere to
+  // go, on EITHER track. Not hard-coded to 'tier_2': this job means "take the
+  // next step", so with a fourth tier on the roster it advances tier_3 -> tier_4
+  // as well, without a fourth cron job.
   //
-  // No internal age gate — the admin decides when to escalate purely through
-  // this job's schedule. Shifts on the 'catchup' track are escalated by
-  // staffing-catchup instead.
+  // Both tracks are escalated here now — catch-up shifts included — so their
+  // escalation happens at the admin's Schedule-tab time, not on the daily
+  // staffing-catchup slot. staffing-catchup no longer escalates. The one-day
+  // minimum gate (daysSinceCurrentTierOffer) stops a catch-up shift being
+  // stepped twice in a day; weekly shifts are always older, so it never delays
+  // them.
   const chain = await tierChain(sb);
   if (chain.length < 2) return json({ ok: true, escalatedOffers: 0 });
 
@@ -41,7 +44,7 @@ Deno.serve(async (req) => {
     .select("id, shift_date, shift_type, start_time, current_tier")
     .eq("status", "staffing")
     .in("current_tier", chain.slice(1))
-    .eq("staffing_track", "weekly")
+    .in("staffing_track", ["weekly", "catchup"])
     // Soonest shift first — this loop sends in sequence, and unordered rows come
     // back in physical storage order, which is not chronological.
     .order("shift_date")
@@ -50,6 +53,9 @@ Deno.serve(async (req) => {
   let escalated = 0;
   for (const s of shifts ?? []) {
     try {
+      // At least one venue-local day at this tier since its last offer here,
+      // so a catch-up shift adopted today isn't stepped again the same day.
+      if (await daysSinceCurrentTierOffer(sb, s.id, (s.current_tier ?? chain[1]) as "tier_1" | "tier_2" | "tier_3") < 1) continue;
       // The next tier with someone free for this shift, stepping over any that
       // is empty or already fully on the shift. Null = the chain is spent; the
       // shift was alerted on when it reached the last tier, so leave it alone
