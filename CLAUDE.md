@@ -29,3 +29,9 @@ uninstall with `npx sipcode rules --uninstall`.)
 <!-- /sipcode:block -->
 
 <!-- sipcode:end -->
+
+## Git workflow
+
+- Do NOT create new branches. Work on the current branch (usually `main`).
+- Do NOT commit or push. Leave changes staged/unstaged in the working tree.
+- Committing and pushing is done manually by the user.
