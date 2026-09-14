@@ -673,25 +673,36 @@ export async function acceptOffer(
   const shift = await loadShift(sb, a.shift_id);
   if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") return "closed";
 
-  // First-come wins: if the cleaner slots are already full, this accept loses.
-  if ((await acceptedCount(sb, a.shift_id)) >= shift.required_cleaners) {
-    await sb.from("shift_assignments")
-      .update({ status: "no_response", responded_at: new Date().toISOString() })
-      .eq("id", assignmentId);
-    return "already_full";
+  // First-come-wins must be ATOMIC. Counting accepted rows then updating in two
+  // separate statements lets two concurrent accepts for the last spot both pass
+  // the count check and both write "accepted" -> over-staffed. The claim_shift_slot
+  // RPC does the count-and-set in one statement under a row lock on the shift, so
+  // exactly one of two racing accepts wins. See migration accept_offer_atomic.
+  const { data: outcome, error: claimErr } = await sb.rpc("claim_shift_slot", {
+    p_assignment_id: assignmentId,
+  });
+  if (claimErr) {
+    console.error(`[engine] claim_shift_slot failed for ${assignmentId}: ${claimErr.message}`);
+    return "closed";
   }
-
-  await sb.from("shift_assignments")
-    .update({ status: "accepted", responded_at: new Date().toISOString() })
-    .eq("id", assignmentId);
-  await recomputeStaffing(sb, a.shift_id);
-  return "accepted";
+  // The RPC returns 'accepted' | 'already_full' | 'closed'.
+  const res = (outcome as "accepted" | "already_full" | "closed" | null) ?? "closed";
+  if (res === "accepted") await recomputeStaffing(sb, a.shift_id);
+  return res;
 }
 
-export async function declineOffer(sb: SupabaseClient, assignmentId: string): Promise<void> {
-  await sb.from("shift_assignments")
+// Returns true when the decline was actually written. The caller only sends the
+// "declined" confirmation on true, so a failed write can't leave the cleaner
+// thinking they declined while the offer stays open and gets re-chased.
+export async function declineOffer(sb: SupabaseClient, assignmentId: string): Promise<boolean> {
+  const { error } = await sb.from("shift_assignments")
     .update({ status: "declined", responded_at: new Date().toISOString() })
     .eq("id", assignmentId);
+  if (error) {
+    console.error(`[engine] declineOffer write failed for ${assignmentId}: ${error.message}`);
+    return false;
+  }
+  return true;
 }
 
 // The deeper of two tiers, either of which may be absent.
@@ -742,10 +753,17 @@ export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Pro
     .select("shift_id")
     .eq("id", assignmentId)
     .maybeSingle();
-  await sb.from("shift_assignments")
+  // Validate the row exists BEFORE writing, and check the write — a swallowed
+  // failure here would tell the cleaner the shift was dropped while it stays
+  // accepted (and thus wrongly counted as staffed).
+  if (!a) return "closed";
+  const { error: cancelErr } = await sb.from("shift_assignments")
     .update({ status: "cancelled", responded_at: new Date().toISOString() })
     .eq("id", assignmentId);
-  if (!a) return "closed";
+  if (cancelErr) {
+    console.error(`[engine] cancelOffer write failed for ${assignmentId}: ${cancelErr.message}`);
+    return "closed";
+  }
 
   const shift = await loadShift(sb, a.shift_id);
   if (!shift || shift.status === "cancelled") return "closed";

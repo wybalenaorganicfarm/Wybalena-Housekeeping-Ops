@@ -125,7 +125,39 @@ async function sendReminders(
       ? fillVars(many?.body ?? DEFAULT_MANY, { shift_dates: dates.map((d) => `• ${d}`).join("\n") })
       : fillVars(one?.body ?? DEFAULT_ONE, { shift_date: dates[0] });
 
-    if (cleaner.phone) await sendMessage(cleaner.phone, body);
+    // A cleaner with no phone can't be reminded — skip WITHOUT stamping, so the
+    // offer stays remindable if a number is added later, and don't log a success.
+    if (!cleaner.phone) {
+      for (const r of rows) {
+        await writeAuditLog(sb, {
+          event_type: "reminder.nonresponder_skipped",
+          event_label: label,
+          status: "warning",
+          summary: `Could not remind ${cleaner.full_name ?? "cleaner"} (${TIER_WORD[tier]}) about the shift on ${prettyDate(r.shifts?.shift_date ?? "")} — no phone number on file.`,
+          detail: { assignment_id: r.id, shift_id: r.shift_id, tier },
+          source, shift_id: r.shift_id, cleaner_id: cleanerId, triggered_by: "cron",
+        });
+      }
+      continue;
+    }
+
+    const send = await sendMessage(cleaner.phone, body);
+    // If the WhatsApp send FAILED, do NOT stamp reminder_sent_at (which is once-only,
+    // so stamping would mean this offer is never chased again) and do NOT count it as
+    // reminded. Log the failure so the offer is retried on the next run / followed up.
+    if (send.ok === false) {
+      for (const r of rows) {
+        await writeAuditLog(sb, {
+          event_type: "reminder.nonresponder_failed",
+          event_label: label,
+          status: "failed",
+          summary: `WhatsApp reminder to ${cleaner.full_name ?? "cleaner"} (${TIER_WORD[tier]}) for the shift on ${prettyDate(r.shifts?.shift_date ?? "")} FAILED to send — not marked reminded; will retry next run.`,
+          detail: { assignment_id: r.id, shift_id: r.shift_id, tier, offers_in_message: rows.length },
+          source, shift_id: r.shift_id, cleaner_id: cleanerId, triggered_by: "cron",
+        });
+      }
+      continue;
+    }
 
     // Stamp every offer this one message covered, in a single write.
     await sb.from("shift_assignments")

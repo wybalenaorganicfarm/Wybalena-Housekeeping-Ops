@@ -73,6 +73,20 @@ Deno.serve(async (req) => {
   const { error } = await sb.from("shifts").update(clean).eq("id", shiftId);
   if (error) return json({ error: error.message }, 400);
 
+  // The offer code is derived from the shift DATE (DDMM), but assign_shift_offer_code
+  // is idempotent — once set it never recomputes — so a shift moved to a new day kept
+  // its OLD date's code (e.g. 1018 after moving to 19 Oct). When the date changes,
+  // clear the code and reissue it for the new date so the reference matches. The
+  // shift-moved notification below re-sends the offer details with this new code.
+  if (dateMoved) {
+    const { error: clearErr } = await sb.from("shifts").update({ offer_code: null }).eq("id", shiftId);
+    if (clearErr) console.error(`[update-shift] clearing offer_code failed for ${shiftId}: ${clearErr.message}`);
+    else {
+      const { error: codeErr } = await sb.rpc("assign_shift_offer_code", { p_shift_id: shiftId });
+      if (codeErr) console.error(`[update-shift] reissuing offer_code failed for ${shiftId}: ${codeErr.message}`);
+    }
+  }
+
   const { data: sh } = await sb.from("shifts").select("shift_date, start_time").eq("id", shiftId).maybeSingle();
   const { data: me } = await sb.from("profiles").select("full_name").eq("id", caller.userId).maybeSingle();
   const who = me?.full_name ?? "The admin";

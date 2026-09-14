@@ -63,7 +63,9 @@ Deno.serve(async (req) => {
       const next = await nextOfferableTier(sb, s.id, s.current_tier ?? null);
       if (!next) continue;
       const res = await offerTier(sb, s.id, next);
-      escalated++;
+      // Count only real deliveries, matching escalate-tier-2 — a tier with nobody
+      // free (count 0) or a failed send must not inflate the escalation summary.
+      if (res.count > 0) escalated += res.count;
 
       // Only the LAST tier in the chain is the "nothing left after this" moment
       // that warrants the urgent alert — with a fourth tier on the roster, being
@@ -71,43 +73,53 @@ Deno.serve(async (req) => {
       const lastTier = next === chain[chain.length - 1];
       const word = TIER_WORD[next] ?? next;
 
+      let notifiedUrgently = false;
       if (lastTier) {
         // Raise urgent alert (dedupe one open per shift) + urgent email.
-        const { data: dup } = await sb
+        const { data: dup, error: dupErr } = await sb
           .from("alerts")
           .select("id")
           .eq("alert_type", "understaffed_urgent")
           .eq("shift_id", s.id)
           .eq("status", "open")
           .maybeSingle();
-        if (!dup) {
-          await sb.from("alerts").insert({
+        if (dupErr) console.error(`[escalate-tier-3] alert dedupe read failed for ${s.id}: ${dupErr.message}`);
+        if (!dupErr && !dup) {
+          const { error: insErr } = await sb.from("alerts").insert({
             alert_type: "understaffed_urgent",
             shift_id: s.id,
             title: `${word} reached — understaffed`,
             body: `${s.shift_type} on ${s.shift_date} reached ${word}, the last tier, and still has open spots. Intervene manually.`,
           });
+          if (insErr) console.error(`[escalate-tier-3] urgent alert insert failed for ${s.id}: ${insErr.message}`);
         }
-        await sendEmail(
+        // Capture the send result — only claim "notified urgently" if the email
+        // actually went out, so the log/alert don't assert a notification that failed.
+        const sent = await sendEmail(
           `Wybalena URGENT: shift understaffed at ${word}`,
           `The ${s.shift_type} shift on ${s.shift_date} has reached ${word}, the last tier, ` +
             `and is still not fully staffed. Please assign cleaners manually.`,
           (await opsManager(sb)).email ?? undefined,
         );
+        notifiedUrgently = sent?.ok !== false;
+        if (!notifiedUrgently) console.error(`[escalate-tier-3] urgent email FAILED for shift ${s.id}`);
       }
 
       // Report what actually reached cleaners — a failed WhatsApp send must not be
-      // logged as "offers sent". Ashleigh is already emailed urgently above either way.
+      // logged as "offers sent".
       const deliveryNote = res.failed > 0
         ? `${word} offers to ${res.failedNames.join(", ")} could NOT be sent — the WhatsApp channel needs reconnecting.`
         : res.count > 0
           ? `${word} offers sent to ${res.offered.map((c) => c.full_name).join(", ")}.`
           : `No ${word} cleaner was available to offer.`;
+      const urgentNote = lastTier
+        ? (notifiedUrgently ? " Ashleigh notified urgently." : " Ashleigh's urgent email FAILED to send — follow up manually.")
+        : "";
       await writeAuditLog(sb, {
         event_type: "escalation.tier3_triggered",
         event_label: "Tier 3 Escalation",
-        status: res.failed > 0 ? "failed" : "warning",
-        summary: `Escalation to ${word} triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled. ${deliveryNote}${lastTier ? " Ashleigh notified urgently." : ""}`,
+        status: (res.failed > 0 || (lastTier && !notifiedUrgently)) ? "failed" : "warning",
+        summary: `Escalation to ${word} triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled. ${deliveryNote}${urgentNote}`,
         detail: { shift_id: s.id, open_spots: res.openSpots, count: res.count, cleaners: res.offered, failed: res.failed, failed_cleaners: res.failedNames },
         source: SOURCE,
         shift_id: s.id,

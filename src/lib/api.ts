@@ -6,15 +6,27 @@ import type {
 
 // ---- Reads (governed by RLS) -----------------------------------------------
 
+// A failed read must NOT look like an empty result — that is how "data comes
+// through blank" bugs happen (a list renders empty, a lookup renders nothing).
+// These helpers throw on error so the caller's error boundary / catch handles it,
+// and only return `data` when the query genuinely succeeded. `unwrap` keeps the
+// null-vs-error distinction for single-row reads (null row is valid; error is not).
+function unwrapRows<T>(res: { data: T[] | null; error: unknown }): T[] {
+  if (res.error) throw new Error(friendlyError((res.error as { message?: string }).message ?? "Read failed"));
+  return res.data ?? [];
+}
+function unwrap<T>(res: { data: T | null; error: unknown }): T | null {
+  if (res.error) throw new Error(friendlyError((res.error as { message?: string }).message ?? "Read failed"));
+  return res.data ?? null;
+}
+
 export async function getShifts(): Promise<Shift[]> {
-  const { data } = await supabase
-    .from("shifts").select("*").order("shift_date", { ascending: true });
-  return data ?? [];
+  return unwrapRows(await supabase
+    .from("shifts").select("*").order("shift_date", { ascending: true }));
 }
 
 export async function getShift(id: string): Promise<Shift | null> {
-  const { data } = await supabase.from("shifts").select("*").eq("id", id).maybeSingle();
-  return (data as Shift | null) ?? null;
+  return unwrap<Shift>(await supabase.from("shifts").select("*").eq("id", id).maybeSingle());
 }
 
 // Resolve profile display names by id (RLS-safe via SECURITY DEFINER RPC). Used
@@ -33,10 +45,9 @@ export async function getProfileNames(ids: string[]): Promise<Record<string, str
 // ---- Cleaner notes ---------------------------------------------------------
 
 export async function getCleanerNotes(cleanerId: string): Promise<CleanerNote[]> {
-  const { data } = await supabase
+  return unwrapRows<CleanerNote>(await supabase
     .from("cleaner_notes").select("*").eq("cleaner_id", cleanerId)
-    .order("created_at", { ascending: false });
-  return (data as CleanerNote[] | null) ?? [];
+    .order("created_at", { ascending: false }));
 }
 
 // author_id defaults to auth.uid() in the DB, so we only send cleaner_id + body.
@@ -47,28 +58,25 @@ export async function addCleanerNote(cleanerId: string, body: string): Promise<s
 }
 
 export async function getStaffing(): Promise<Record<string, ShiftStaffing>> {
-  const { data } = await supabase.from("shift_staffing").select("*");
+  const rows = unwrapRows<ShiftStaffing>(await supabase.from("shift_staffing").select("*"));
   const map: Record<string, ShiftStaffing> = {};
-  for (const r of (data ?? []) as ShiftStaffing[]) map[r.shift_id] = r;
+  for (const r of rows) map[r.shift_id] = r;
   return map;
 }
 
 export async function getBookings(): Promise<Booking[]> {
-  const { data } = await supabase
-    .from("bookings").select("*").order("check_in", { ascending: true });
-  return data ?? [];
+  return unwrapRows<Booking>(await supabase
+    .from("bookings").select("*").order("check_in", { ascending: true }));
 }
 
 export async function getAlerts(): Promise<Alert[]> {
-  const { data } = await supabase
-    .from("alerts").select("*").order("created_at", { ascending: false });
-  return data ?? [];
+  return unwrapRows<Alert>(await supabase
+    .from("alerts").select("*").order("created_at", { ascending: false }));
 }
 
 export async function getCleaners(): Promise<Cleaner[]> {
-  const { data } = await supabase
-    .from("cleaners").select("*").order("full_name", { ascending: true });
-  return data ?? [];
+  return unwrapRows<Cleaner>(await supabase
+    .from("cleaners").select("*").order("full_name", { ascending: true }));
 }
 
 // The single team leader lives in profiles (role = team_leader), not cleaners.
@@ -85,9 +93,9 @@ export async function getTeamLead(): Promise<{ id: string; full_name: string } |
 }
 
 export async function getReliability(): Promise<Record<string, CleanerReliability>> {
-  const { data } = await supabase.from("cleaner_reliability").select("*");
+  const rows = unwrapRows<CleanerReliability>(await supabase.from("cleaner_reliability").select("*"));
   const map: Record<string, CleanerReliability> = {};
-  for (const r of (data ?? []) as CleanerReliability[]) map[r.cleaner_id] = r;
+  for (const r of rows) map[r.cleaner_id] = r;
   return map;
 }
 
@@ -125,7 +133,10 @@ export async function getAuditLogs(q: AuditLogQuery = {}): Promise<{ rows: Audit
   if (q.search?.trim()) query = query.ilike("summary", `%${q.search.trim()}%`);
 
   const start = page * AUDIT_PAGE_SIZE;
-  const { data, count } = await query.range(start, start + AUDIT_PAGE_SIZE - 1);
+  // A failed audit read must surface — never render as "no logs", which would hide
+  // the very failures this page exists to show.
+  const { data, count, error } = await query.range(start, start + AUDIT_PAGE_SIZE - 1);
+  if (error) throw new Error(friendlyError(error.message));
   return { rows: (data ?? []) as unknown as AuditLogResolved[], total: count ?? 0 };
 }
 
@@ -143,9 +154,8 @@ export async function getRecentFailureCount(): Promise<number> {
 // ---- Message templates (admin + operations_manager via RLS) ----------------
 
 export async function getMessageTemplates(): Promise<MessageTemplate[]> {
-  const { data } = await supabase
-    .from("message_templates").select("*").order("sort_order", { ascending: true });
-  return (data as MessageTemplate[] | null) ?? [];
+  return unwrapRows<MessageTemplate>(await supabase
+    .from("message_templates").select("*").order("sort_order", { ascending: true }));
 }
 
 // Update the editable fields of one template. updated_at / updated_by are stamped
@@ -160,15 +170,14 @@ export async function updateMessageTemplate(
 }
 
 export async function getUsers(): Promise<Profile[]> {
-  const { data } = await supabase
-    .from("profiles").select("*").order("created_at", { ascending: true });
-  return data ?? [];
+  return unwrapRows<Profile>(await supabase
+    .from("profiles").select("*").order("created_at", { ascending: true }));
 }
 
 export async function getResponseSummary(): Promise<{ accepted: number; declined: number; no_response: number }> {
-  const { data } = await supabase.from("shift_assignments").select("status");
+  const rows = unwrapRows<{ status: string }>(await supabase.from("shift_assignments").select("status"));
   let accepted = 0, declined = 0, no_response = 0;
-  for (const r of (data ?? []) as { status: string }[]) {
+  for (const r of rows) {
     if (r.status === "accepted") accepted++;
     else if (r.status === "declined") declined++;
     else if (r.status === "no_response" || r.status === "offered") no_response++;
@@ -177,10 +186,9 @@ export async function getResponseSummary(): Promise<{ accepted: number; declined
 }
 
 export async function getAssignmentsForShift(shiftId: string): Promise<ShiftAssignment[]> {
-  const { data } = await supabase
+  return unwrapRows<ShiftAssignment>(await supabase
     .from("shift_assignments").select("*").eq("shift_id", shiftId)
-    .order("offered_at", { ascending: true });
-  return data ?? [];
+    .order("offered_at", { ascending: true }));
 }
 
 // ---- Direct writes via RLS (admin+ only; team_leader blocked by policy) -----
@@ -220,8 +228,9 @@ export async function addCleaner(input: {
   return null;
 }
 
-export async function dismissAlert(id: string): Promise<void> {
-  await supabase.from("alerts").update({ status: "dismissed" } as never).eq("id", id);
+export async function dismissAlert(id: string): Promise<string | null> {
+  const { error } = await supabase.from("alerts").update({ status: "dismissed" } as never).eq("id", id);
+  return error ? friendlyError(error.message) : null;
 }
 
 // ---- Privileged actions via Edge Functions (service-role side effects) ------
@@ -287,10 +296,11 @@ export async function setUserPhone(userId: string, phone: string | null): Promis
 
 // Keep a team leader's cleaner row in sync with their user status. inactive
 // stops offers (is_active only true when active).
-export async function setCleanerStatusByEmail(email: string, status: string): Promise<void> {
-  await supabase.from("cleaners")
+export async function setCleanerStatusByEmail(email: string, status: string): Promise<string | null> {
+  const { error } = await supabase.from("cleaners")
     .update({ status, is_active: status === "active" } as never)
     .eq("email", email.toLowerCase()).eq("is_team_leader", true);
+  return error ? friendlyError(error.message) : null;
 }
 
 // Cleaner status change (Cleaners page) — routed through an Edge Function so the

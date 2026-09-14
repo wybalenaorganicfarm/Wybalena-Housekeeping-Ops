@@ -70,10 +70,24 @@ Deno.serve(async (req) => {
     return landing("already", label);
   }
 
-  await sb.from("shifts")
+  // Confirm only if still pending, and CHECK a row actually changed. Without this,
+  // a failed write (or a row that flipped status under a concurrent click) would
+  // still fall through to "confirmed" — telling the user it's done while the shift
+  // stays pending_confirmation and never gets staffed.
+  const { data: confirmed, error: confirmErr } = await sb.from("shifts")
     .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
     .eq("id", shiftId)
-    .eq("status", "pending_confirmation");
+    .eq("status", "pending_confirmation")
+    .select("id")
+    .maybeSingle();
+  if (confirmErr) {
+    console.error(`[confirm-shift-email] confirm write failed for ${shiftId}: ${confirmErr.message}`);
+    return landing("invalid", label);
+  }
+  if (!confirmed) {
+    // Nothing updated — a concurrent click already confirmed it. Show "already".
+    return landing("already", label);
+  }
 
   // Close any open unconfirmed_shifts alert for this shift.
   await sb.from("alerts")

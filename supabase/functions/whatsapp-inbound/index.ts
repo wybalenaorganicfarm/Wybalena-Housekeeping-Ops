@@ -17,7 +17,25 @@ import { writeAuditLog } from "../_shared/auditLog.ts";
 const SOURCE = "whatsapp-inbound";
 
 function normPhone(p: string): string {
-  return p.replace(/[^0-9]/g, "");
+  return (p ?? "").replace(/[^0-9]/g, "");
+}
+
+// Match an inbound sender number against a stored cleaner number. Cleaner numbers
+// are stored E.164 (e.g. +61409123456 -> "61409123456"); Whapi delivers digits.
+// A properly-entered number matches exactly. Legacy rows stored in LOCAL format
+// (e.g. "0409123456") won't match the E.164 sender ("61409123456") on a straight
+// compare, which silently drops that cleaner's replies. Fall back to comparing the
+// national significant number (last 9 digits, the part after country code / trunk
+// "0"), so both formats resolve to the same cleaner. 9 digits is long enough to
+// stay specific; require it so short/garbage numbers never collide.
+function phoneMatches(stored: string, inbound: string): boolean {
+  const a = normPhone(stored);
+  const b = normPhone(inbound);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const tail = (s: string) => s.replace(/^0+/, "").slice(-9);
+  const ta = tail(a), tb = tail(b);
+  return ta.length === 9 && ta === tb;
 }
 
 // Resolve the shift behind an assignment, plus its accepted/required counts —
@@ -28,8 +46,24 @@ async function shiftContext(sb: ReturnType<typeof serviceClient>, assignmentId: 
     .select("shift_id, shifts(shift_date, start_time, shift_type, required_cleaners, status)")
     .eq("id", assignmentId)
     .maybeSingle();
-  const sh = (a as Record<string, any>)?.shifts;
   const shiftId = (a as Record<string, any>)?.shift_id as string | undefined;
+  // The embed is a to-one join and normally comes back as an object, but if
+  // PostgREST hands it back as an array (a stale schema-cache edge case seen
+  // after migrations) `sh.shift_date` would read undefined and the cleaner's
+  // "Shift Accepted" confirmation would render with a blank date and time. Take
+  // the first element in that case, and if the embed is missing entirely fall
+  // back to reading the shift row directly by shift_id — the date/time on the
+  // confirmation must never be blank.
+  let sh = (a as Record<string, any>)?.shifts;
+  if (Array.isArray(sh)) sh = sh[0];
+  if (!sh?.shift_date && shiftId) {
+    const { data: s } = await sb
+      .from("shifts")
+      .select("shift_date, start_time, shift_type, required_cleaners, status")
+      .eq("id", shiftId)
+      .maybeSingle();
+    if (s) sh = s;
+  }
   let accepted = 0;
   if (shiftId) {
     const { count } = await sb
@@ -89,8 +123,12 @@ Deno.serve(async (req) => {
     //    not reply and do not log a warning (that just clutters System Logs with
     //    every random message the line receives).
     const phone = normPhone(r.fromPhone);
-    const { data: cleaners } = await sb.from("cleaners").select("id, full_name, phone");
-    const cleaner = (cleaners ?? []).find((c) => normPhone(c.phone) === phone);
+    const { data: cleaners, error: cleanersErr } = await sb.from("cleaners").select("id, full_name, phone");
+    // A FAILED read must not be mistaken for "no matching cleaner" — that would
+    // silently drop every reply (accept/decline/cancel) while WhatsApp is up. Throw
+    // so the catch removes the dedup row and the message is retried on redelivery.
+    if (cleanersErr) throw new Error(`cleaner lookup failed: ${cleanersErr.message}`);
+    const cleaner = (cleaners ?? []).find((c) => phoneMatches(c.phone, r.fromPhone));
     if (!cleaner) {
       console.log(`[whatsapp-inbound] ignoring message from non-cleaner ${phone}`);
       results.push({ id: r.providerMessageId, skipped: "not a cleaner" });
@@ -147,20 +185,26 @@ Deno.serve(async (req) => {
     //      to the status the answer can actually apply to, so a stale prompt from an
     //      already-resolved offer is never picked up.
     if (!assignmentId) {
-      const CONFIRM_ANSWER: Record<string, string[]> = {
-        decline_confirm: ["offered"],
-        decline_cancel: ["offered"],
-        cancel_confirm: ["accepted", "offered"],
-        cancel_cancel: ["accepted", "offered"],
+      const CONFIRM_ANSWER: Record<string, { status: string[]; kind: string }> = {
+        decline_confirm: { status: ["offered"], kind: "decline" },
+        decline_cancel: { status: ["offered"], kind: "decline" },
+        cancel_confirm: { status: ["accepted", "offered"], kind: "cancel" },
+        cancel_cancel: { status: ["accepted", "offered"], kind: "cancel" },
       };
-      const wantStatus = CONFIRM_ANSWER[r.action];
-      if (wantStatus) {
+      const want = CONFIRM_ANSWER[r.action];
+      if (want) {
         const { data } = await sb
           .from("shift_assignments")
           .select("id")
           .eq("cleaner_id", cleaner.id)
-          .in("status", wantStatus)
+          .in("status", want.status)
           .not("confirm_message_id", "is", null)
+          // Match the PROMPT KIND, not just recency. confirm_sent_at is stamped by
+          // the decline prompt, the cancel prompt AND the accept confirmation, so
+          // "most recent prompt" alone could resolve a "Yes cancel" to a shift whose
+          // decline prompt was merely stamped later — cancelling the wrong shift.
+          // confirm_kind pins the answer to a row whose LAST prompt was this kind.
+          .eq("confirm_kind", want.kind)
           // By confirm_sent_at, NOT offered_at: the prompt we sent most recently is
           // the one being answered, which is not necessarily the newest offer.
           .order("confirm_sent_at", { ascending: false, nullsFirst: false })
@@ -275,7 +319,7 @@ Deno.serve(async (req) => {
           const conf = await sendAcceptConfirm(cleaner.phone, assignmentId, sb, shiftRef);
           // Store the confirmation's message id so a later Cancel tap on it resolves.
           if (conf?.providerMessageId) {
-            await sb.from("shift_assignments").update({ confirm_message_id: conf.providerMessageId, confirm_sent_at: new Date().toISOString() }).eq("id", assignmentId);
+            await sb.from("shift_assignments").update({ confirm_message_id: conf.providerMessageId, confirm_sent_at: new Date().toISOString(), confirm_kind: "accept" }).eq("id", assignmentId);
           }
           const after = await shiftContext(sb, assignmentId);
           await logResponse("response.accepted", "success", `${cleaner.full_name} accepted the shift on ${dateLabel}. Assigned count: ${after.accepted}/${after.required ?? "?"}.`);
@@ -312,16 +356,32 @@ Deno.serve(async (req) => {
         // reply to the original offer still resolves.
         const res = await sendDeclineConfirm(cleaner.phone, assignmentId, sb, shiftRef);
         if (res?.providerMessageId) {
-          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString() }).eq("id", assignmentId);
+          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString(), confirm_kind: "decline" }).eq("id", assignmentId);
         }
         results.push({ id: r.providerMessageId, action: "decline", result: "confirm_requested" });
         break;
       }
       case "decline_confirm": { // tapped "Yes"
+        // Only an OPEN offer can be declined — mirror the cancel_confirm guard so a
+        // stale "Yes decline" can't flip a re-accepted (or already-resolved) row
+        // back to declined.
+        if (assn?.status !== "offered") {
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_not_on_shift",
+            "You're not currently on this shift, so there's nothing to decline.", tplVars));
+          results.push({ id: r.providerMessageId, action: "decline_confirm", result: "not_active" });
+          break;
+        }
         // Record the decline FIRST, then acknowledge. If the acknowledgement send
         // fails the response is still logged, so the offer is never chased again as
-        // though the cleaner had stayed silent.
-        await declineOffer(sb, assignmentId);
+        // though the cleaner had stayed silent. If the decline WRITE itself fails,
+        // don't tell them it's declined.
+        const declined = await declineOffer(sb, assignmentId);
+        if (!declined) {
+          await logResponse("response.declined", "warning",
+            `${cleaner.full_name}'s decline of the shift on ${dateLabel} FAILED to save — not removed from the offer list. Needs manual follow-up.`);
+          results.push({ id: r.providerMessageId, action: "decline_confirm", result: "write_failed" });
+          break;
+        }
         const ack = await sendOutcome(cleaner.phone, "declined_confirmation", "Shift Declined", sb, shiftRef);
         // Surface a failed acknowledgement instead of logging a clean success: the
         // cleaner declined but never saw "you've declined", so they may well tap
@@ -360,7 +420,7 @@ Deno.serve(async (req) => {
         // Yes/No reply resolves back to this assignment.
         const res = await sendCancelConfirm(cleaner.phone, assignmentId, sb, shiftRef);
         if (res?.providerMessageId) {
-          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString() }).eq("id", assignmentId);
+          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString(), confirm_kind: "cancel" }).eq("id", assignmentId);
         }
         results.push({ id: r.providerMessageId, action: "cancel", result: "confirm_requested" });
         break;
@@ -427,12 +487,20 @@ Deno.serve(async (req) => {
       }
     }
    } catch (e) {
+      // The dedup row was inserted BEFORE the action ran, so if processing threw
+      // the action may be incomplete. Remove the dedup row so Whapi's retry can
+      // reprocess this message instead of it being discarded as a "duplicate" and
+      // the reply lost. The engine writes are guarded/idempotent, so reprocessing
+      // a partially-applied action is safe.
+      if (r.providerMessageId) {
+        await sb.from("processed_messages").delete().eq("provider_message_id", r.providerMessageId);
+      }
       results.push({ id: r.providerMessageId, error: String(e) });
       await writeAuditLog(sb, {
         event_type: "response.inbound",
         event_label: "WhatsApp Reply Received",
         status: "failed",
-        summary: `WhatsApp inbound webhook failed to process. Error: ${String(e)}.`,
+        summary: `WhatsApp inbound webhook failed to process (will retry on redelivery). Error: ${String(e)}.`,
         error_message: String(e),
         detail: { message_id: r.providerMessageId },
         source: SOURCE,

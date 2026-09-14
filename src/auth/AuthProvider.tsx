@@ -31,8 +31,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   async function loadProfile(uid: string) {
-    const { data } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
-    setProfile(data ?? null);
+    // A transient read failure must NOT silently downgrade an authenticated user
+    // to no-access (profile=null -> role=null -> canEdit=false). Distinguish a
+    // genuine "no row" (valid: clear the profile) from a read ERROR (keep whatever
+    // profile we already have, retry once). Only overwrite the profile on success.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
+      if (!error) { setProfile(data ?? null); return; }
+      console.error(`[auth] profile load failed (attempt ${attempt + 1}): ${error.message}`);
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
+    }
+    // Both attempts errored — leave the existing profile untouched rather than
+    // nulling it. The user keeps their current access; a later auth event or
+    // navigation reloads it.
   }
 
   useEffect(() => {
