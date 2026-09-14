@@ -25,11 +25,11 @@ const META: JobMeta[] = [
   // chain started — a shift confirmed too late for the Tier 1 slot is handled
   // end to end by Staffing Catch-Up instead, so the two never drive the same shift.
   { fn: "offer-tier-1", label: "Tier 1 Offers", desc: "Sends the first round of shift offers to Tier 1 cleaners, for every shift confirmed since the last run.", group: "weekly", order: 3 },
-  { fn: "remind-tier-1", label: "Tier 1 Non-Responder Reminders", desc: "Re-pings Tier 1 cleaners who were offered a shift on this schedule and haven't replied.", group: "weekly", order: 4 },
-  { fn: "escalate-tier-2", label: "Tier 2 Escalation", desc: "Opens shifts still unfilled up to Tier 2 cleaners.", group: "weekly", order: 5 },
-  { fn: "remind-tier-2", label: "Tier 2 Non-Responder Reminders", desc: "Re-pings Tier 2 cleaners who were offered a shift on this schedule and haven't replied.", group: "weekly", order: 6 },
-  { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Opens shifts still unfilled up to Tier 3 cleaners.", group: "weekly", order: 7 },
-  { fn: "remind-tier-3", label: "Tier 3 Non-Responder Reminders", desc: "Re-pings Tier 3 cleaners who were offered a shift on this schedule and haven't replied.", group: "weekly", order: 8 },
+  { fn: "remind-tier-1", label: "Tier 1 Non-Responder Reminders", desc: "Runs daily. Re-pings Tier 1 cleaners who were offered a shift and haven't replied — weekly-schedule and late-confirmed (catch-up) shifts alike. Each offer is reminded at most once.", group: "weekly", order: 4 },
+  { fn: "escalate-tier-2", label: "Tier 2 Escalation", desc: "Runs daily. Opens shifts still unfilled at Tier 1 up to Tier 2 cleaners, once they've sat at Tier 1 for at least a day. Covers weekly-schedule and catch-up shifts.", group: "weekly", order: 5 },
+  { fn: "remind-tier-2", label: "Tier 2 Non-Responder Reminders", desc: "Runs daily. Re-pings Tier 2 cleaners who were offered a shift and haven't replied. Each offer is reminded at most once.", group: "weekly", order: 6 },
+  { fn: "escalate-tier-3", label: "Tier 3 Escalation", desc: "Runs daily. Opens shifts still unfilled at Tier 2 up to Tier 3 cleaners, once they've sat at Tier 2 for at least a day. Covers weekly-schedule and catch-up shifts.", group: "weekly", order: 7 },
+  { fn: "remind-tier-3", label: "Tier 3 Non-Responder Reminders", desc: "Runs daily. Re-pings Tier 3 cleaners who were offered a shift and haven't replied. Each offer is reminded at most once.", group: "weekly", order: 8 },
   // Sit after the tier sequence — both are independent of the offer/escalation flow.
   { fn: "wipeover-notify", label: "Wipeover Cleaning Alert", desc: "Emails Ashleigh when a >3-day gap between bookings needs a wipeover clean.", group: "weekly", order: 9 },
   { fn: "mid-retreat-notify", label: "Mid-Retreat Cleaning Alert", desc: "Emails Ashleigh when a stay of 7+ nights needs a mid-retreat clean scheduled by hand.", group: "weekly", order: 10 },
