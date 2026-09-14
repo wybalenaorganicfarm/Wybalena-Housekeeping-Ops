@@ -91,11 +91,16 @@ function row(label: string, value: string, headBg = "#fff"): string {
 
 function shiftBlock(s: ConfirmShift, opts: ConfirmOpts): string {
   const bookingName = esc(s.guest_name ?? "Guest booking");
+  // check_in / check_out are ISO timestamps that carry the TIME. The original
+  // emails showed the check-in/out time (e.g. "27 September 2026, 1:00 pm"); the
+  // rewrite dropped it by formatting with fmtDate (date only). Use the venue-local
+  // date+time formatter so the time is shown again. (Shift Date & Time below
+  // already shows a time via fmtTime.)
   const bookingRows =
     row("Booking Name", bookingName) +
     row("Booking Nights", esc(s.nights ?? "—")) +
-    row("Check-In", `<strong>${fmtDate(s.check_in)}</strong>`) +
-    row("Check-Out", fmtDate(s.check_out));
+    row("Check-In", `<strong>${s.check_in ? fmtDateTime(s.check_in) : "—"}</strong>`) +
+    row("Check-Out", s.check_out ? fmtDateTime(s.check_out) : "—");
   const assignRows =
     row("Shift Date & Time", `<strong>${fmtDate(s.shift_date)}</strong> · ${fmtTime(s.start_time)}`, "#FBF3E2") +
     row("Shift Type", esc(SHIFT_LABEL[s.shift_type] ?? s.shift_type), "#FBF3E2") +
