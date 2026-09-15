@@ -311,7 +311,7 @@ export function Dashboard() {
                           {canEdit && s.status === "pending_confirmation"
                             ? <Button kind="secondary" disabled={confirming[s.id]} onClick={() => confirm(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming[s.id] ? "Confirming…" : "Confirm"}</Button>
                             : canEdit && (s.status === "staffing" || urgent)
-                              ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Assign</Button>
+                              ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Offer</Button>
                               : <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "7px 13px", fontSize: 12 }}>View</Button>}
                         </div>
                       </div>

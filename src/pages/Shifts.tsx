@@ -307,7 +307,7 @@ export function Shifts() {
                         {canEdit && s.status === "pending_confirmation"
                           ? <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => confirmOne(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : "Confirm"}</Button>
                           : canEdit && (s.status === "staffing" || urgent)
-                            ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Assign</Button>
+                            ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Offer</Button>
                             : null}
                       </div>
                     </div>
