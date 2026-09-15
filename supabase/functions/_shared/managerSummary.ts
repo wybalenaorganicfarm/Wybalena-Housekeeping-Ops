@@ -27,7 +27,10 @@ const TIER_LABEL: Record<string, string> = {
   tier_3: "Tier 3",
 };
 
-function prettyType(t: string): string {
+// Exported so notify-manager-roster renders the same "Standard" / "Deep Full
+// Venue" labels in the manager's rostered notification as the roster summary uses
+// — one source of truth for clean-type display, never a raw enum in a message.
+export function prettyType(t: string): string {
   return (t ?? "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 

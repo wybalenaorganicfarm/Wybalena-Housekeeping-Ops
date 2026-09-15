@@ -49,5 +49,15 @@ Deno.serve(async (req) => {
       .neq("status", "invite_sent"); // don't override a pending invite
   }
 
+  // Deactivating the Cleaning Manager clears the role: the trigger/notify/staffing
+  // all gate on is_active=true, so an inactive manager silently stops being
+  // rostered — but the flag would linger on an inactive cleaner and their upcoming
+  // roster rows would orphan. clear_cleaning_manager() unflags and drops those
+  // rows atomically, keeping the "one active manager" invariant. Re-nominate from
+  // the Cleaners page once someone is set as manager again.
+  if (cleaner.is_team_leader && status === "inactive") {
+    await sb.rpc("clear_cleaning_manager");
+  }
+
   return json({ ok: true });
 });

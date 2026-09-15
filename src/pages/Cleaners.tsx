@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
@@ -9,7 +8,7 @@ import { CleanerNotesModal } from "../components/CleanerNotesModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { parsePhoneNumber, type CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
-import { addCleaner, getCleaners, getLatestCleanerNotes, getReliability, removeCleaner, setCleanerStatus, updateCleaner } from "../lib/api";
+import { addCleaner, getCleaners, getLatestCleanerNotes, getReliability, removeCleaner, setCleanerStatus, setManager, updateCleaner } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { acceptRate, monthYear } from "../lib/format";
 import type { Cleaner, CleanerNote, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
@@ -208,7 +207,6 @@ const filterStyle = {
 export function Cleaners() {
   const { canEdit, isTeamLead } = useAuth();
   const canManage = canEdit || isTeamLead; // status + notes; add/remove stays admin-only
-  const navigate = useNavigate();
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
   const [latestNotes, setLatestNotes] = useState<Record<string, CleanerNote>>({});
@@ -242,6 +240,18 @@ export function Cleaners() {
       toastError(error);
       setCleaners((prev) => prev.map((x) => x.id === cl.id ? { ...x, status: prevStatus, is_active: prevActive } : x));
     }
+  }
+
+  // Nominate this cleaner as the Cleaning Manager, or (nominate=false) step the
+  // current one down. The server RPC enforces single-holder atomically, so we
+  // refetch afterwards rather than optimistically toggle the flag on one row.
+  async function manageManager(cl: Cleaner, nominate: boolean) {
+    setSaving((s) => ({ ...s, [cl.id]: true }));
+    const error = await setManager(nominate ? cl.id : null);
+    setSaving((s) => ({ ...s, [cl.id]: false }));
+    if (error) { toastError(error); return; }
+    toastOk(nominate ? `${cl.full_name} is now the Cleaning Manager` : "Cleaning Manager cleared");
+    await load();
   }
 
   async function remove(cl: Cleaner) {
@@ -434,11 +444,18 @@ export function Cleaners() {
                             // Edit (contact details) + remove are admin-only; team leads get notes + status only.
                             ...(canEdit ? [{ label: "Edit", icon: "pencil", onClick: () => setEditing(cl) }] : []),
                             { label: "Notes", icon: "book", onClick: () => setNotesFor(cl) },
+                            // Cleaning Manager nomination (owner action). The current
+                            // holder gets a step-down; everyone else, a nominate. The
+                            // server RPC enforces exactly one holder atomically.
                             ...(canEdit
                               ? [cl.is_team_leader
-                                  ? { label: "Remove in User management", icon: "users", onClick: () => navigate("/users") }
-                                  : { label: "Remove cleaner", danger: true, onClick: () => setToRemove(cl) }]
+                                  ? { label: "Remove as Cleaning Manager", icon: "users", onClick: () => manageManager(cl, false) }
+                                  : { label: "Nominate as Cleaning Manager", icon: "users", onClick: () => manageManager(cl, true) }]
                               : []),
+                            // The manager is a real cleaner now, so removal is the
+                            // normal cleaner removal — but remove-cleaner blocks it
+                            // while she's still nominated, so step her down first.
+                            ...(canEdit ? [{ label: "Remove cleaner", danger: true, onClick: () => setToRemove(cl) }] : []),
                           ]} />
                         )}
                       </div>

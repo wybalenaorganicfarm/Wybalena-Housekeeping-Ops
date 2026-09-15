@@ -273,6 +273,14 @@ export async function setUserRole(userId: string, role: string): Promise<string 
   return error ?? data?.error ?? null;
 }
 
+// Nominate (or, with null, clear) the Cleaning Manager — the one cleaner who is
+// auto-rostered onto every non-wipeover shift. Routed through an Edge Function
+// (atomic single-holder RPC + audit log + service-role write).
+export async function setManager(cleanerId: string | null): Promise<string | null> {
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("set-manager", { cleanerId });
+  return error ?? data?.error ?? null;
+}
+
 // Edit a cleaner's contact details (phone/email) — Edge Function for the audit log.
 export async function updateCleaner(cleanerId: string, input: { phone: string; email: string | null; tier?: string }): Promise<string | null> {
   const { data, error } = await invokeFn<{ ok?: boolean; error?: string; tier?: string }>("update-cleaner", { cleanerId, ...input });

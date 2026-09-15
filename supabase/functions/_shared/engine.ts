@@ -183,8 +183,14 @@ export async function offerToCleaner(
   const { data: cleaner } = await sb
     .from("cleaners").select("id, full_name, phone, tier, is_team_leader, is_active").eq("id", cleanerId).maybeSingle();
   if (!cleaner) return "error";
-  // The team lead is auto-assigned to every shift and is never offered/re-offered.
-  if (cleaner.is_team_leader) return "error";
+  // The Cleaning Manager (is_team_leader) is NOT blocked here. She is excluded from
+  // every AUTOMATIC tier pool — tierChain / offerTier / nextOfferableTier /
+  // reofferToUnaccepted all gate on is_team_leader = false, and none of them call
+  // this function. offerToCleaner is the MANUAL path only (admin override, e.g. a
+  // 1-cleaner wipeover), where she is a working cleaner whose Accept counts toward
+  // staffing. So: manual offers to the manager = allowed; automatic tier offers = still
+  // excluded. (Her "you're rostered" notification on normal shifts is a separate
+  // path — a status='team_lead' roster row + notify-manager-roster, never an offer.)
   // Never send an offer to an Inactive cleaner — the UI already hides them,
   // this is the server-side guard for manual assign / any direct call.
   if (!cleaner.is_active) return "inactive";

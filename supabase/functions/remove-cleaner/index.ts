@@ -23,7 +23,11 @@ Deno.serve(async (req) => {
     .from("cleaners").select("id, full_name, email, is_team_leader").eq("id", cleanerId).maybeSingle();
   if (loadErr) return json({ error: loadErr.message }, 400);
   if (!cleaner) return json({ error: "cleaner not found" }, 404);
-  if (cleaner.is_team_leader) return json({ error: "the team leader cannot be removed" }, 400);
+  // The Cleaning Manager can't be removed while nominated — step them down first
+  // (Cleaners page -> Remove as Cleaning Manager), which clears the flag and drops
+  // their upcoming roster rows atomically. Blocking here keeps the "one manager"
+  // invariant: no removed/deleted cleaner is ever left is_team_leader=true.
+  if (cleaner.is_team_leader) return json({ error: "the Cleaning Manager can't be removed — step them down first" }, 400);
 
   // Clear shift-assignment history first (FK is on delete restrict) so the
   // cleaner is actually deleted, not just deactivated.
