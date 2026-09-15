@@ -9,10 +9,10 @@ import { CleanerNotesModal } from "../components/CleanerNotesModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { parsePhoneNumber, type CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
-import { addCleaner, getCleaners, getReliability, removeCleaner, setCleanerStatus, updateCleaner } from "../lib/api";
+import { addCleaner, getCleaners, getLatestCleanerNotes, getReliability, removeCleaner, setCleanerStatus, updateCleaner } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { acceptRate, monthYear } from "../lib/format";
-import type { Cleaner, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
+import type { Cleaner, CleanerNote, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
 
 const TIER_SUB: Record<CleanerTier, string> = {
   tier_1: "first to be offered",
@@ -175,7 +175,17 @@ const CLEANER_STATUS_META: Record<CleanerStatus, { label: string; color: string;
   inactive: { label: "Inactive", color: "#8a8478", dot: "#c4bdb0" },
 };
 
-const COL = { phone: 120, email: 180, status: 116, rel: 168, rate: 84, action: 40 };
+// One authoritative 8-column track shared by the header row AND every data row.
+// Because the header and body are separate DOM rows, the ONLY way they stay
+// aligned is to give both the identical `grid-template-columns` — never size a
+// cell with its own flex/width/basis (per-cell padding used to inflate flex-basis
+// and drift the columns; under Grid the track is fixed, so padding is free to use
+// for spacing without shifting anything). Widths sum to 100% and fill the card;
+// Notes is capped so long notes wrap/ellipsis inside the column; Actions is the
+// narrow far-right pin. `minWidth:0` on cells keeps ellipsis working.
+const GRID = "22% 12% 19% 10% 16% 8% 10% 3%"; // Cleaner Phone Email Status Rel Rate Notes Actions
+const gridRow = { display: "grid", gridTemplateColumns: GRID, alignItems: "center" } as const;
+const cell = { minWidth: 0 } as const;
 
 // The tier/status selection survives refreshes and tab changes — an admin
 // working through, say, the Inactive list shouldn't be reset to "All" every
@@ -201,6 +211,7 @@ export function Cleaners() {
   const navigate = useNavigate();
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
+  const [latestNotes, setLatestNotes] = useState<Record<string, CleanerNote>>({});
   const [loading, setLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState<string>(() => storedFilter(TIER_KEY, ["all", "tier_1", "tier_2", "tier_3"]));
   const [statusFilter, setStatusFilter] = useState<string>(() => storedFilter(STATUS_KEY, ["all", "active", "inactive"]));
@@ -213,8 +224,8 @@ export function Cleaners() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   async function load() {
-    const [cs, r] = await Promise.all([getCleaners(), getReliability()]);
-    setCleaners(cs); setRel(r); setLoading(false);
+    const [cs, r, notes] = await Promise.all([getCleaners(), getReliability(), getLatestCleanerNotes()]);
+    setCleaners(cs); setRel(r); setLatestNotes(notes); setLoading(false);
   }
   useEffect(() => { load(); }, []);
   useEffect(() => { try { localStorage.setItem(TIER_KEY, tierFilter); } catch { /* private mode */ } }, [tierFilter]);
@@ -291,16 +302,41 @@ export function Cleaners() {
       .map((t) => ({ key: t, label: TIER_LABEL[t], sub: TIER_SUB[t], rows: byRate(visible.filter((cl) => cl.tier === t)) }));
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="cln-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      {/* Responsive rules scoped to this page only via the `.cln-page` prefix —
+          nothing here leaks to other pages or the shared layout. The table keeps
+          its % grid on wide screens; on narrower ones the card gets a min-width
+          and its scroll container scrolls horizontally so the 8 columns stay
+          aligned (header + rows share the same track) instead of crushing. */}
+      <style>{`
+        @media (max-width: 1024px) {
+          .cln-page .cln-toolbar { padding-left: 16px; padding-right: 16px; }
+          .cln-page .cln-scroll  { padding-left: 16px; padding-right: 16px; }
+        }
+        @media (max-width: 900px) {
+          .cln-page .cln-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .cln-page .cln-table  { min-width: 860px; }
+        }
+        @media (max-width: 640px) {
+          .cln-page .cln-toolbar { flex-wrap: wrap; row-gap: 8px; padding-left: 12px; padding-right: 12px; }
+          .cln-page .cln-toolbar .cln-sortnote { flex-basis: 100%; text-align: right; }
+          .cln-page .cln-scroll  { padding-left: 12px; padding-right: 12px; padding-top: 12px; }
+        }
+        /* Keep both header actions on the fixed-height bar at phone width by
+           collapsing them to icon-only — the labels return past 480px. */
+        @media (max-width: 480px) {
+          .cln-page .cln-headbtns .cln-btnlabel { display: none; }
+        }
+      `}</style>
       <PageHeader title="Cleaners" subtitle={`${activeCount} active`}
         right={canEdit ? (
-          <>
-            <Button kind="secondary"><Icon name="search" size={14} strokeWidth={2.2} /> Search</Button>
-            <Button onClick={() => setShowAdd(true)}><Icon name="plus" size={14} strokeWidth={2.2} /> Add cleaner</Button>
-          </>
+          <span className="cln-headbtns" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Button kind="secondary"><Icon name="search" size={14} strokeWidth={2.2} /> <span className="cln-btnlabel">Search</span></Button>
+            <Button onClick={() => setShowAdd(true)}><Icon name="plus" size={14} strokeWidth={2.2} /> <span className="cln-btnlabel">Add cleaner</span></Button>
+          </span>
         ) : undefined} />
 
-      <div style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 7, padding: "10px 24px" }}>
+      <div className="cln-toolbar" style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 7, padding: "10px 24px" }}>
         {/* Two independent dropdowns — tier and status. "All" means no narrowing. */}
         <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)} style={filterStyle}>
           {tierOptions.map(([k, l]) => <option key={k} value={k}>{l} ({counts[k as keyof typeof counts]})</option>)}
@@ -309,19 +345,23 @@ export function Cleaners() {
           {statusOptions.map(([k, l]) => <option key={k} value={k}>{l} ({statusCounts[k as keyof typeof statusCounts]})</option>)}
         </select>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11.5, color: c.faint }}>Sorted by tier, then reliability</span>
+        <span className="cln-sortnote" style={{ fontSize: 11.5, color: c.faint }}>Sorted by tier, then reliability</span>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
-        <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
-            <div style={{ flex: 1 }}>Cleaner</div>
-            <div style={{ flex: "none", width: COL.phone }}>Phone</div>
-            <div style={{ flex: "none", width: COL.email }}>Email</div>
-            <div style={{ flex: "none", width: COL.status }}>Status</div>
-            <div style={{ flex: "none", width: COL.rel }}>Reliability</div>
-            <div style={{ flex: "none", width: COL.rate, textAlign: "right" }}>Accept rate</div>
-            {canManage && <div style={{ flex: "none", width: COL.action }} />}
+      <div className="cln-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
+        <div className="cln-table" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+          <div style={{ ...gridRow, padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
+            {/* Each header's textAlign matches its body cell so labels stack over
+                their values: left for Cleaner/Status/Reliability/Notes (left-origin
+                controls), center for Phone/Email/Accept rate, right for Actions. */}
+            <div style={{ ...cell, textAlign: "left" }}>Cleaner</div>
+            <div style={{ ...cell, textAlign: "center" }}>Phone</div>
+            <div style={{ ...cell, textAlign: "center" }}>Email</div>
+            <div style={{ ...cell, textAlign: "left" }}>Status</div>
+            <div style={{ ...cell, textAlign: "left" }}>Reliability</div>
+            <div style={{ ...cell, textAlign: "center" }}>Accept rate</div>
+            <div style={{ ...cell, textAlign: "left" }}>Notes</div>
+            <div style={{ ...cell, textAlign: "right" }}>{canManage ? "Actions" : ""}</div>
           </div>
 
           {groups.map((g, gi) => {
@@ -338,20 +378,20 @@ export function Cleaners() {
                   const col = rateColor(rate);
                   const avBg = cl.is_team_leader ? c.green : cl.tier === "tier_1" ? c.greenMid : cl.tier === "tier_2" ? c.warn : "#c4bdb0";
                   return (
-                    <div key={cl.id} style={{ display: "flex", alignItems: "center", padding: "11px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: cl.status === "inactive" ? 0.6 : 1 }}>
-                      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 11 }}>
+                    <div key={cl.id} style={{ ...gridRow, padding: "11px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: cl.status === "inactive" ? 0.6 : 1 }}>
+                      <div style={{ ...cell, display: "flex", alignItems: "center", gap: 11 }}>
                         <Avatar name={cl.full_name} size={32} bg={avBg} />
-                        <div>
-                          <div style={{ fontSize: 13.5, fontWeight: 500 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {cl.full_name}
                             {cl.is_team_leader && <span style={{ fontSize: 10, color: "#9a7320", background: "#FBF1DF", padding: "0 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>Team Lead</span>}
                           </div>
                           <div style={{ fontSize: 11.5, color: c.faint }}>Joined {monthYear(cl.created_at)}</div>
                         </div>
                       </div>
-                      <div style={{ flex: "none", width: COL.phone, fontSize: 12, color: "#5d665f" }}>{cl.phone}</div>
-                      <div style={{ flex: "none", width: COL.email, fontSize: 12, color: "#5d665f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cl.email || "—"}</div>
-                      <div style={{ flex: "none", width: COL.status, display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ ...cell, fontSize: 12, color: "#5d665f", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cl.phone}</div>
+                      <div style={{ ...cell, fontSize: 12, color: "#5d665f", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cl.email || "—"}</div>
+                      <div style={{ ...cell, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6 }}>
                         {canManage ? (
                           <>
                           <select value={cl.status} disabled={saving[cl.id]} onChange={(e) => changeStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[cl.id] ? "wait" : "pointer", outline: "none" }}>
@@ -366,15 +406,30 @@ export function Cleaners() {
                           </span>
                         )}
                       </div>
-                      <div style={{ flex: "none", width: COL.rel, display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ ...cell, display: "flex", alignItems: "center", gap: 8, paddingRight: 12 }}>
                         <div style={{ flex: 1, height: 5, borderRadius: 3, background: "#eceadf", overflow: "hidden" }}>
                           <div style={{ width: `${rate ?? 0}%`, height: "100%", background: col }} />
                         </div>
                         <span style={{ fontSize: 11, color: c.muted2, whiteSpace: "nowrap" }}>{acc}✓ {dec}✕</span>
                       </div>
-                      <div style={{ flex: "none", width: COL.rate, textAlign: "right", fontSize: 13, fontWeight: 600, color: col }}>{rate === null ? "—" : `${rate}%`}</div>
-                      {canManage && (
-                        <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>
+                      <div style={{ ...cell, textAlign: "center", fontSize: 13, fontWeight: 600, color: col }}>{rate === null ? "—" : `${rate}%`}</div>
+                      {/* Latest note preview, far right. Click to open the full
+                          notes thread (view/add) when the user can manage. */}
+                      <div
+                        onClick={canManage ? () => setNotesFor(cl) : undefined}
+                        title={latestNotes[cl.id]?.body}
+                        style={{ ...cell, textAlign: "left", paddingRight: 10, cursor: canManage ? "pointer" : "default" }}
+                      >
+                        {latestNotes[cl.id] ? (
+                          <div style={{ fontSize: 12, color: c.body, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.4, wordBreak: "break-word" }}>
+                            {latestNotes[cl.id].body}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: canManage ? c.muted2 : "#c4bdb0" }}>{canManage ? "Add note" : "—"}</span>
+                        )}
+                      </div>
+                      <div style={{ ...cell, display: "flex", justifyContent: "flex-end" }}>
+                        {canManage && (
                           <KebabMenu disabled={removing === cl.id} items={[
                             // Edit (contact details) + remove are admin-only; team leads get notes + status only.
                             ...(canEdit ? [{ label: "Edit", icon: "pencil", onClick: () => setEditing(cl) }] : []),
@@ -385,8 +440,8 @@ export function Cleaners() {
                                   : { label: "Remove cleaner", danger: true, onClick: () => setToRemove(cl) }]
                               : []),
                           ]} />
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -403,7 +458,7 @@ export function Cleaners() {
 
       {showAdd && <AddCleanerModal existing={cleaners} onClose={() => setShowAdd(false)} onSaved={load} />}
       {editing && <EditCleanerModal cleaner={editing} existing={cleaners} onClose={() => setEditing(null)} onSaved={load} />}
-      {notesFor && <CleanerNotesModal cleaner={notesFor} onClose={() => setNotesFor(null)} />}
+      {notesFor && <CleanerNotesModal cleaner={notesFor} onClose={() => { setNotesFor(null); getLatestCleanerNotes().then(setLatestNotes).catch(() => {}); }} />}
       {toRemove && (
         <ConfirmDialog
           title="Remove cleaner"

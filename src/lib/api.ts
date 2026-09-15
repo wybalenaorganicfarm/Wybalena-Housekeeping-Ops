@@ -50,6 +50,17 @@ export async function getCleanerNotes(cleanerId: string): Promise<CleanerNote[]>
     .order("created_at", { ascending: false }));
 }
 
+// Latest note per cleaner, for the inline Notes column on the Cleaners page.
+// One query for all notes (newest first); we keep the first row seen per
+// cleaner, so the map holds each cleaner's most recent note.
+export async function getLatestCleanerNotes(): Promise<Record<string, CleanerNote>> {
+  const rows = unwrapRows<CleanerNote>(await supabase
+    .from("cleaner_notes").select("*").order("created_at", { ascending: false }));
+  const map: Record<string, CleanerNote> = {};
+  for (const n of rows) if (!map[n.cleaner_id]) map[n.cleaner_id] = n;
+  return map;
+}
+
 // author_id defaults to auth.uid() in the DB, so we only send cleaner_id + body.
 export async function addCleanerNote(cleanerId: string, body: string): Promise<string | null> {
   const { error } = await supabase

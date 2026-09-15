@@ -22,6 +22,32 @@ type View = "list" | "calendar";
 // (the check-out this clean is linked to) · staffing · action.
 const COL = { check: 28, date: 150, time: 96, type: 140, notes: 190, staffing: 172, action: 110 };
 
+// Time-window filter — mirrors the Cleaners page's dropdown so the page doesn't
+// grow to hundreds of long-dead shifts. "Upcoming" (the default) keeps today +
+// future only; historical shifts stay in the data and every drawer/assignment
+// detail is untouched — they're just filed out of the default view until "All"
+// is picked. The choice persists across visits like the Cleaners filters do.
+const TIME_KEY = "shifts.timeFilter";
+const TIME_OPTIONS: [string, string][] = [["upcoming", "Current & upcoming"], ["all", "All shifts"]];
+function storedTimeFilter(): string {
+  try {
+    const v = localStorage.getItem(TIME_KEY);
+    return v && TIME_OPTIONS.some(([k]) => k === v) ? v : "upcoming";
+  } catch { return "upcoming"; }
+}
+// Local YYYY-MM-DD for "today" so the cutoff matches how shift_date is stored
+// (a plain date, no timezone) — a shift dated today still counts as upcoming.
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const filterStyle = {
+  fontSize: 12.5, fontWeight: 600, color: "#5d665f", background: "#fff",
+  border: `1px solid ${c.border3}`, borderRadius: 8, padding: "6px 10px",
+  outline: "none", cursor: "pointer", minWidth: 150,
+} as const;
+
 export function Shifts() {
   const { canEdit } = useAuth();
   const escLabel = useEscalationLabel();
@@ -32,6 +58,7 @@ export function Shifts() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>("list");
   const [search, setSearch] = useState("");
+  const [timeFilter, setTimeFilter] = useState<string>(storedTimeFilter);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<Shift | null>(null);
   const [bookingDrawer, setBookingDrawer] = useState<Booking | null>(null);
@@ -49,14 +76,19 @@ export function Shifts() {
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => { try { localStorage.setItem(TIME_KEY, timeFilter); } catch { /* ignore */ } }, [timeFilter]);
 
   // Latest date at the top, historical shifts flowing chronologically backwards
-  // down the list. Cancelled hidden — no filtering.
-  const visible = useMemo(
-    () => shifts.filter((s) => s.status !== "cancelled")
-      .sort((a, b) => (b.shift_date + b.start_time).localeCompare(a.shift_date + a.start_time)),
-    [shifts],
-  );
+  // down the list. Cancelled hidden. The time filter files past shifts out of the
+  // default view ("Current & upcoming"): today counts as upcoming; "All shifts"
+  // shows every historical one. Applied here so list and calendar views agree.
+  const visible = useMemo(() => {
+    const cutoff = todayStr();
+    return shifts
+      .filter((s) => s.status !== "cancelled")
+      .filter((s) => timeFilter === "all" || s.shift_date >= cutoff)
+      .sort((a, b) => (b.shift_date + b.start_time).localeCompare(a.shift_date + a.start_time));
+  }, [shifts, timeFilter]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -74,12 +106,20 @@ export function Shifts() {
     return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
   }, [filtered]);
 
+  // Only ever act on selections that are actually on screen — a pending shift
+  // filtered out by the time window must not be silently swept into a bulk
+  // confirm or counted in the green bar.
+  const visibleSel = useMemo(() => {
+    const ids = new Set(visible.map((s) => s.id));
+    return [...sel].filter((id) => ids.has(id));
+  }, [sel, visible]);
+
   function toggleSel(id: string) {
     setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
   async function bulkConfirm() {
     setBulkBusy(true);
-    await confirmShifts([...sel]); await load();
+    await confirmShifts(visibleSel); await load();
     setBulkBusy(false);
   }
   async function confirmOne(id: string) {
@@ -97,24 +137,30 @@ export function Shifts() {
       ) : undefined} />
 
       <div style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 24px" }}>
-        {view === "list" ? (
-          <div style={{ position: "relative", width: 280, maxWidth: "50%" }}>
-            <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: c.muted2, display: "flex", pointerEvents: "none" }}>
-              <Icon name="search" size={14} strokeWidth={2} />
-            </span>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search shifts"
-              style={{ width: "100%", boxSizing: "border-box", padding: "7px 28px 7px 30px", fontSize: 12.5, border: `1px solid ${c.border3}`, borderRadius: 8, outline: "none", color: c.ink, background: "#fff" }}
-            />
-            {search && (
-              <span onClick={() => setSearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: c.muted2, cursor: "pointer", display: "flex" }}>
-                <Icon name="x" size={14} strokeWidth={2} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {view === "list" && (
+            <div style={{ position: "relative", width: 280, maxWidth: "50vw" }}>
+              <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: c.muted2, display: "flex", pointerEvents: "none" }}>
+                <Icon name="search" size={14} strokeWidth={2} />
               </span>
-            )}
-          </div>
-        ) : <span />}
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search shifts"
+                style={{ width: "100%", boxSizing: "border-box", padding: "7px 28px 7px 30px", fontSize: 12.5, border: `1px solid ${c.border3}`, borderRadius: 8, outline: "none", color: c.ink, background: "#fff" }}
+              />
+              {search && (
+                <span onClick={() => setSearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: c.muted2, cursor: "pointer", display: "flex" }}>
+                  <Icon name="x" size={14} strokeWidth={2} />
+                </span>
+              )}
+            </div>
+          )}
+          {/* Time window — applies to both list and calendar. Default hides history. */}
+          <select value={timeFilter} onChange={(e) => setTimeFilter(e.target.value)} style={filterStyle}>
+            {TIME_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </div>
         <div style={{ display: "flex", background: "#eef0ec", borderRadius: 8, padding: 2 }}>
           {([["list", "List", "list"], ["calendar", "Calendar", "calendar"]] as [View, string, string][]).map(([k, lbl, ic]) => (
             <button key={k} onClick={() => setView(k)} style={{ border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: "5px 12px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 6, background: view === k ? "#fff" : "transparent", color: view === k ? c.ink : c.muted, boxShadow: view === k ? "0 1px 2px rgba(0,0,0,.06)" : "none" }}>
@@ -124,14 +170,14 @@ export function Shifts() {
         </div>
       </div>
 
-      {canEdit && sel.size > 0 && view === "list" && (
+      {canEdit && visibleSel.length > 0 && view === "list" && (
         <div style={{ flex: "none", background: c.green, color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 24px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, fontWeight: 600 }}>
-            <Icon name="check" size={16} strokeWidth={2.2} /> {sel.size} pending shift{sel.size === 1 ? "" : "s"} selected
+            <Icon name="check" size={16} strokeWidth={2.2} /> {visibleSel.length} pending shift{visibleSel.length === 1 ? "" : "s"} selected
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <button onClick={() => setSel(new Set())} style={{ background: "none", border: "none", color: "#cfe0d6", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Clear</button>
-            <Button onClick={bulkConfirm} disabled={bulkBusy} style={{ background: c.warn, padding: "7px 14px", fontSize: 12.5 }}>{bulkBusy ? "Confirming…" : `Confirm all ${sel.size}`}</Button>
+            <button onClick={() => setSel((prev) => { const n = new Set(prev); visibleSel.forEach((id) => n.delete(id)); return n; })} style={{ background: "none", border: "none", color: "#cfe0d6", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Clear</button>
+            <Button onClick={bulkConfirm} disabled={bulkBusy} style={{ background: c.warn, padding: "7px 14px", fontSize: 12.5 }}>{bulkBusy ? "Confirming…" : `Confirm all ${visibleSel.length}`}</Button>
           </div>
         </div>
       )}
@@ -152,7 +198,7 @@ export function Shifts() {
               <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>Action</div>
             </div>
 
-            {byWeek.length === 0 && <div style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>{search ? "No shifts match your search." : "No upcoming shifts."}</div>}
+            {byWeek.length === 0 && <div style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>{search ? "No shifts match your search." : timeFilter === "upcoming" ? "No current or upcoming shifts. Switch to “All shifts” to see historical ones." : "No shifts yet."}</div>}
             {byWeek.map(([wk, weekShifts]) => (
               <div key={wk}>
                 <div style={{ padding: "8px 18px", background: c.railGreenBg, borderBottom: `1px solid ${c.railGreenBd}`, fontSize: 10.5, fontWeight: 700, color: "#5e7a6a", textTransform: "uppercase", letterSpacing: "0.08em" }}>{weekRangeLabel(wk)}</div>
