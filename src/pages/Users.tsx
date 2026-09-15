@@ -74,9 +74,9 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
       <Field label={<>Email <span style={{ color: c.danger }}>*</span></>}><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@email.com" /></Field>
       <Field label="Role">
         <Select value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="admin">Admin</option>
-          <option value="operations_manager">Operations Manager</option>
-          <option value="team_leader">Team Leader</option>
+          <option value="admin">Owner</option>
+          <option value="operations_manager">Retreat Director</option>
+          <option value="team_leader">Cleaning Manager</option>
         </Select>
       </Field>
       <Field label={role === "team_leader"
@@ -195,7 +195,7 @@ export function Users() {
   ), [users, roleFilter, q]);
 
   const chips: [string, string, string?][] = [
-    ["all", "All roles"], ["admin", "Admin", "#3D8B5F"], ["operations_manager", "Operations Manager", "#2f6fb0"], ["team_leader", "Team Leader", "#C8821A"],
+    ["all", "All roles"], ["admin", "Owner", "#3D8B5F"], ["operations_manager", "Retreat Director", "#2f6fb0"], ["team_leader", "Cleaning Manager", "#C8821A"],
   ];
 
   if (loading) return <Spinner />;

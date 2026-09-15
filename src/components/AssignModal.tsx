@@ -106,7 +106,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
                               opacity: busy ? 0.6 : 1,
                             }}
                           >
-                            {busy ? "…" : offered ? "Offered ✓" : "Assign"}
+                            {busy ? "…" : offered ? "Offered ✓" : "Offer"}
                           </button>
                         );
                       })()}

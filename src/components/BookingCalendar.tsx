@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { c, font } from "../theme";
+import { c, font, BOOKING } from "../theme";
 import { Icon } from "./Icon";
 import type { Booking } from "../lib/types";
 
@@ -162,11 +162,11 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
                     // next / previous week, so it reads as one run.
                     borderTopLeftRadius: s.startsHere ? 4 : 0, borderBottomLeftRadius: s.startsHere ? 4 : 0,
                     borderTopRightRadius: s.endsHere ? 4 : 0, borderBottomRightRadius: s.endsHere ? 4 : 0,
-                    borderLeft: s.startsHere ? `2px solid ${cancelled ? c.faint : c.greenMid}` : "none",
+                    borderLeft: s.startsHere ? `2px solid ${cancelled ? BOOKING.cancelledDot : BOOKING.dot}` : "none",
                     marginLeft: s.startsHere ? 4 : 0, marginRight: s.endsHere ? 4 : 0,
                     padding: "3px 6px",
-                    background: cancelled ? "#f0eee9" : "#e7f0ed",
-                    color: cancelled ? "#6b665c" : "#21564b",
+                    background: cancelled ? BOOKING.cancelledBg : BOOKING.bg,
+                    color: cancelled ? BOOKING.cancelledFg : BOOKING.fg,
                     fontSize: 10.5, fontWeight: 600, cursor: "pointer",
                     overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis",
                     opacity: cancelled ? 0.75 : 1,

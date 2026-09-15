@@ -106,7 +106,7 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
             <span style={labelStyle}>Venue</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setScope("full_venue")} style={toggleBtn(scope === "full_venue")}>The Whole Venue</button>
-              <button onClick={() => setScope("partial_venue")} style={toggleBtn(scope === "partial_venue")}>Individual buildings</button>
+              <button onClick={() => setScope("partial_venue")} style={toggleBtn(scope === "partial_venue")}>Individual Buildings</button>
             </div>
             {scope === "partial_venue" && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>

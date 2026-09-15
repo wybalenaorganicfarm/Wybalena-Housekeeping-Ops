@@ -131,13 +131,40 @@ export function Shifts() {
   if (loading) return <Spinner />;
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="shf-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      {/* Responsive rules scoped to this page only via the `.shf-page` prefix —
+          nothing leaks to other pages or the shared layout. The wide fixed-column
+          table scrolls horizontally on narrow screens (header + rows share the
+          same min-width track, so they stay aligned) instead of crushing, and the
+          toolbar wraps so search / filter / view-toggle never overflow. */}
+      <style>{`
+        @media (max-width: 1024px) {
+          .shf-page .shf-toolbar { padding-left: 16px; padding-right: 16px; }
+          .shf-page .shf-scroll  { padding-left: 16px; padding-right: 16px; }
+        }
+        @media (max-width: 900px) {
+          .shf-page .shf-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .shf-page .shf-table  { min-width: 900px; }
+        }
+        @media (max-width: 720px) {
+          .shf-page .shf-toolbar { flex-wrap: wrap; row-gap: 8px; }
+          .shf-page .shf-toolbar .shf-controls { flex: 1 1 auto; }
+          .shf-page .shf-toolbar .shf-controls > div:first-child { width: auto; flex: 1 1 auto; }
+        }
+        @media (max-width: 640px) {
+          .shf-page .shf-toolbar { padding-left: 12px; padding-right: 12px; }
+          .shf-page .shf-scroll  { padding-left: 12px; padding-right: 12px; padding-top: 12px; }
+        }
+        @media (max-width: 480px) {
+          .shf-page .shf-btnlabel { display: none; }
+        }
+      `}</style>
       <PageHeader title="Shifts" right={canEdit ? (
-        <Button onClick={() => setShowNew(true)}><Icon name="plus" size={14} strokeWidth={2.2} /> New shift</Button>
+        <Button onClick={() => setShowNew(true)}><Icon name="plus" size={14} strokeWidth={2.2} /> <span className="shf-btnlabel">New shift</span></Button>
       ) : undefined} />
 
-      <div style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div className="shf-toolbar" style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 24px" }}>
+        <div className="shf-controls" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {view === "list" && (
             <div style={{ position: "relative", width: 280, maxWidth: "50vw" }}>
               <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: c.muted2, display: "flex", pointerEvents: "none" }}>
@@ -182,11 +209,11 @@ export function Shifts() {
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
+      <div className="shf-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
         {view === "calendar" ? (
           <ShiftCalendar shifts={visible} bookings={bookings} initialDate={visible[visible.length - 1]?.shift_date} onSelect={(s) => setDrawer(s)} />
         ) : (
-          <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+          <div className="shf-table" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
               <div style={{ flex: "none", width: COL.check }} />
               <div style={{ flex: "none", width: COL.date }}>Date</div>
@@ -235,7 +262,7 @@ export function Shifts() {
                         {/* Only flag the exception — full venue is the norm, and
                             "Edited" lives in the shift details. */}
                         {s.venue_scope === "partial_venue" && (
-                          <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>Partial venue</div>
+                          <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>Partial Venue</div>
                         )}
                       </div>
                       {/* The booking this clean follows — read-only here; the row

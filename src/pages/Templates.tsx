@@ -110,8 +110,8 @@ function EditField({ label, children }: { label: string; children: React.ReactNo
 // sits in the staff/roster groups.
 interface Recipient { label: string; icon: string; bg: string; fg: string; hint: string }
 const R_CLEANER: Recipient = { label: "Cleaner", icon: "user", bg: "#eaf3ed", fg: "#2c6446", hint: "Sent to a cleaner" };
-const R_LEAD: Recipient = { label: "Team lead", icon: "users", bg: "#ECEEFB", fg: "#3B44A0", hint: "Sent to the team leader" };
-const R_OPS: Recipient = { label: "Ops manager", icon: "shield", bg: "#FBF1DF", fg: "#9a7320", hint: "Sent to the Operations Manager" };
+const R_LEAD: Recipient = { label: "Cleaning Manager", icon: "users", bg: "#ECEEFB", fg: "#3B44A0", hint: "Sent to the Cleaning Manager" };
+const R_OPS: Recipient = { label: "Retreat Director", icon: "shield", bg: "#FBF1DF", fg: "#9a7320", hint: "Sent to the Retreat Director" };
 const R_ADMIN: Recipient = { label: "Admins", icon: "shield", bg: "#F8E5E1", fg: "#a8392b", hint: "Sent to all admins" };
 const RECIPIENT_DEFAULT = R_CLEANER;
 const RECIPIENT: Record<string, Recipient> = {

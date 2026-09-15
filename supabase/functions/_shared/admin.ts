@@ -44,7 +44,7 @@ export async function opsManager(sb: SupabaseClient): Promise<OpsManager> {
     .maybeSingle();
   if (mgr?.email) {
     return {
-      name: mgr.full_name ?? "Operations Manager",
+      name: mgr.full_name ?? "Retreat Director",
       email: mgr.email,
       phone: cleanPhone(mgr.phone) ?? envPhone,
     };
@@ -55,10 +55,10 @@ export async function opsManager(sb: SupabaseClient): Promise<OpsManager> {
   if (inbox) {
     const { data } = await sb.from("profiles").select("full_name, phone").eq("email", inbox).maybeSingle();
     return {
-      name: data?.full_name ?? "Operations Manager",
+      name: data?.full_name ?? "Retreat Director",
       email: inbox,
       phone: cleanPhone(data?.phone) ?? envPhone,
     };
   }
-  return { name: "Operations Manager", email: null, phone: envPhone };
+  return { name: "Retreat Director", email: null, phone: envPhone };
 }

@@ -6,6 +6,7 @@ import { Icon } from "../components/Icon";
 import { Button, Card, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
+import { BookingDrawer } from "../components/BookingDrawer";
 import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
@@ -50,9 +51,14 @@ function todayKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Same table shape as the Shifts page. Columns: date · time · type · booking ·
-// notes · staffing · action.
-const COL = { date: 150, time: 96, type: 140, notes: 190, staffing: 172, action: 110 };
+// One authoritative agenda-table track shared by the header row AND every data
+// row — the same Grid pattern the Cleaners table uses, so header and body can
+// never drift out of alignment (a per-cell width can't distort a fixed track).
+// Widths are px so the columns stay legible; the table gets a min-width floor and
+// horizontal scroll on narrow screens (see the `.dash-agenda` rules) rather than
+// crushing. Booking flexes to fill the remainder.
+const AGENDA_GRID = "150px 96px 140px minmax(140px,1fr) 190px 172px 110px";
+const agendaRow = { display: "grid", gridTemplateColumns: AGENDA_GRID, alignItems: "center" } as const;
 
 const ALERT_ICON: Record<string, string> = {
   understaffed_urgent: "alert",
@@ -86,6 +92,7 @@ export function Dashboard() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState<Shift | null>(null);
+  const [bookingDrawer, setBookingDrawer] = useState<Booking | null>(null);
   const [assign, setAssign] = useState<Shift | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [view, setView] = useState<View>("agenda");
@@ -165,7 +172,32 @@ export function Dashboard() {
   if (loading) return <Spinner />;
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="dash-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      {/* Responsive rules scoped to this page only via `.dash-page` — nothing
+          leaks to other pages or the shared layout. Reuses the app's established
+          1024/900/640/480 breakpoints (same as the Cleaners/Shifts pages). */}
+      <style>{`
+        /* Stat cards: 4 across on desktop → 2×2 tablet → stacked on phone. */
+        @media (max-width: 1024px) { .dash-page .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 520px)  { .dash-page .dash-kpis { grid-template-columns: 1fr; } }
+        /* Right rail drops below the main content (full width) once the row is
+           too narrow to give it a readable 296px without squeezing the agenda. */
+        @media (max-width: 900px) {
+          .dash-page .dash-body { flex-direction: column; overflow-y: auto; }
+          .dash-page .dash-main { overflow-y: visible; }
+          .dash-page .dash-rail { width: auto; border-left: none; border-top: 1px solid ${c.border2}; overflow-y: visible; }
+        }
+        /* Agenda table: wide fixed track scrolls horizontally instead of crushing;
+           header + rows share the same min-width track so they scroll aligned. */
+        @media (max-width: 860px) {
+          .dash-page .dash-agenda { overflow-x: auto; }
+          .dash-page .dash-agenda > * { min-width: 858px; }
+        }
+        /* Calendar: shrink day cells on phones so a 7-col month isn't cramped. */
+        @media (max-width: 640px) {
+          .dash-page .dash-main { padding-left: 14px; padding-right: 14px; }
+        }
+      `}</style>
       <PageHeader
         title={`Good morning, ${profile?.full_name?.split(" ")[0] ?? "there"}`}
         subtitle={`${longDateLabel(new Date())} · ${attention} shift${attention === 1 ? "" : "s"} need your attention this week`}
@@ -176,19 +208,19 @@ export function Dashboard() {
           </>
         ) : undefined}
       />
-      <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
+      <div className="dash-body" style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {/* center */}
-        <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "22px 26px 40px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 22 }}>
+        <div className="dash-main" style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "22px 26px 40px" }}>
+          <div className="dash-kpis" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 22 }}>
             <Kpi icon="clock" color={c.warn} label="Pending" value={kpis.pending} sub="awaiting confirm" />
             <Kpi icon="alert" color={c.danger} label="Urgent" value={kpis.urgent} sub="understaffed" />
             <Kpi icon="target" color={c.teal} label="Staffing" value={kpis.staffing} sub="in tier offers" />
             <Kpi icon="check" color={c.greenMid} label="Staffed" value={kpis.staffed} sub="fully booked" />
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, margin: "0 0 16px" }}>
             <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: font.displayWeight, margin: 0 }}>{scope === "past" ? "Past agenda" : scope === "all" ? "All shifts" : "Upcoming agenda"}</h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
               {view === "agenda" && (
                 <div style={{ display: "flex", background: "#ece8df", borderRadius: 8, padding: 2 }}>
                   {([["upcoming", "Upcoming"], ["past", "Past"], ["all", "All"]] as [Scope, string][]).map(([k, lbl]) => (
@@ -205,19 +237,19 @@ export function Dashboard() {
           </div>
 
           {view === "calendar" ? (
-            <ShiftCalendar shifts={active} bookings={bookings} initialDate={agenda[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
+            <ShiftCalendar shifts={active} bookings={bookings} showBookings initialDate={agenda[0]?.shift_date} onSelect={(s) => setDrawer(s)} onSelectBooking={(b) => setBookingDrawer(b)} />
           ) : agenda.length === 0 ? (
             <Card style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>{scope === "past" ? "No past shifts." : scope === "all" ? "No shifts." : "No upcoming shifts."}</Card>
           ) : (
-            <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
-              <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
-                <div style={{ flex: "none", width: COL.date }}>Date</div>
-                <div style={{ flex: "none", width: COL.time }}>Time</div>
-                <div style={{ flex: "none", width: COL.type }}>Type</div>
-                <div style={{ flex: 1 }}>Booking</div>
-                <div style={{ flex: "none", width: COL.notes }}>Notes</div>
-                <div style={{ flex: "none", width: COL.staffing }}>Staffing</div>
-                <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>Action</div>
+            <div className="dash-agenda" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ ...agendaRow, padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
+                <div>Date</div>
+                <div>Time</div>
+                <div>Type</div>
+                <div>Booking</div>
+                <div>Notes</div>
+                <div>Staffing</div>
+                <div style={{ textAlign: "right" }}>Action</div>
               </div>
 
               {byWeek.map(([wk, weekShifts]) => (
@@ -233,24 +265,24 @@ export function Dashboard() {
                     const escalating = s.status === "staffing" && s.current_tier === "tier_2";
                     const booking = s.booking_id ? bookings[s.booking_id] : undefined;
                     return (
-                      <div key={s.id} style={{ display: "flex", alignItems: "center", padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, background: urgent ? "#fdf3f1" : "#fff" }}>
-                        <div onClick={() => setDrawer(s)} style={{ flex: "none", width: COL.date, cursor: "pointer" }}>
+                      <div key={s.id} style={{ ...agendaRow, padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, background: urgent ? "#fdf3f1" : "#fff" }}>
+                        <div onClick={() => setDrawer(s)} style={{ minWidth: 0, cursor: "pointer" }}>
                           <div style={{ fontSize: 13, fontWeight: 500 }}>{dayDateMonth(s.shift_date)}</div>
                           <span title={escalating && escLabel ? `Tier 3 ${escLabel}` : undefined} style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 3, background: urgent ? "#fbe9e6" : status.bg, color: urgent ? "#a8392b" : status.fg, fontSize: 10, fontWeight: 600, padding: "1px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>
                             <span style={{ width: 5, height: 5, borderRadius: "50%", background: urgent ? c.danger : status.dot }} />{badgeLabel}
                           </span>
                         </div>
-                        <div onClick={() => setDrawer(s)} style={{ flex: "none", width: COL.time, cursor: "pointer" }}>
+                        <div onClick={() => setDrawer(s)} style={{ minWidth: 0, cursor: "pointer" }}>
                           <div style={{ fontSize: 12.5, color: c.body }}>{tp.hour}:{tp.min}</div>
                           <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
                         </div>
-                        <div onClick={() => setDrawer(s)} style={{ flex: "none", width: COL.type, cursor: "pointer" }}>
+                        <div onClick={() => setDrawer(s)} style={{ minWidth: 0, cursor: "pointer" }}>
                           <div style={{ fontSize: 12.5, color: c.body }}>{typeLabel(s)}</div>
                           {s.venue_scope === "partial_venue" && (
-                            <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>Partial venue</div>
+                            <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>Partial Venue</div>
                           )}
                         </div>
-                        <div onClick={() => setDrawer(s)} style={{ flex: 1, minWidth: 0, cursor: "pointer", paddingRight: 12 }}>
+                        <div onClick={() => setDrawer(s)} style={{ minWidth: 0, cursor: "pointer", paddingRight: 12 }}>
                           {booking ? (
                             <>
                               <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{booking.guest_name || "Unnamed booking"}</div>
@@ -260,7 +292,7 @@ export function Dashboard() {
                             <div style={{ fontSize: 13, color: c.muted2 }}>{shiftBookingName(s, bookings)}</div>
                           )}
                         </div>
-                        <div onClick={() => setDrawer(s)} title={s.special_instructions ?? undefined} style={{ flex: "none", width: COL.notes, minWidth: 0, cursor: "pointer", paddingRight: 12 }}>
+                        <div onClick={() => setDrawer(s)} title={s.special_instructions ?? undefined} style={{ minWidth: 0, cursor: "pointer", paddingRight: 12 }}>
                           {s.special_instructions ? (
                             <div style={{ fontSize: 12, color: c.body, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.4 }}>
                               {s.special_instructions}
@@ -269,13 +301,13 @@ export function Dashboard() {
                             <span style={{ fontSize: 12, color: "#c4bdb0" }}>—</span>
                           )}
                         </div>
-                        <div style={{ flex: "none", width: COL.staffing, display: "flex", alignItems: "center", gap: 10, paddingRight: 12 }}>
+                        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10, paddingRight: 12 }}>
                           <div style={{ flex: 1, display: "flex", gap: 2 }}>
                             {dots.map((d, i) => <span key={i} style={{ height: 4, flex: 1, borderRadius: 2, background: d }} />)}
                           </div>
                           <span style={{ fontSize: 11.5, color: urgent ? "#a8392b" : c.muted2, fontWeight: urgent ? 600 : 400, whiteSpace: "nowrap" }}>{countLabel(staffing[s.id], s.required_cleaners).replace(" confirmed", "")}</span>
                         </div>
-                        <div style={{ flex: "none", width: COL.action, textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                        <div style={{ minWidth: 0, textAlign: "right", display: "flex", justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
                           {canEdit && s.status === "pending_confirmation"
                             ? <Button kind="secondary" disabled={confirming[s.id]} onClick={() => confirm(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming[s.id] ? "Confirming…" : "Confirm"}</Button>
                             : canEdit && (s.status === "staffing" || urgent)
@@ -294,7 +326,7 @@ export function Dashboard() {
         {/* right rail — pending shifts + alerts queue. Hidden for the team lead:
             neither is theirs to action, so their dashboard is just the agenda. */}
         {!isTeamLead && (
-        <div style={{ flex: "none", width: 296, background: c.rail, borderLeft: `1px solid ${c.border2}`, overflowY: "auto", padding: "22px 18px 40px" }}>
+        <div className="dash-rail" style={{ flex: "none", width: 296, background: c.rail, borderLeft: `1px solid ${c.border2}`, overflowY: "auto", padding: "22px 18px 40px" }}>
           {canEdit && pendingShifts.length > 0 && (
             <div style={{ marginBottom: 22 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -379,6 +411,16 @@ export function Dashboard() {
       </div>
 
       {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} />}
+      {bookingDrawer && (
+        <BookingDrawer
+          booking={bookingDrawer}
+          shifts={shifts
+            .filter((s) => s.booking_id === bookingDrawer.id)
+            .sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time))}
+          onClose={() => setBookingDrawer(null)}
+          onViewShift={(s) => { setBookingDrawer(null); setDrawer(s); }}
+        />
+      )}
       {assign && <AssignModal shift={assign} onClose={() => setAssign(null)} onAssigned={load} />}
       {showNew && <NewShiftModal onClose={() => setShowNew(false)} onCreated={load} onManualAssign={(s) => { setShowNew(false); setAssign(s); }} />}
     </div>

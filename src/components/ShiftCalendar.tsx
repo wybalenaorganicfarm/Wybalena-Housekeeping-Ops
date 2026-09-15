@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { c, font } from "../theme";
+import { c, font, BOOKING } from "../theme";
 import { Icon } from "./Icon";
 import { shiftBookingName, statusOf, typeColumn } from "../lib/format";
 import type { Booking, Shift } from "../lib/types";
@@ -12,8 +12,19 @@ function ymd(d: Date): string {
 
 const navBtn = { width: 30, height: 30, border: `1px solid ${c.border3}`, background: "#fff", borderRadius: 7, color: c.body, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } as const;
 
-export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: {
-  shifts: Shift[]; bookings?: Record<string, Booking>; initialDate?: string; onSelect: (s: Shift) => void;
+// Local YYYY-MM-DD of a booking's check-in, so it lands in the same day bucket
+// the calendar cells are keyed by (the stored check_in is a full timestamp).
+function checkInDay(b: Booking): string {
+  return ymd(new Date(b.check_in));
+}
+
+export function ShiftCalendar({ shifts, bookings = {}, showBookings = false, initialDate, onSelect, onSelectBooking }: {
+  shifts: Shift[]; bookings?: Record<string, Booking>;
+  // When true, bookings render as green pills on their check-in day alongside
+  // shifts. Off by default so the Shifts-tab calendar is unchanged; the Dashboard
+  // turns it on. `onSelectBooking` opens the booking (falls back to no-op).
+  showBookings?: boolean;
+  initialDate?: string; onSelect: (s: Shift) => void; onSelectBooking?: (b: Booking) => void;
 }) {
   const today = new Date();
   const init = initialDate ? new Date(initialDate + "T00:00:00") : today;
@@ -25,6 +36,16 @@ export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: 
     for (const k in m) m[k].sort((a, b) => a.start_time.localeCompare(b.start_time));
     return m;
   }, [shifts]);
+
+  // Bookings bucketed by check-in day (only when the host opts in).
+  const bookingsByDay = useMemo(() => {
+    const m: Record<string, Booking[]> = {};
+    if (showBookings) {
+      for (const b of Object.values(bookings)) (m[checkInDay(b)] ??= []).push(b);
+      for (const k in m) m[k].sort((a, b) => a.check_in.localeCompare(b.check_in));
+    }
+    return m;
+  }, [bookings, showBookings]);
 
   // Grid starts on the Monday on/before the 1st; render 6 weeks (42 cells).
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -60,6 +81,7 @@ export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: 
           const ds = ymd(d);
           const inMonth = d.getMonth() === cursor.getMonth();
           const dayShifts = byDay[ds] ?? [];
+          const dayBookings = bookingsByDay[ds] ?? [];
           const isToday = ds === todayStr;
           return (
             <div key={i} style={{ minHeight: 108, minWidth: 0, overflow: "hidden", borderRight: i % 7 !== 6 ? `1px solid ${c.border2}` : "none", borderBottom: i < 35 ? `1px solid ${c.border2}` : "none", padding: 7, background: inMonth ? "#fff" : "#faf9f5" }}>
@@ -74,6 +96,20 @@ export function ShiftCalendar({ shifts, bookings = {}, initialDate, onSelect }: 
                     style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", textAlign: "left", border: "none", borderLeft: `2px solid ${st.dot}`, borderRadius: 4, padding: "3px 6px", marginTop: 4, background: st.bg, color: st.fg, fontSize: 10.5, fontWeight: 600, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                     <span style={{ flex: "none", color: st.fg, opacity: 0.85 }}>{s.start_time.slice(0, 5)}</span>
                     <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+                  </button>
+                );
+              })}
+              {/* Booking pills — same shape/padding/radius/time-prefix as shift
+                  pills; only the accent differs (green BOOKING token). */}
+              {dayBookings.map((b) => {
+                const cancelled = b.is_cancelled;
+                const time = new Date(b.check_in).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
+                const guest = b.guest_name || "Unnamed booking";
+                return (
+                  <button key={b.id} onClick={() => onSelectBooking?.(b)} title={`${time} · ${guest}${cancelled ? " · cancelled" : ""}`}
+                    style={{ display: "flex", alignItems: "center", gap: 5, width: "100%", textAlign: "left", border: "none", borderLeft: `2px solid ${cancelled ? BOOKING.cancelledDot : BOOKING.dot}`, borderRadius: 4, padding: "3px 6px", marginTop: 4, background: cancelled ? BOOKING.cancelledBg : BOOKING.bg, color: cancelled ? BOOKING.cancelledFg : BOOKING.fg, fontSize: 10.5, fontWeight: 600, cursor: "pointer", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", opacity: cancelled ? 0.75 : 1, textDecoration: cancelled ? "line-through" : "none" }}>
+                    <span style={{ flex: "none", opacity: 0.85 }}>{time}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{guest}</span>
                   </button>
                 );
               })}

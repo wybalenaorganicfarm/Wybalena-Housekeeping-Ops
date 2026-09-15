@@ -9,9 +9,9 @@ import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const VALID = ["admin", "operations_manager", "team_leader"];
 const ROLE_WORD: Record<string, string> = {
-  admin: "Admin",
-  operations_manager: "Operations Manager",
-  team_leader: "Team Leader",
+  admin: "Owner",
+  operations_manager: "Retreat Director",
+  team_leader: "Cleaning Manager",
 };
 
 Deno.serve(async (req) => {

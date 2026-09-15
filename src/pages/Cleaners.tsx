@@ -384,7 +384,7 @@ export function Cleaners() {
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {cl.full_name}
-                            {cl.is_team_leader && <span style={{ fontSize: 10, color: "#9a7320", background: "#FBF1DF", padding: "0 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>Team Lead</span>}
+                            {cl.is_team_leader && <span style={{ fontSize: 10, color: "#9a7320", background: "#FBF1DF", padding: "0 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>Cleaning Manager</span>}
                           </div>
                           <div style={{ fontSize: 11.5, color: c.faint }}>Joined {monthYear(cl.created_at)}</div>
                         </div>

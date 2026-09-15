@@ -8,6 +8,10 @@ import { getAlerts } from "../lib/api";
 
 const SECTION_LABEL = { fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase" as const, color: "#5e7d6c", fontWeight: 600, padding: "2px 10px 6px" };
 
+// Desktop sidebar collapse preference — persists across refreshes. Phone width
+// ignores this and always starts closed (see the Layout component).
+const SIDEBAR_KEY = "layout.sidebarCollapsed";
+
 function NavItem({ to, icon, label, badge }: { to: string; icon: string; label: string; badge?: number }) {
   return (
     <NavLink to={to} end={to === "/"} style={({ isActive }) => ({
@@ -47,8 +51,39 @@ export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [openAlerts, setOpenAlerts] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
+  // Sidebar collapse: on desktop the user's choice persists across refreshes
+  // (localStorage); on phone width the sidebar is ALWAYS closed on load, ignoring
+  // the stored desktop preference, so it never opens over the content.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      if (window.matchMedia("(max-width: 640px)").matches) return true;
+      return localStorage.getItem(SIDEBAR_KEY) === "1";
+    } catch { return false; }
+  });
   const [confirmOut, setConfirmOut] = useState(false);
+
+  // Persist the choice — but only as the DESKTOP preference. A phone forcing the
+  // sidebar closed must not overwrite what the user set on desktop, so skip the
+  // write while at phone width.
+  useEffect(() => {
+    try {
+      if (window.matchMedia("(max-width: 640px)").matches) return;
+      localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0");
+    } catch { /* ignore */ }
+  }, [collapsed]);
+
+  // Auto-collapse when the viewport crosses down into phone width (rotate/resize).
+  // Crossing back up to desktop restores the saved desktop preference.
+  useEffect(() => {
+    let mq: MediaQueryList;
+    try { mq = window.matchMedia("(max-width: 640px)"); } catch { return; }
+    const onChange = (e: MediaQueryListEvent) => {
+      if (e.matches) { setCollapsed(true); return; }
+      try { setCollapsed(localStorage.getItem(SIDEBAR_KEY) === "1"); } catch { setCollapsed(false); }
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // Re-count on every navigation. The Layout itself never unmounts, so a count
   // fetched once at login goes stale the moment anything resolves an alert —

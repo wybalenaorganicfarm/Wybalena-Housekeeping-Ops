@@ -416,7 +416,7 @@ export function reminderEmail(opts: { count: number; shiftsUrl: string }): { sub
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef0ee;padding:24px 0;"><tr><td align="center">
     <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
       <tr><td style="background:${GREEN};padding:20px 24px;text-align:center;">
-        <div style="color:#ffffff;font-size:18px;font-weight:700;">Shifts awaiting confirmation</div>
+        <div style="color:#ffffff;font-size:18px;font-weight:700;">Shifts Awaiting Confirmation</div>
       </td></tr>
       <tr><td style="padding:24px;color:${INK};font-size:14px;line-height:1.6;text-align:center;">
         <strong>${opts.count} cleaning shift(s)</strong> are still awaiting confirmation.<br/><br/>

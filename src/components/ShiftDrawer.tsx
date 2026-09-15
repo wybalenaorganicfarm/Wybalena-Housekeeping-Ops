@@ -10,7 +10,7 @@ import type { Booking, Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "..
 import { useAuth } from "../auth/AuthProvider";
 
 const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
-  team_lead: { label: "Team Lead", color: c.lead },
+  team_lead: { label: "Cleaning Manager", color: c.lead },
   accepted: { label: "Accepted", color: "#2c6446" },
   offered: { label: "Offered", color: "#9a7320" },
   declined: { label: "Declined", color: "#a8392b" },
@@ -144,7 +144,7 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
               {segments.map((seg, i) => <span key={i} style={{ height: 7, flex: 1, borderRadius: 3, background: seg }} />)}
             </div>
             <div style={{ display: "flex", gap: 16, fontSize: 11, color: c.muted2, flexWrap: "wrap" }}>
-              {lead > 0 && <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: c.lead }} />Team Lead {lead}</span>}
+              {lead > 0 && <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: c.lead }} />Cleaning Manager {lead}</span>}
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#3D8B5F" }} />Accepted {accepted}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#aacfb8" }} />Offered {offered}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: "#e0dccf" }} />Open {open}</span>

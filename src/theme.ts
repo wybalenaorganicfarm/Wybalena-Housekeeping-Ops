@@ -52,6 +52,20 @@ export const STATUS = {
   cancelled: { label: "Cancelled", dot: "#a39d91", bg: "#f0eee9", fg: "#6b665c" },
 } as const;
 
+// Booking event styling — one source of truth for the green booking pills/bars,
+// referenced by BOTH the Dashboard (ShiftCalendar) and the Bookings-tab
+// (BookingCalendar). Shifts stay status-coloured (see STATUS above, e.g. the
+// purple `staffing` accent); bookings are always this brand green so they read
+// identically wherever they appear. `cancelledBg/Fg/Dot` mute a cancelled stay.
+export const BOOKING = {
+  dot: c.greenMid,     // left-border accent (matches the sidebar/brand green family)
+  bg: "#e7f0ed",
+  fg: "#21564b",
+  cancelledDot: "#a39d91",
+  cancelledBg: "#f0eee9",
+  cancelledFg: "#6b665c",
+} as const;
+
 export const SHIFT_TYPE_LABEL: Record<string, string> = {
   standard: "Standard Clean",
   deep_full_venue: "Deep Clean",
@@ -68,9 +82,9 @@ export const TIER_LABEL: Record<string, string> = {
 
 export const ROLE_LABEL: Record<string, string> = {
   super_admin: "Super Admin",
-  admin: "Admin",
-  operations_manager: "Operations Manager",
-  team_leader: "Team Lead",
+  admin: "Owner",
+  operations_manager: "Retreat Director",
+  team_leader: "Cleaning Manager",
 };
 
 export function initials(name: string): string {

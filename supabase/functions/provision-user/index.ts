@@ -8,7 +8,7 @@ import { getCaller, isWriter } from "../_shared/authz.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const VALID_ROLES = ["super_admin", "admin", "operations_manager", "team_leader"];
-const ROLE_WORD: Record<string, string> = { super_admin: "Super Admin", admin: "Admin", team_leader: "Team Leader" };
+const ROLE_WORD: Record<string, string> = { super_admin: "Super Admin", admin: "Owner", team_leader: "Cleaning Manager" };
 
 Deno.serve(async (req) => {
   const pre = handleOptions(req);

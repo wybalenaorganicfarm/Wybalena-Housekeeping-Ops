@@ -149,7 +149,7 @@ export function shiftBookingName(s: Shift, bookings: Record<string, Booking>): s
 export function venueLabel(s: Shift): string {
   return s.venue_scope === "partial_venue" && s.buildings?.length
     ? `Partial · ${s.buildings.join(", ")}`
-    : s.venue_scope === "partial_venue" ? "Partial venue" : "";
+    : s.venue_scope === "partial_venue" ? "Partial Venue" : "";
 }
 
 // Secondary line under the title — the venue scope.
