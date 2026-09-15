@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
-import { Badge, Button, Card, Spinner } from "../components/ui";
+import { Button, Card, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
 import { ShiftCalendar } from "../components/ShiftCalendar";
@@ -14,8 +14,9 @@ import {
   getShifts, getStaffing,
 } from "../lib/api";
 import {
-  countLabel, dateLabel, longDateLabel, shiftSubtitle, shiftTitle, shortType,
-  staffingDots, statusOf, timeParts,
+  countLabel, dateLabel, dateTimeLabel, longDateLabel, shiftBookingName,
+  shiftTitle, staffingDots, statusOf, timeParts, typeLabel, weekKey,
+  weekRangeLabel,
 } from "../lib/format";
 import { useEscalationLabel } from "../lib/useEscalation";
 import type { Alert, Booking, Shift, ShiftStaffing } from "../lib/types";
@@ -32,27 +33,26 @@ function Kpi({ icon, color, label, value, sub }: { icon: string; color: string; 
   );
 }
 
-// "Sun 23 Aug" — the date on each agenda card, now that days aren't grouped.
-function cardDate(dateStr: string): string {
+// "Mon 6 July" — each row carries its own full day/date/month (matches the
+// Shifts page).
+function dayDateMonth(dateStr: string): string {
   return new Date(dateStr + "T00:00:00")
-    .toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
-}
-
-// "10:00 am" — one line, am/pm kept.
-function cardTime(t: string): string {
-  const tp = timeParts(t);
-  return `${tp.hour}:${tp.min}`;
+    .toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "long" });
 }
 
 type View = "agenda" | "calendar";
+type Scope = "upcoming" | "past" | "all";
 
-const TYPE_BADGE: Record<string, { bg: string; fg: string }> = {
-  standard: { bg: "#eaf3ed", fg: "#2c6446" },
-  deep_full_venue: { bg: "#f0e9f5", fg: "#6b4a86" },
-  mid_retreat: { bg: "#eef3ef", fg: "#21564b" },
-  wipeover: { bg: "#fdf4e3", fg: "#9a6512" },
-  other: { bg: "#eef3ef", fg: "#21564b" },
-};
+// Local YYYY-MM-DD for "today" so the past/upcoming split matches the user's
+// calendar day (shift_date is a plain date, no timezone).
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Same table shape as the Shifts page. Columns: date · time · type · booking ·
+// notes · staffing · action.
+const COL = { date: 150, time: 96, type: 140, notes: 190, staffing: 172, action: 110 };
 
 const ALERT_ICON: Record<string, string> = {
   understaffed_urgent: "alert",
@@ -89,6 +89,7 @@ export function Dashboard() {
   const [assign, setAssign] = useState<Shift | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [view, setView] = useState<View>("agenda");
+  const [scope, setScope] = useState<Scope>("upcoming");
   const [confirming, setConfirming] = useState<Record<string, boolean>>({});
 
   async function load() {
@@ -97,9 +98,6 @@ export function Dashboard() {
     setBookings(Object.fromEntries(b.map((x) => [x.id, x])));
     setLoading(false);
   }
-  // Booking (guest) name for a shift; falls back to the clean-type label for
-  // manual shifts with no linked booking.
-  const shiftName = (s: Shift) => (s.booking_id && bookings[s.booking_id]?.guest_name) || shiftTitle(s);
   useEffect(() => { load(); }, []);
 
   // Deep-link from the confirmation email's "Edit Shift" button: /?edit=<shiftId>
@@ -123,14 +121,34 @@ export function Dashboard() {
 
   const pendingShifts = useMemo(() => active.filter((s) => s.status === "pending_confirmation"), [active]);
 
-  // Flat, chronological list — no per-day grouping headers; each card shows its
-  // own date.
-  const upcoming = useMemo(
-    () => [...active].sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time)),
-    [active],
+  const openAlerts = alerts.filter((a) => a.status === "open");
+  const urgentIds = useMemo(
+    () => new Set(alerts.filter((a) => a.status === "open" && a.alert_type === "understaffed_urgent" && a.shift_id).map((a) => a.shift_id!)),
+    [alerts],
   );
 
-  const openAlerts = alerts.filter((a) => a.status === "open");
+  // Agenda scope. "upcoming" (default) = today onward, earliest first — the
+  // original behaviour. "past" = before today, most-recent first. "all" =
+  // everything, earliest first. Grouped by week so the green header states the
+  // range, matching the Shifts page layout.
+  const today = todayKey();
+  const agenda = useMemo(() => {
+    const rows = scope === "upcoming" ? active.filter((s) => s.shift_date >= today)
+      : scope === "past" ? active.filter((s) => s.shift_date < today)
+      : active;
+    const asc = scope !== "past";
+    return [...rows].sort((a, b) => {
+      const cmp = (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time);
+      return asc ? cmp : -cmp;
+    });
+  }, [active, scope, today]);
+  const byWeek = useMemo(() => {
+    const groups: Record<string, Shift[]> = {};
+    for (const s of agenda) (groups[weekKey(s.shift_date)] ??= []).push(s);
+    const entries = Object.entries(groups);
+    return entries.sort((a, b) => scope === "past" ? b[0].localeCompare(a[0]) : a[0].localeCompare(b[0]));
+  }, [agenda, scope]);
+
   const attention = kpis.pending + kpis.urgent + kpis.staffing;
 
   async function confirm(id: string) {
@@ -169,8 +187,15 @@ export function Dashboard() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 16px" }}>
-            <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: font.displayWeight, margin: 0 }}>Upcoming agenda</h2>
+            <h2 style={{ fontFamily: font.display, fontSize: 20, fontWeight: font.displayWeight, margin: 0 }}>{scope === "past" ? "Past agenda" : scope === "all" ? "All shifts" : "Upcoming agenda"}</h2>
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              {view === "agenda" && (
+                <div style={{ display: "flex", background: "#ece8df", borderRadius: 8, padding: 2 }}>
+                  {([["upcoming", "Upcoming"], ["past", "Past"], ["all", "All"]] as [Scope, string][]).map(([k, lbl]) => (
+                    <button key={k} onClick={() => setScope(k)} style={{ border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: "5px 12px", borderRadius: 6, background: scope === k ? "#fff" : "transparent", color: scope === k ? c.ink : c.muted, boxShadow: scope === k ? "0 1px 2px rgba(0,0,0,.06)" : "none" }}>{lbl}</button>
+                  ))}
+                </div>
+              )}
               <div style={{ display: "flex", background: "#ece8df", borderRadius: 8, padding: 2 }}>
                 {([["agenda", "Agenda"], ["calendar", "Calendar"]] as [View, string][]).map(([k, lbl]) => (
                   <button key={k} onClick={() => setView(k)} style={{ border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: "5px 12px", borderRadius: 6, background: view === k ? "#fff" : "transparent", color: view === k ? c.ink : c.muted, boxShadow: view === k ? "0 1px 2px rgba(0,0,0,.06)" : "none" }}>{lbl}</button>
@@ -180,50 +205,88 @@ export function Dashboard() {
           </div>
 
           {view === "calendar" ? (
-            <ShiftCalendar shifts={active} bookings={bookings} initialDate={upcoming[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
-          ) : upcoming.length === 0 ? (
-            <Card style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>No upcoming shifts.</Card>
+            <ShiftCalendar shifts={active} bookings={bookings} initialDate={agenda[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
+          ) : agenda.length === 0 ? (
+            <Card style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>{scope === "past" ? "No past shifts." : scope === "all" ? "No shifts." : "No upcoming shifts."}</Card>
           ) : (
-            <div style={{ marginTop: 16 }}>
-              {upcoming.map((s) => {
-                const status = statusOf(s);
-                const dots = staffingDots(staffing[s.id], s.required_cleaners);
-                const tierLabel = s.status === "staffing" && s.current_tier ? `${status.label} · ${TIER_LABEL[s.current_tier]}` : status.label;
-                const escalating = s.status === "staffing" && s.current_tier === "tier_2";
-                return (
-                  <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: "15px 16px", marginBottom: 10, borderLeft: `3px solid ${status.dot}`, display: "flex", alignItems: "center", gap: 16, cursor: "pointer" }}>
-                    <div style={{ flex: "none", width: 104, borderRight: `1px solid ${c.border2}`, paddingRight: 14 }}>
-                      <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight, lineHeight: 1.2 }}>{cardDate(s.shift_date)}</div>
-                      <div style={{ fontSize: 12.5, color: c.muted, marginTop: 3 }}>{cardTime(s.start_time)}</div>
-                      <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
-                        <Badge label={shortType(s)} bg={(TYPE_BADGE[s.shift_type] ?? TYPE_BADGE.other).bg} fg={(TYPE_BADGE[s.shift_type] ?? TYPE_BADGE.other).fg} />
-                        <Badge label={tierLabel} dot={status.dot} bg={status.bg} fg={status.fg} />
-                        {escalating && <Badge label={escLabel ? `Tier 3 ${escLabel}` : "Escalating · Tier 3"} bg="#eaf4ee" fg="#256b43" />}
+            <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
+                <div style={{ flex: "none", width: COL.date }}>Date</div>
+                <div style={{ flex: "none", width: COL.time }}>Time</div>
+                <div style={{ flex: "none", width: COL.type }}>Type</div>
+                <div style={{ flex: 1 }}>Booking</div>
+                <div style={{ flex: "none", width: COL.notes }}>Notes</div>
+                <div style={{ flex: "none", width: COL.staffing }}>Staffing</div>
+                <div style={{ flex: "none", width: COL.action, textAlign: "right" }}>Action</div>
+              </div>
+
+              {byWeek.map(([wk, weekShifts]) => (
+                <div key={wk}>
+                  <div style={{ padding: "8px 18px", background: c.railGreenBg, borderBottom: `1px solid ${c.railGreenBd}`, fontSize: 10.5, fontWeight: 700, color: "#5e7a6a", textTransform: "uppercase", letterSpacing: "0.08em" }}>{weekRangeLabel(wk)}</div>
+                  {weekShifts.map((s) => {
+                    const status = statusOf(s);
+                    const tp = timeParts(s.start_time);
+                    const dots = staffingDots(staffing[s.id], s.required_cleaners);
+                    const urgent = urgentIds.has(s.id);
+                    const tierTag = s.current_tier ? ` · ${TIER_LABEL[s.current_tier]}` : "";
+                    const badgeLabel = (urgent ? "Urgent" : status.label) + tierTag;
+                    const escalating = s.status === "staffing" && s.current_tier === "tier_2";
+                    const booking = s.booking_id ? bookings[s.booking_id] : undefined;
+                    return (
+                      <div key={s.id} style={{ display: "flex", alignItems: "center", padding: "13px 18px", borderBottom: `1px solid ${c.rowBd}`, background: urgent ? "#fdf3f1" : "#fff" }}>
+                        <div onClick={() => setDrawer(s)} style={{ flex: "none", width: COL.date, cursor: "pointer" }}>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{dayDateMonth(s.shift_date)}</div>
+                          <span title={escalating && escLabel ? `Tier 3 ${escLabel}` : undefined} style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 3, background: urgent ? "#fbe9e6" : status.bg, color: urgent ? "#a8392b" : status.fg, fontSize: 10, fontWeight: 600, padding: "1px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>
+                            <span style={{ width: 5, height: 5, borderRadius: "50%", background: urgent ? c.danger : status.dot }} />{badgeLabel}
+                          </span>
+                        </div>
+                        <div onClick={() => setDrawer(s)} style={{ flex: "none", width: COL.time, cursor: "pointer" }}>
+                          <div style={{ fontSize: 12.5, color: c.body }}>{tp.hour}:{tp.min}</div>
+                          <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>{s.estimated_hours}h</div>
+                        </div>
+                        <div onClick={() => setDrawer(s)} style={{ flex: "none", width: COL.type, cursor: "pointer" }}>
+                          <div style={{ fontSize: 12.5, color: c.body }}>{typeLabel(s)}</div>
+                          {s.venue_scope === "partial_venue" && (
+                            <div style={{ fontSize: 11, color: c.faint, marginTop: 2 }}>Partial venue</div>
+                          )}
+                        </div>
+                        <div onClick={() => setDrawer(s)} style={{ flex: 1, minWidth: 0, cursor: "pointer", paddingRight: 12 }}>
+                          {booking ? (
+                            <>
+                              <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{booking.guest_name || "Unnamed booking"}</div>
+                              <div style={{ fontSize: 11.5, color: c.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Check-out {dateTimeLabel(booking.check_out)}</div>
+                            </>
+                          ) : (
+                            <div style={{ fontSize: 13, color: c.muted2 }}>{shiftBookingName(s, bookings)}</div>
+                          )}
+                        </div>
+                        <div onClick={() => setDrawer(s)} title={s.special_instructions ?? undefined} style={{ flex: "none", width: COL.notes, minWidth: 0, cursor: "pointer", paddingRight: 12 }}>
+                          {s.special_instructions ? (
+                            <div style={{ fontSize: 12, color: c.body, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.4 }}>
+                              {s.special_instructions}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 12, color: "#c4bdb0" }}>—</span>
+                          )}
+                        </div>
+                        <div style={{ flex: "none", width: COL.staffing, display: "flex", alignItems: "center", gap: 10, paddingRight: 12 }}>
+                          <div style={{ flex: 1, display: "flex", gap: 2 }}>
+                            {dots.map((d, i) => <span key={i} style={{ height: 4, flex: 1, borderRadius: 2, background: d }} />)}
+                          </div>
+                          <span style={{ fontSize: 11.5, color: urgent ? "#a8392b" : c.muted2, fontWeight: urgent ? 600 : 400, whiteSpace: "nowrap" }}>{countLabel(staffing[s.id], s.required_cleaners).replace(" confirmed", "")}</span>
+                        </div>
+                        <div style={{ flex: "none", width: COL.action, textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                          {canEdit && s.status === "pending_confirmation"
+                            ? <Button kind="secondary" disabled={confirming[s.id]} onClick={() => confirm(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming[s.id] ? "Confirming…" : "Confirm"}</Button>
+                            : canEdit && (s.status === "staffing" || urgent)
+                              ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Assign</Button>
+                              : <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "7px 13px", fontSize: 12 }}>View</Button>}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{shiftName(s)}</div>
-                      {shiftSubtitle(s, staffing[s.id]) && (
-                        <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2 }}>{shiftSubtitle(s, staffing[s.id])}</div>
-                      )}
-                    </div>
-                    <div style={{ flex: "none", textAlign: "center" }}>
-                      <div style={{ display: "flex", gap: 3, marginBottom: 5, justifyContent: "center", flexWrap: "wrap", maxWidth: 120 }}>
-                        {dots.map((d, i) => <span key={i} style={{ width: 12, height: 12, borderRadius: 3, background: d }} />)}
-                      </div>
-                      <div style={{ fontSize: 11, color: c.muted }}>{countLabel(staffing[s.id], s.required_cleaners)}</div>
-                    </div>
-                    <div style={{ flex: "none" }} onClick={(e) => e.stopPropagation()}>
-                      {canEdit && s.status === "pending_confirmation"
-                        ? <Button onClick={() => confirm(s.id)} loading={confirming[s.id]} style={{ borderRadius: 9 }}>Confirm</Button>
-                        : canEdit && s.status === "staffing"
-                          ? <Button kind="danger" onClick={() => setAssign(s)} style={{ borderRadius: 9 }}>Assign</Button>
-                          : <Button kind="secondary" onClick={() => setDrawer(s)} style={{ borderRadius: 9 }}>View</Button>}
-                    </div>
-                  </Card>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           )}
         </div>

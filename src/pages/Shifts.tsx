@@ -50,10 +50,11 @@ export function Shifts() {
   }
   useEffect(() => { load(); }, []);
 
-  // Always earliest-first, cancelled hidden — no filtering.
+  // Latest date at the top, historical shifts flowing chronologically backwards
+  // down the list. Cancelled hidden — no filtering.
   const visible = useMemo(
     () => shifts.filter((s) => s.status !== "cancelled")
-      .sort((a, b) => (a.shift_date + a.start_time).localeCompare(b.shift_date + b.start_time)),
+      .sort((a, b) => (b.shift_date + b.start_time).localeCompare(a.shift_date + a.start_time)),
     [shifts],
   );
 
@@ -70,7 +71,7 @@ export function Shifts() {
   const byWeek = useMemo(() => {
     const groups: Record<string, Shift[]> = {};
     for (const s of filtered) (groups[weekKey(s.shift_date)] ??= []).push(s);
-    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+    return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
   }, [filtered]);
 
   function toggleSel(id: string) {
@@ -137,7 +138,7 @@ export function Shifts() {
 
       <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
         {view === "calendar" ? (
-          <ShiftCalendar shifts={visible} bookings={bookings} initialDate={visible[0]?.shift_date} onSelect={(s) => setDrawer(s)} />
+          <ShiftCalendar shifts={visible} bookings={bookings} initialDate={visible[visible.length - 1]?.shift_date} onSelect={(s) => setDrawer(s)} />
         ) : (
           <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
