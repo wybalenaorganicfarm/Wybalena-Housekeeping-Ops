@@ -39,7 +39,7 @@ async function loadShift(sb: SupabaseClient, shiftId: string): Promise<ShiftRow 
   return data as ShiftRow | null;
 }
 
-async function acceptedCount(sb: SupabaseClient, shiftId: string): Promise<number> {
+export async function acceptedCount(sb: SupabaseClient, shiftId: string): Promise<number> {
   const { count } = await sb
     .from("shift_assignments")
     .select("id", { count: "exact", head: true })

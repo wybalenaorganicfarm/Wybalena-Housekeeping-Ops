@@ -1,12 +1,16 @@
-// escalate-tier-3 — cron (admin-scheduled). Any shift still in Tier-2 staffing ->
-// offer Tier 3 + raise understaffed_urgent alert + urgent email to Ashleigh. No
-// internal delay: the admin controls the spacing after Tier 2 via this job's
-// schedule (Spec §2, §7.1).
+// escalate-tier-3 — cron (admin-scheduled, daily, runs AFTER remind-tier-3).
+// Two passes:
+//   1. Delayed understaffed alert — a shift that reached the last tier is alerted
+//      only once its last-tier offer is >=1 venue-day old, so Tier 3 cleaners get
+//      the initial WhatsApp AND the next-morning remind-tier-3 reminder (20:00 UTC,
+//      earlier the same day) before a human is pulled in. The alert is no longer
+//      raised at the moment of escalation.
+//   2. Escalation — any shift still in Tier-2 staffing is offered Tier 3. The admin
+//      controls the spacing after Tier 2 via this job's schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
-import { sendEmail } from "../_shared/adapters/email.ts";
-import { opsManager } from "../_shared/admin.ts";
+import { acceptedCount, daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
+import { raiseTier3Alert } from "../_shared/tier3Alert.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "escalate-tier-3";
@@ -38,7 +42,32 @@ Deno.serve(async (req) => {
   // them.
   const chain = await tierChain(sb);
   if (chain.length < 2) return json({ ok: true, escalatedOffers: 0 });
+  const lastTier = chain[chain.length - 1] as "tier_1" | "tier_2" | "tier_3";
 
+  // ── Pass 1: delayed understaffed alert ────────────────────────────────────
+  // A shift qualifies once ALL hold: still staffing, sitting at the last tier,
+  // still has open spots, and its last-tier offer is >=1 venue-day old. The
+  // day-old gate is the 24h window — measured from shift_assignments.offered_at
+  // via daysSinceCurrentTierOffer, DST-safe on this fixed daily slot (an hours
+  // gate would slip a day — see staffing-catchup). raiseTier3Alert dedupes one
+  // open alert per shift and emails only alongside a newly-raised one, so a
+  // shift already alerted, or staffed in the meantime, is never re-alerted.
+  const { data: lastTierShifts } = await sb
+    .from("shifts")
+    .select("id, shift_date, shift_type, required_cleaners")
+    .eq("status", "staffing")
+    .eq("current_tier", lastTier);
+  for (const s of lastTierShifts ?? []) {
+    try {
+      if (await daysSinceCurrentTierOffer(sb, s.id, lastTier) < 1) continue;
+      if ((s.required_cleaners - await acceptedCount(sb, s.id)) <= 0) continue;
+      await raiseTier3Alert(sb, s);
+    } catch (e) {
+      console.error(`[escalate-tier-3] delayed alert check failed for ${s.id}: ${String(e)}`);
+    }
+  }
+
+  // ── Pass 2: escalation ─────────────────────────────────────────────────────
   const { data: shifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type, start_time, current_tier")
@@ -58,8 +87,8 @@ Deno.serve(async (req) => {
       if (await daysSinceCurrentTierOffer(sb, s.id, (s.current_tier ?? chain[1]) as "tier_1" | "tier_2" | "tier_3") < 1) continue;
       // The next tier with someone free for this shift, stepping over any that
       // is empty or already fully on the shift. Null = the chain is spent; the
-      // shift was alerted on when it reached the last tier, so leave it alone
-      // rather than re-emailing Ashleigh about it every week.
+      // shift is handled by Pass 1's delayed understaffed alert once its last-tier
+      // offer is a day old, so leave it alone here rather than re-processing it.
       const next = await nextOfferableTier(sb, s.id, s.current_tier ?? null);
       if (!next) continue;
       const res = await offerTier(sb, s.id, next);
@@ -67,43 +96,10 @@ Deno.serve(async (req) => {
       // free (count 0) or a failed send must not inflate the escalation summary.
       if (res.count > 0) escalated += res.count;
 
-      // Only the LAST tier in the chain is the "nothing left after this" moment
-      // that warrants the urgent alert — with a fourth tier on the roster, being
-      // moved to tier_3 is no longer the end of the road.
-      const lastTier = next === chain[chain.length - 1];
+      // The urgent understaffed alert is NO LONGER raised here at the moment of
+      // escalation — Pass 1 raises it 24h later (once the offer is >=1 day old),
+      // after Tier 3 cleaners have had the reminder. This pass only sends offers.
       const word = TIER_WORD[next] ?? next;
-
-      let notifiedUrgently = false;
-      if (lastTier) {
-        // Raise urgent alert (dedupe one open per shift) + urgent email.
-        const { data: dup, error: dupErr } = await sb
-          .from("alerts")
-          .select("id")
-          .eq("alert_type", "understaffed_urgent")
-          .eq("shift_id", s.id)
-          .eq("status", "open")
-          .maybeSingle();
-        if (dupErr) console.error(`[escalate-tier-3] alert dedupe read failed for ${s.id}: ${dupErr.message}`);
-        if (!dupErr && !dup) {
-          const { error: insErr } = await sb.from("alerts").insert({
-            alert_type: "understaffed_urgent",
-            shift_id: s.id,
-            title: `${word} reached — understaffed`,
-            body: `${s.shift_type} on ${s.shift_date} reached ${word}, the last tier, and still has open spots. Intervene manually.`,
-          });
-          if (insErr) console.error(`[escalate-tier-3] urgent alert insert failed for ${s.id}: ${insErr.message}`);
-        }
-        // Capture the send result — only claim "notified urgently" if the email
-        // actually went out, so the log/alert don't assert a notification that failed.
-        const sent = await sendEmail(
-          `Wybalena URGENT: shift understaffed at ${word}`,
-          `The ${s.shift_type} shift on ${s.shift_date} has reached ${word}, the last tier, ` +
-            `and is still not fully staffed. Please assign cleaners manually.`,
-          (await opsManager(sb)).email ?? undefined,
-        );
-        notifiedUrgently = sent?.ok !== false;
-        if (!notifiedUrgently) console.error(`[escalate-tier-3] urgent email FAILED for shift ${s.id}`);
-      }
 
       // Report what actually reached cleaners — a failed WhatsApp send must not be
       // logged as "offers sent".
@@ -112,14 +108,11 @@ Deno.serve(async (req) => {
         : res.count > 0
           ? `${word} offers sent to ${res.offered.map((c) => c.full_name).join(", ")}.`
           : `No ${word} cleaner was available to offer.`;
-      const urgentNote = lastTier
-        ? (notifiedUrgently ? " Ashleigh notified urgently." : " Ashleigh's urgent email FAILED to send — follow up manually.")
-        : "";
       await writeAuditLog(sb, {
         event_type: "escalation.tier3_triggered",
         event_label: "Tier 3 Escalation",
-        status: (res.failed > 0 || (lastTier && !notifiedUrgently)) ? "failed" : "warning",
-        summary: `Escalation to ${word} triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled. ${deliveryNote}${urgentNote}`,
+        status: res.failed > 0 ? "failed" : "warning",
+        summary: `Escalation to ${word} triggered for shift on ${s.shift_date}. ${res.openSpots} spot(s) still unfilled. ${deliveryNote}`,
         detail: { shift_id: s.id, open_spots: res.openSpots, count: res.count, cleaners: res.offered, failed: res.failed, failed_cleaners: res.failedNames },
         source: SOURCE,
         shift_id: s.id,
