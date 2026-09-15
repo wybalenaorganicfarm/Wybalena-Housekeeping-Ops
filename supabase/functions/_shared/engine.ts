@@ -213,7 +213,14 @@ export async function offerToCleaner(
     offer_code: row?.offer_code ?? code,
   });
   if (!ok) {
-    if (row?.id) await sb.from("shift_assignments").delete().eq("id", row.id);
+    // Don't delete — the send may have reached the cleaner even though Whapi
+    // returned not-ok. Keep the row as 'send_failed' so the cleaner still shows on
+    // the shift (flagged, retryable) instead of vanishing. (Karin Gisler, 9 Oct.)
+    if (row?.id) {
+      await sb.from("shift_assignments")
+        .update({ status: "send_failed", responded_at: new Date().toISOString() })
+        .eq("id", row.id);
+    }
     return "send_failed";
   }
 
@@ -262,8 +269,6 @@ async function deliverOffers(
   shift: ShiftRow,
   candidates: { id: string; full_name: string; phone: string | null }[],
   inserted: { id: string; cleaner_id: string; offer_code?: string | null }[],
-  // Assignment ids that already existed and were re-opened rather than created.
-  reopenedIds?: Set<string>,
 ): Promise<{ offered: { id: string; full_name: string }[]; failedIds: string[]; failedNames: string[] }> {
   const byId = new Map(inserted.map((r) => [r.cleaner_id, r]));
   const offered: { id: string; full_name: string }[] = [];
@@ -282,18 +287,17 @@ async function deliverOffers(
       failedNames.push(c.full_name);
     }
   }
-  // Undeliverable offers must not linger as "offered" — they'd block the cleaner
-  // from being re-offered next run and hold the shift in a false "staffing" state.
-  // Rows this run CREATED are deleted; rows it merely re-opened are put back to
-  // no_response, because deleting them would destroy the cleaner's real history
-  // on the shift (their earlier decline, their earlier offer).
+  // Undeliverable offers must not linger as "offered" (a false "delivered" that
+  // would count toward staffing) — but they must NOT be deleted either. Whapi can
+  // DELIVER a message and still return not-ok, so a deleted row means a cleaner who
+  // actually received the offer disappears from the platform entirely (the 9 Oct /
+  // Karin Gisler report). Mark them 'send_failed' instead: kept visible on the
+  // shift, flagged as not confirmed-delivered, not counted as accepted, and
+  // retryable next run. This applies whether the row was newly created or re-opened.
   if (failedIds.length) {
-    const created = failedIds.filter((id) => !reopenedIds?.has(id));
-    const reopened = failedIds.filter((id) => reopenedIds?.has(id));
-    if (created.length) await sb.from("shift_assignments").delete().in("id", created);
-    if (reopened.length) {
-      await sb.from("shift_assignments").update({ status: "no_response" }).in("id", reopened);
-    }
+    await sb.from("shift_assignments")
+      .update({ status: "send_failed", responded_at: new Date().toISOString() })
+      .in("id", failedIds);
   }
   return { offered, failedIds, failedNames };
 }
@@ -347,11 +351,13 @@ export async function offerTier(
   }
 
   // Candidates: active, in tier, not already offered/assigned to this shift.
+  // A previous 'send_failed' row does NOT count as "taken" — that offer never
+  // reached them (or its delivery is unknown), so they must be retryable here.
   const { data: existing } = await sb
     .from("shift_assignments")
-    .select("cleaner_id")
+    .select("cleaner_id, status")
     .eq("shift_id", shiftId);
-  const taken = new Set((existing ?? []).map((r) => r.cleaner_id));
+  const taken = new Set((existing ?? []).filter((r) => r.status !== "send_failed").map((r) => r.cleaner_id));
 
   const { data: pool } = await sb
     .from("cleaners")
@@ -374,10 +380,15 @@ export async function offerTier(
     tier_at_offer: tier,
     status: "offered",
     offer_code: shiftCode,
+    offered_at: new Date().toISOString(),
+    reminder_sent_at: null,
+    responded_at: null,
   }));
+  // upsert, not insert: a retried 'send_failed' cleaner already has a row for this
+  // shift, so re-offering must update it rather than collide on (shift_id,cleaner_id).
   const { data: inserted } = await sb
     .from("shift_assignments")
-    .insert(rows)
+    .upsert(rows, { onConflict: "shift_id,cleaner_id" })
     // offer_code comes back so the plain-text fallback can quote it if the
     // buttons don't send — it's the only way a typed reply resolves to this offer.
     .select("id, cleaner_id, offer_code");
@@ -545,7 +556,6 @@ export async function reofferToUnaccepted(
   }
 
   const now = new Date().toISOString();
-  const reopenedIds = new Set<string>();
   const assignments: { id: string; cleaner_id: string; offer_code?: string | null }[] = [];
   const fresh: typeof candidates = [];
   // One code for the shift, reused by re-offers and fresh offers alike. A
@@ -572,7 +582,6 @@ export async function reofferToUnaccepted(
         responded_at: null,
       })
       .eq("id", row.id);
-    reopenedIds.add(row.id);
     assignments.push({ id: row.id, cleaner_id: c.id, offer_code });
   }
 
@@ -590,7 +599,7 @@ export async function reofferToUnaccepted(
     assignments.push(...(inserted ?? []));
   }
 
-  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, assignments, reopenedIds);
+  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, assignments);
 
   if (offered.length > 0) {
     await sb.from("shifts").update({ status: "staffing" }).eq("id", shiftId);

@@ -16,6 +16,10 @@ const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
   declined: { label: "Declined", color: "#a8392b" },
   cancelled: { label: "Cancelled", color: "#a39d91" },
   no_response: { label: "No response", color: "#a39d91" },
+  // The offer row was created but the WhatsApp send returned not-ok — the cleaner
+  // MAY still have received it. Shown (not hidden like no_response) so they don't
+  // vanish from the shift, and flagged in red so it's chased/retried.
+  send_failed: { label: "Send failed", color: "#a8392b" },
 };
 
 export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onViewBooking }: {
