@@ -15,7 +15,7 @@ import { prettyDate, prettyDateTime, prettyTime } from "../_shared/datetime.ts";
 // and before this it was not. The modal offered time, duration, type, cleaners and
 // instructions but NOT the date, so a shift on the wrong day could only be deleted
 // and rebuilt by hand — losing its link to the booking.
-const EDITABLE = ["shift_date", "start_time", "estimated_hours", "shift_type", "required_cleaners", "special_instructions"] as const;
+const EDITABLE = ["shift_date", "start_time", "estimated_hours", "shift_type", "required_cleaners", "special_instructions", "booking_id"] as const;
 
 // Cancelling is a status change, not a field edit, so it travels the same path but
 // is handled separately below. `status` was previously absent from EDITABLE, which
@@ -47,6 +47,23 @@ Deno.serve(async (req) => {
   const clean: Record<string, unknown> = { is_modified: true };
   for (const k of EDITABLE) {
     if (k in patch) clean[k] = patch[k];
+  }
+
+  // Linking a shift to a booking after creation. null is UNLINK (allowed — it
+  // passes through the loop above untouched and writes null). A non-null value
+  // must reference a real booking, or we'd write a dangling FK, so validate it.
+  // `"booking_id" in patch` is what tells UNLINK (explicit null) apart from
+  // "not touching the link" (key absent) — never validate/reject the null case.
+  const changingLink = "booking_id" in patch;
+  let linkTo: { id: string; guest_name: string | null } | null = null;
+  if (changingLink && patch.booking_id !== null) {
+    if (typeof patch.booking_id !== "string") {
+      return json({ error: "booking_id must be a booking id or null" }, 400);
+    }
+    const { data: bk } = await sb
+      .from("bookings").select("id, guest_name").eq("id", patch.booking_id).maybeSingle();
+    if (!bk) return json({ error: "that booking no longer exists" }, 404);
+    linkTo = bk;
   }
 
   // Cancelling the shift. Only this one status transition is accepted from the
@@ -159,6 +176,11 @@ Deno.serve(async (req) => {
     ? ` Moved from ${prettyDateTime(before.shift_date ?? "", (before.start_time ?? "").slice(0, 5))} to ${prettyDateTime(sh?.shift_date ?? "", (sh?.start_time ?? "").slice(0, 5))}.`
     : "";
   const notifyNote = affected ? ` ${notified} cleaner(s) notified.` : "";
+  // Describe a link change plainly in the audit trail. (A switch A->B reads as
+  // "Linked to booking: B" — it doesn't name the dropped A, which is acceptable.)
+  const linkNote = changingLink
+    ? (linkTo ? ` Linked to booking: ${linkTo.guest_name ?? "Unnamed booking"}.` : " Unlinked from its booking.")
+    : "";
 
   await writeAuditLog(sb, {
     event_type: cancelling ? "shift.cancelled" : "shift.edited",
@@ -166,7 +188,7 @@ Deno.serve(async (req) => {
     status: cancelling ? "warning" : "success",
     summary: cancelling
       ? `${who} cancelled the shift on ${prettyDate(before.shift_date ?? "")}. Open offers closed.${notifyNote}`
-      : `${who} edited the shift on ${prettyDate(sh?.shift_date ?? "—")}.${moveNote}${notifyNote}`,
+      : `${who} edited the shift on ${prettyDate(sh?.shift_date ?? "—")}.${moveNote}${linkNote}${notifyNote}`,
     detail: {
       shift_id: shiftId,
       fields: Object.keys(clean).filter((k) => k !== "is_modified"),

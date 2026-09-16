@@ -410,7 +410,7 @@ export function Dashboard() {
         )}
       </div>
 
-      {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} />}
+      {drawer && <ShiftDrawer shift={drawer} booking={drawer.booking_id ? bookings[drawer.booking_id] : undefined} bookings={bookings} bookingHasCheckoutClean={(bid) => shifts.some((x) => x.booking_id === bid && x.shift_type === "standard" && x.status !== "cancelled")} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} onViewBooking={(b) => { setDrawer(null); setBookingDrawer(b); }} />}
       {bookingDrawer && (
         <BookingDrawer
           booking={bookingDrawer}

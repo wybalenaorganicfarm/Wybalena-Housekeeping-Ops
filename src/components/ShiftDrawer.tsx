@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { c, font, TIER_LABEL } from "../theme";
 import { Avatar, ConfirmDialog, Spin } from "./ui";
 import { Icon } from "./Icon";
@@ -9,7 +9,7 @@ import { toastError } from "../lib/toast";
 import type { Booking, Cleaner, Shift, ShiftAssignment, ShiftStaffing } from "../lib/types";
 import { useAuth } from "../auth/AuthProvider";
 
-const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
+export const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
   team_lead: { label: "Cleaning Manager", color: c.lead },
   accepted: { label: "Accepted", color: "#2c6446" },
   offered: { label: "Offered", color: "#9a7320" },
@@ -22,8 +22,14 @@ const ASSIGN_STATUS: Record<string, { label: string; color: string }> = {
   send_failed: { label: "Send failed", color: "#a8392b" },
 };
 
-export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onViewBooking }: {
-  shift: Shift; booking?: Booking; onClose: () => void; onChanged: () => void; onAssign: (s: Shift) => void; onViewBooking?: (b: Booking) => void;
+export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean, onClose, onChanged, onAssign, onViewBooking }: {
+  shift: Shift; booking?: Booking;
+  // The bookings map (already fetched by the parent) powers the "Link to booking"
+  // picker; a predicate the parent derives from its shift list drives the Order-B
+  // warning. Both optional — call sites without them simply hide the link control.
+  bookings?: Record<string, Booking>;
+  bookingHasCheckoutClean?: (bookingId: string) => boolean;
+  onClose: () => void; onChanged: () => void; onAssign: (s: Shift) => void; onViewBooking?: (b: Booking) => void;
 }) {
   const { canEdit } = useAuth();
   // Local, refreshable copy of the shift — the prop is a snapshot from the list
@@ -36,6 +42,9 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
   const [teamLead, setTeamLead] = useState<{ id: string; full_name: string } | null>(null);
   const [instrAuthor, setInstrAuthor] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
+  const [linking, setLinking] = useState(false);      // booking picker open
+  const [linkQuery, setLinkQuery] = useState("");      // picker search text
+  const [savingLink, setSavingLink] = useState(false);
 
   async function load() {
     const [fresh, a, cs, staffing, lead] = await Promise.all([
@@ -80,6 +89,25 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
     ? [{ key: "team-lead", name: teamLead.full_name, statusKey: "team_lead", tierLabel: null, isLead: true }, ...cleanerRows]
     : cleanerRows;
 
+  // The link control only appears where the parent supplied the bookings map and
+  // the user can edit. Options are filtered by the search box (guest name or the
+  // check-in/out dates), current booking first so it's easy to see what's set.
+  const linkControl = canEdit && !!bookings;
+  const bookingOptions = bookings
+    ? Object.values(bookings)
+        .filter((b) => {
+          const q = linkQuery.trim().toLowerCase();
+          if (!q) return true;
+          return ((b.guest_name ?? "") + " " + dateTimeLabel(b.check_in) + " " + dateTimeLabel(b.check_out)).toLowerCase().includes(q);
+        })
+        .sort((a, b) => (a.id === s.booking_id ? -1 : b.id === s.booking_id ? 1 : a.check_in.localeCompare(b.check_in)))
+    : [];
+  const linkBtn = (subtle: boolean): CSSProperties => ({
+    flex: "none", background: subtle ? "#fff" : c.green, color: subtle ? c.body : "#fff",
+    border: subtle ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: "8px 14px",
+    fontSize: 12.5, fontWeight: 600, cursor: savingLink ? "default" : "pointer",
+  });
+
   const [confirming, setConfirming] = useState(false);
   const [askCancel, setAskCancel] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
@@ -109,6 +137,20 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
     setAskDelete(false);
     if (err) { toastError(err); return; }
     onChanged(); onClose();
+  }
+
+  // Link / switch / unlink this shift's booking. null = unlink. A switch A->B is a
+  // single overwrite of booking_id (no explicit unlink of A needed). load() refreshes
+  // the drawer's own copy (header, Booking section); onChanged() refreshes the parent
+  // so the shift row's booking column and any booking-grouped list update too.
+  async function setLink(bookingId: string | null) {
+    setSavingLink(true);
+    const err = await updateShift(shift.id, { booking_id: bookingId });
+    setSavingLink(false);
+    if (err) { toastError(err); return; }
+    setLinking(false); setLinkQuery("");
+    await load();
+    onChanged();
   }
 
   return (
@@ -153,7 +195,7 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
 
           {/* linked booking */}
           {booking && (
-            <div style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: linkControl ? 10 : 18 }}>
               <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Booking</div>
               <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: "14px 16px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: onViewBooking ? 10 : 0 }}>
@@ -171,6 +213,67 @@ export function ShiftDrawer({ shift, booking, onClose, onChanged, onAssign, onVi
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Link control — set / switch / clear this shift's booking. Only shown
+              where the parent supplies the bookings map (Shifts, Dashboard); other
+              call sites (Alerts, Bookings) render nothing here. */}
+          {linkControl && (
+            <div style={{ marginBottom: 18 }}>
+              {!booking && (
+                <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Booking</div>
+              )}
+              {!linking ? (
+                <div style={{ display: "flex", gap: 8 }}>
+                  {!booking ? (
+                    <button onClick={() => setLinking(true)} style={linkBtn(false)}>Link to booking</button>
+                  ) : (
+                    <>
+                      <button onClick={() => setLinking(true)} style={linkBtn(false)}>Switch booking</button>
+                      <button onClick={() => setLink(null)} disabled={savingLink} style={linkBtn(true)}>{savingLink ? "…" : "Unlink"}</button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, padding: 12 }}>
+                  <input
+                    autoFocus value={linkQuery} onChange={(e) => setLinkQuery(e.target.value)}
+                    placeholder="Search bookings by guest or date…"
+                    style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${c.border3}`, borderRadius: 7, padding: "8px 10px", fontSize: 13, marginBottom: 8 }}
+                  />
+                  <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+                    {bookingOptions.length === 0 && (
+                      <div style={{ fontSize: 12.5, color: c.faint, textAlign: "center", padding: "10px 0" }}>No matching bookings.</div>
+                    )}
+                    {bookingOptions.map((b) => {
+                      const isCurrent = b.id === s.booking_id;
+                      const warn = bookingHasCheckoutClean && !bookingHasCheckoutClean(b.id);
+                      return (
+                        <div key={b.id} style={{ borderRadius: 7, border: `1px solid ${isCurrent ? c.greenMid : c.rowBd}`, padding: "8px 10px", background: isCurrent ? "#f2f7f4" : "#fff" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.guest_name || "Unnamed booking"}</div>
+                              <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 1 }}>{dateTimeLabel(b.check_in)} → {dateTimeLabel(b.check_out)}</div>
+                            </div>
+                            {isCurrent
+                              ? <span style={{ flex: "none", fontSize: 11, color: c.muted2, fontWeight: 600 }}>Current</span>
+                              : <button onClick={() => setLink(b.id)} disabled={savingLink} style={linkBtn(false)}>{savingLink ? "…" : "Link"}</button>}
+                          </div>
+                          {!isCurrent && warn && (
+                            <div style={{ background: "#fdf3f1", border: "1px solid #f0cfc8", borderRadius: 6, padding: "8px 10px", fontSize: 11.5, color: "#a8392b", marginTop: 8, lineHeight: 1.5 }}>
+                              This booking has no checkout clean yet. Linking here stops the booking
+                              sync from auto-creating one — add a standard clean too, or link after the
+                              checkout clean appears. You can still proceed.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => { setLinking(false); setLinkQuery(""); }} style={{ ...linkBtn(true), width: "100%", marginTop: 8 }}>Cancel</button>
+                </div>
+              )}
             </div>
           )}
 

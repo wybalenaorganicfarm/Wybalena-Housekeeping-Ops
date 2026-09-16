@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Avatar } from "./ui";
 import { Icon } from "./Icon";
+import { ASSIGN_STATUS } from "./ShiftDrawer";
 import { getAssignmentsForShift, getCleaners, getStaffing, manualAssign } from "../lib/api";
 import { toastError } from "../lib/toast";
 import { c, font, TIER_LABEL } from "../theme";
@@ -15,6 +16,9 @@ export function AssignModal({ shift, onClose, onAssigned }: {
   // Cleaners already sent an offer (status "offered") for this shift — keep them
   // visible but with a disabled "Offered" button so they can't be re-offered.
   const [offeredIds, setOfferedIds] = useState<Set<string>>(new Set());
+  // Cleaners who declined this shift's offer — kept visible with a LIVE "Re-offer"
+  // button (the offerToCleaner upsert resets their declined row to offered).
+  const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
   const [openSlots, setOpenSlots] = useState(shift.required_cleaners);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -22,12 +26,16 @@ export function AssignModal({ shift, onClose, onAssigned }: {
     const [cs, a, staffing] = await Promise.all([
       getCleaners(), getAssignmentsForShift(shift.id), getStaffing(),
     ]);
-    // Team lead is auto-assigned and never offered — keep her out of the list.
-    setCleaners(cs.filter((x) => x.is_active && !x.is_team_leader));
+    // The Cleaning Manager (is_team_leader) is above-tier and normally auto-rostered,
+    // never offered — keep her out. EXCEPTION: a wipeover has no auto-roster slot, so
+    // there she is a working cleaner who can be manually offered — include her only then.
+    const isWipeover = shift.shift_type === "wipeover";
+    setCleaners(cs.filter((x) => x.is_active && (!x.is_team_leader || isWipeover)));
     setAssignedIds(new Set(
       a.filter((x) => x.status === "accepted" || x.status === "team_lead").map((x) => x.cleaner_id),
     ));
     setOfferedIds(new Set(a.filter((x) => x.status === "offered").map((x) => x.cleaner_id)));
+    setDeclinedIds(new Set(a.filter((x) => x.status === "declined").map((x) => x.cleaner_id)));
     const st = staffing[shift.id];
     setOpenSlots(Math.max(shift.required_cleaners - (st?.accepted_count ?? 0), 0));
   }
@@ -45,6 +53,44 @@ export function AssignModal({ shift, onClose, onAssigned }: {
   }
 
   const avBg = (cl: Cleaner) => cl.is_team_leader ? c.green : cl.tier === "tier_1" ? c.greenMid : cl.tier === "tier_2" ? c.warn : c.teal;
+
+  // One cleaner row — shared by the tier groups and the wipeover Cleaning Manager
+  // section so both render identically. isLast controls the divider (a single-row
+  // section passes true → no trailing border).
+  const renderRow = (cl: Cleaner, isLast: boolean) => {
+    const offered = offeredIds.has(cl.id);
+    const declined = declinedIds.has(cl.id);
+    const busy = busyId === cl.id;
+    const subLabel = cl.is_team_leader ? "Cleaning Manager" : TIER_LABEL[cl.tier];
+    return (
+      <div key={cl.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: isLast ? "none" : `1px solid ${c.rowBd}` }}>
+        <Avatar name={cl.full_name} size={36} bg={avBg(cl)} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 500 }}>{cl.full_name}</div>
+          <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 1 }}>{subLabel} · {cl.phone}</div>
+        </div>
+        {declined && (
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: ASSIGN_STATUS.declined.color, border: `1px solid ${ASSIGN_STATUS.declined.color}`, borderRadius: 5, padding: "1px 7px" }}>
+            {ASSIGN_STATUS.declined.label}
+          </span>
+        )}
+        <button
+          onClick={() => assign(cl.id)}
+          disabled={busy || offered}
+          style={{
+            background: offered ? "#eef2ee" : c.green,
+            color: offered ? c.muted2 : "#fff",
+            border: offered ? `1px solid ${c.border}` : "none",
+            borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
+            cursor: busy || offered ? "default" : "pointer",
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          {busy ? "…" : offered ? "Offered ✓" : declined ? "Re-offer" : "Offer"}
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(20,24,22,.45)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -76,42 +122,28 @@ export function AssignModal({ shift, onClose, onAssigned }: {
 
         {/* cleaner list */}
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 22px 20px" }}>
+          {/* Cleaning Manager — wipeover only. She's above-tier (no Tier bucket), so
+              she gets her own section at the top, matching the drawer's label. */}
+          {shift.shift_type === "wipeover" && (() => {
+            const mgr = cleaners.find((cl) => cl.is_team_leader && !assignedIds.has(cl.id));
+            if (!mgr) return null;
+            return (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Cleaning Manager</div>
+                <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+                  {renderRow(mgr, true)}
+                </div>
+              </div>
+            );
+          })()}
           {(["tier_1", "tier_2", "tier_3"] as const).map((t) => {
-            const inTier = cleaners.filter((cl) => cl.tier === t && !assignedIds.has(cl.id));
+            const inTier = cleaners.filter((cl) => cl.tier === t && !cl.is_team_leader && !assignedIds.has(cl.id));
             if (!inTier.length) return null;
             return (
               <div key={t} style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Available · {TIER_LABEL[t]}</div>
                 <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
-                  {inTier.map((cl, i) => (
-                    <div key={cl.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: i < inTier.length - 1 ? `1px solid ${c.rowBd}` : "none" }}>
-                      <Avatar name={cl.full_name} size={36} bg={avBg(cl)} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 500 }}>{cl.full_name}</div>
-                        <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 1 }}>{TIER_LABEL[cl.tier]} · {cl.phone}</div>
-                      </div>
-                      {(() => {
-                        const offered = offeredIds.has(cl.id);
-                        const busy = busyId === cl.id;
-                        return (
-                          <button
-                            onClick={() => assign(cl.id)}
-                            disabled={busy || offered}
-                            style={{
-                              background: offered ? "#eef2ee" : c.green,
-                              color: offered ? c.muted2 : "#fff",
-                              border: offered ? `1px solid ${c.border}` : "none",
-                              borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                              cursor: busy || offered ? "default" : "pointer",
-                              opacity: busy ? 0.6 : 1,
-                            }}
-                          >
-                            {busy ? "…" : offered ? "Offered ✓" : "Offer"}
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  ))}
+                  {inTier.map((cl, i) => renderRow(cl, i === inTier.length - 1))}
                 </div>
               </div>
             );
