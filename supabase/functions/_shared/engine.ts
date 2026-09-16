@@ -801,3 +801,54 @@ export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Pro
   await reofferToUnaccepted(sb, a.shift_id);
   return "reoffered";
 }
+
+// Withdraw an UNACCEPTED offer (admin action). The deliberate opposite of
+// cancelOffer: an `offered` row was never counted toward staffing, so pulling it
+// changes no count and must NOT trigger any reopen or re-offer cascade
+// (nextOfferableTier / reofferToUnaccepted) — doing so would blast fresh offers at
+// everyone off a mere admin tidy-up. It only closes the one row to `cancelled`.
+//
+// Refuses anything that isn't a live, unanswered offer:
+//   • accepted   -> "accepted" — route to cancel-accepted, which reopens the shift.
+//                   Writing `cancelled` here would skip that reopen and strand a
+//                   fully_staffed shift with an empty slot (the core trap).
+//   • team_lead  -> "team_lead" — her roster reservation is not an offer (except on
+//                   wipeover, where she's a working cleaner and CAN be withdrawn).
+//   • declined / cancelled / send_failed / no_response(*) / missing -> "closed" —
+//                   nothing live to withdraw. (*)no_response is still acceptable, so
+//                   it IS withdrawable — included with `offered` below.
+export type WithdrawOutcome = "withdrawn" | "accepted" | "team_lead" | "closed";
+
+export async function withdrawOffer(
+  sb: SupabaseClient,
+  assignmentId: string,
+): Promise<WithdrawOutcome> {
+  const { data: a } = await sb
+    .from("shift_assignments")
+    .select("id, shift_id, status")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  if (!a) return "closed";
+
+  // An accepted cleaner must go through cancel-accepted (cancelOffer), which
+  // reopens a filled shift. Refuse here rather than silently overwrite.
+  if (a.status === "accepted") return "accepted";
+
+  if (a.status === "team_lead") {
+    // Only withdrawable when she's a working cleaner — i.e. on a wipeover.
+    const shift = await loadShift(sb, a.shift_id);
+    if (shift?.shift_type !== "wipeover") return "team_lead";
+  } else if (a.status !== "offered" && a.status !== "no_response") {
+    // declined / cancelled / send_failed / anything unexpected — nothing live.
+    return "closed";
+  }
+
+  const { error } = await sb.from("shift_assignments")
+    .update({ status: "cancelled", responded_at: new Date().toISOString() })
+    .eq("id", assignmentId);
+  if (error) {
+    console.error(`[engine] withdrawOffer write failed for ${assignmentId}: ${error.message}`);
+    return "closed";
+  }
+  return "withdrawn";
+}

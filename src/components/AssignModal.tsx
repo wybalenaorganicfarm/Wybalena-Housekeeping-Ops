@@ -1,69 +1,143 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Avatar, ConfirmDialog } from "./ui";
 import { Icon } from "./Icon";
 import { ASSIGN_STATUS } from "./ShiftDrawer";
-import { getAssignmentsForShift, getCleaners, getStaffing, manualAssign } from "../lib/api";
+import {
+  addAccepted, cancelAccepted, getAssignmentsForShift, getCleaners, getStaffing,
+  manualAssign, withdrawOffer,
+} from "../lib/api";
 import { toastError } from "../lib/toast";
 import { c, font, TIER_LABEL } from "../theme";
 import { dateLabel, typeLabel } from "../lib/format";
-import type { Cleaner, Shift } from "../lib/types";
+import type { Cleaner, Shift, ShiftAssignment } from "../lib/types";
+
+// The per-cleaner action the admin is about to take — drives the one shared
+// ConfirmDialog. `kind` picks the message + which endpoint fires on confirm.
+// withdraw/cancel need the assignment id; offer/reoffer/add work off the cleaner.
+type PendingAction =
+  | { kind: "offer" | "reoffer" | "add"; cleaner: Cleaner }
+  | { kind: "withdraw" | "cancel"; cleaner: Cleaner; assignmentId: string };
 
 export function AssignModal({ shift, onClose, onAssigned }: {
   shift: Shift; onClose: () => void; onAssigned: () => void;
 }) {
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
-  const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
-  // Cleaners already sent an offer (status "offered") for this shift — keep them
-  // visible but with a disabled "Offered" button so they can't be re-offered.
-  const [offeredIds, setOfferedIds] = useState<Set<string>>(new Set());
-  // Cleaners who declined this shift's offer — kept visible with a LIVE "Re-offer"
-  // button (the offerToCleaner upsert resets their declined row to offered).
-  const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
-  // Two-step guard before an offer goes out — sending a WhatsApp to a person.
-  const [pendingOffer, setPendingOffer] = useState<Cleaner | null>(null);
+  // Every assignment row for this shift, keyed by cleaner_id — the single source
+  // of per-cleaner state (status + assignment id) each row's actions read from.
+  // Replaces the old offered/declined/assigned id Sets, which couldn't carry the
+  // assignment id or the full status the withdraw/cancel/re-offer actions need.
+  const [byCleaner, setByCleaner] = useState<Map<string, ShiftAssignment>>(new Map());
+  // Two-step guard before any state change that messages a person or removes them.
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [openSlots, setOpenSlots] = useState(shift.required_cleaners);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The Cleaning Manager (is_team_leader) is above-tier and normally auto-rostered,
+  // never offered — keep her out. EXCEPTION: a wipeover has no auto-roster slot, so
+  // there she is a working cleaner who can be managed like anyone else.
+  const isWipeover = shift.shift_type === "wipeover";
 
   async function load() {
     const [cs, a, staffing] = await Promise.all([
       getCleaners(), getAssignmentsForShift(shift.id), getStaffing(),
     ]);
-    // The Cleaning Manager (is_team_leader) is above-tier and normally auto-rostered,
-    // never offered — keep her out. EXCEPTION: a wipeover has no auto-roster slot, so
-    // there she is a working cleaner who can be manually offered — include her only then.
-    const isWipeover = shift.shift_type === "wipeover";
     setCleaners(cs.filter((x) => x.is_active && (!x.is_team_leader || isWipeover)));
-    setAssignedIds(new Set(
-      a.filter((x) => x.status === "accepted" || x.status === "team_lead").map((x) => x.cleaner_id),
-    ));
-    setOfferedIds(new Set(a.filter((x) => x.status === "offered").map((x) => x.cleaner_id)));
-    setDeclinedIds(new Set(a.filter((x) => x.status === "declined").map((x) => x.cleaner_id)));
+    setByCleaner(new Map(a.map((x) => [x.cleaner_id, x])));
     const st = staffing[shift.id];
     setOpenSlots(Math.max(shift.required_cleaners - (st?.accepted_count ?? 0), 0));
   }
   useEffect(() => { load(); /* eslint-disable-line */ }, [shift.id]);
 
-  async function assign(cleanerId: string) {
+  // --- Action runners: each mirrors the old assign() shape (busy → call →
+  // toast-or-reload). All reload from the server so the row's pill + actions and
+  // the slot bar reflect the new state immediately. ------------------------------
+  async function runOffer(cleanerId: string) {  // offer + re-offer (manual-assign upsert)
     setBusyId(cleanerId);
     const { error } = await manualAssign(shift.id, cleanerId);
     setBusyId(null);
     if (error) { toastError(error); return; }
-    // Reflect the sent offer immediately so the button locks even before reload.
-    setOfferedIds((prev) => new Set(prev).add(cleanerId));
-    await load();
-    onAssigned();
+    await load(); onAssigned();
+  }
+  async function runAdd(cleanerId: string) {
+    setBusyId(cleanerId);
+    const { data, error } = await addAccepted(shift.id, cleanerId);
+    setBusyId(null);
+    if (error || data?.error) { toastError(error ?? data!.error!); return; }
+    await load(); onAssigned();
+  }
+  async function runWithdraw(assignmentId: string, cleanerId: string) {
+    setBusyId(cleanerId);
+    const { data, error } = await withdrawOffer(assignmentId);
+    setBusyId(null);
+    if (error || data?.error) { toastError(error ?? data!.error!); return; }
+    await load(); onAssigned();
+  }
+  async function runCancel(assignmentId: string, cleanerId: string) {
+    setBusyId(cleanerId);
+    const { data, error } = await cancelAccepted(assignmentId);
+    setBusyId(null);
+    if (error || data?.error) { toastError(error ?? data!.error!); return; }
+    await load(); onAssigned();
+  }
+  function runPending(p: PendingAction) {
+    if (p.kind === "withdraw") runWithdraw(p.assignmentId, p.cleaner.id);
+    else if (p.kind === "cancel") runCancel(p.assignmentId, p.cleaner.id);
+    else if (p.kind === "add") runAdd(p.cleaner.id);
+    else runOffer(p.cleaner.id); // offer | reoffer
   }
 
   const avBg = (cl: Cleaner) => cl.is_team_leader ? c.green : cl.tier === "tier_1" ? c.greenMid : cl.tier === "tier_2" ? c.warn : c.teal;
 
+  // Shared row-button styles.
+  const btn = (bg: string, fg: string, bd: string | null): CSSProperties => ({
+    background: bg, color: fg, border: bd ? `1px solid ${bd}` : "none",
+    borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+  });
+  const solid = btn(c.green, "#fff", null);
+  const subtle = btn("#fff", c.body, c.border3);
+  const danger = btn("#fff", "#a8392b", "#e6c3bc");
+
+  // The buttons for a row, chosen by the cleaner's current assignment status.
+  function rowActions(cl: Cleaner, a: ShiftAssignment | undefined, busy: boolean): ReactNode {
+    if (busy) return <button disabled style={{ ...subtle, cursor: "default", opacity: 0.6 }}>…</button>;
+    switch (a?.status) {
+      case "accepted":
+        return <button style={danger} onClick={() => setPending({ kind: "cancel", cleaner: cl, assignmentId: a.id })}>Take off shift</button>;
+      case "offered":
+      case "send_failed":
+        return <>
+          <button style={subtle} onClick={() => setPending({ kind: "offer", cleaner: cl })}>Resend</button>
+          <button style={danger} onClick={() => setPending({ kind: "withdraw", cleaner: cl, assignmentId: a.id })}>Withdraw</button>
+        </>;
+      case "no_response":
+        return <>
+          <button style={subtle} onClick={() => setPending({ kind: "offer", cleaner: cl })}>Re-offer</button>
+          <button style={danger} onClick={() => setPending({ kind: "withdraw", cleaner: cl, assignmentId: a.id })}>Withdraw</button>
+        </>;
+      case "declined":
+      case "cancelled":
+        return <>
+          <button style={solid} onClick={() => setPending({ kind: "reoffer", cleaner: cl })}>Re-offer</button>
+          <button style={subtle} onClick={() => setPending({ kind: "add", cleaner: cl })}>Add as accepted</button>
+        </>;
+      default: // no row yet — never offered
+        return <>
+          <button style={solid} onClick={() => setPending({ kind: "offer", cleaner: cl })}>Offer</button>
+          <button style={subtle} onClick={() => setPending({ kind: "add", cleaner: cl })}>Add as accepted</button>
+        </>;
+    }
+  }
+
   // One cleaner row — shared by the tier groups and the wipeover Cleaning Manager
-  // section so both render identically. isLast controls the divider (a single-row
-  // section passes true → no trailing border).
+  // section so both render identically. isLast controls the divider. The status
+  // pill reuses the drawer's ASSIGN_STATUS styling for every state; a team_lead
+  // reservation row (non-wipeover) shows the pill only, no admin actions.
   const renderRow = (cl: Cleaner, isLast: boolean) => {
-    const offered = offeredIds.has(cl.id);
-    const declined = declinedIds.has(cl.id);
+    const a = byCleaner.get(cl.id);
+    const status = a?.status;
     const busy = busyId === cl.id;
     const subLabel = cl.is_team_leader ? "Cleaning Manager" : TIER_LABEL[cl.tier];
+    const isLeadRow = status === "team_lead";
+    const stat = status ? ASSIGN_STATUS[status] : undefined;
     return (
       <div key={cl.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: isLast ? "none" : `1px solid ${c.rowBd}` }}>
         <Avatar name={cl.full_name} size={36} bg={avBg(cl)} />
@@ -71,25 +145,12 @@ export function AssignModal({ shift, onClose, onAssigned }: {
           <div style={{ fontSize: 13.5, fontWeight: 500 }}>{cl.full_name}</div>
           <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 1 }}>{subLabel} · {cl.phone}</div>
         </div>
-        {declined && (
-          <span style={{ fontSize: 10.5, fontWeight: 600, color: ASSIGN_STATUS.declined.color, border: `1px solid ${ASSIGN_STATUS.declined.color}`, borderRadius: 5, padding: "1px 7px" }}>
-            {ASSIGN_STATUS.declined.label}
+        {stat && (
+          <span style={{ fontSize: 10.5, fontWeight: 600, color: stat.color, border: `1px solid ${stat.color}`, borderRadius: 5, padding: "1px 7px" }}>
+            {stat.label}
           </span>
         )}
-        <button
-          onClick={() => setPendingOffer(cl)}
-          disabled={busy || offered}
-          style={{
-            background: offered ? "#eef2ee" : c.green,
-            color: offered ? c.muted2 : "#fff",
-            border: offered ? `1px solid ${c.border}` : "none",
-            borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
-            cursor: busy || offered ? "default" : "pointer",
-            opacity: busy ? 0.6 : 1,
-          }}
-        >
-          {busy ? "…" : offered ? "Offered ✓" : declined ? "Re-offer" : "Offer"}
-        </button>
+        {!isLeadRow && <div style={{ display: "flex", gap: 6 }}>{rowActions(cl, a, busy)}</div>}
       </div>
     );
   };
@@ -126,8 +187,8 @@ export function AssignModal({ shift, onClose, onAssigned }: {
         <div style={{ flex: 1, overflowY: "auto", padding: "14px 22px 20px" }}>
           {/* Cleaning Manager — wipeover only. She's above-tier (no Tier bucket), so
               she gets her own section at the top, matching the drawer's label. */}
-          {shift.shift_type === "wipeover" && (() => {
-            const mgr = cleaners.find((cl) => cl.is_team_leader && !assignedIds.has(cl.id));
+          {isWipeover && (() => {
+            const mgr = cleaners.find((cl) => cl.is_team_leader);
             if (!mgr) return null;
             return (
               <div style={{ marginBottom: 16 }}>
@@ -139,11 +200,15 @@ export function AssignModal({ shift, onClose, onAssigned }: {
             );
           })()}
           {(["tier_1", "tier_2", "tier_3"] as const).map((t) => {
-            const inTier = cleaners.filter((cl) => cl.tier === t && !cl.is_team_leader && !assignedIds.has(cl.id));
+            // Show every eligible cleaner in the tier, whatever their state — the
+            // row's pill + actions reflect it. (Accepted/offered/declined cleaners
+            // were previously filtered out; they belong here now so an admin can
+            // withdraw, take off, or re-offer them.)
+            const inTier = cleaners.filter((cl) => cl.tier === t && !cl.is_team_leader);
             if (!inTier.length) return null;
             return (
               <div key={t} style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Available · {TIER_LABEL[t]}</div>
+                <div style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>{TIER_LABEL[t]}</div>
                 <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
                   {inTier.map((cl, i) => renderRow(cl, i === inTier.length - 1))}
                 </div>
@@ -154,20 +219,30 @@ export function AssignModal({ shift, onClose, onAssigned }: {
 
         {/* footer */}
         <div style={{ flex: "none", padding: "14px 22px", borderTop: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <span style={{ fontSize: 12, color: c.faint }}>Cleaners will receive an immediate notification.</span>
+          <span style={{ fontSize: 12, color: c.faint }}>Cleaners are notified of any change immediately.</span>
           <button onClick={onClose} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done</button>
         </div>
       </div>
-      {pendingOffer && (
-        <ConfirmDialog
-          title={declinedIds.has(pendingOffer.id) ? "Re-offer shift" : "Send shift offer"}
-          message={<>Send a WhatsApp offer to <b>{pendingOffer.full_name}</b> for the {typeLabel(shift)} on {dateLabel(shift.shift_date)}? They'll get an Accept/Decline message.</>}
-          confirmLabel={declinedIds.has(pendingOffer.id) ? "Re-offer" : "Send offer"}
-          busy={busyId === pendingOffer.id}
-          onConfirm={() => { const id = pendingOffer.id; setPendingOffer(null); assign(id); }}
-          onCancel={() => setPendingOffer(null)}
-        />
-      )}
+      {pending && (() => {
+        const name = pending.cleaner.full_name;
+        const when = `the ${typeLabel(shift)} on ${dateLabel(shift.shift_date)}`;
+        const M: Record<PendingAction["kind"], { title: string; message: ReactNode; confirm: string; danger?: boolean }> = {
+          offer:    { title: "Send shift offer", message: <>Send a WhatsApp offer to <b>{name}</b> for {when}? They'll get an Accept/Decline message.</>, confirm: "Send offer" },
+          reoffer:  { title: "Re-offer shift",   message: <>Re-send the offer to <b>{name}</b> for {when}? They'll get an Accept/Decline message.</>, confirm: "Re-offer" },
+          withdraw: { title: "Withdraw offer",   message: <>Withdraw this offer to <b>{name}</b>? Their offer is cancelled and they'll be told it's no longer available.</>, confirm: "Withdraw", danger: true },
+          cancel:   { title: "Take off shift",   message: <>Take <b>{name}</b> off this shift? The spot reopens and they'll be notified.</>, confirm: "Take off shift", danger: true },
+          add:      { title: "Add as accepted",  message: <>Add <b>{name}</b> as accepted without sending an offer? They'll be told they're booked for {when}.</>, confirm: "Add as accepted" },
+        };
+        const m = M[pending.kind];
+        return (
+          <ConfirmDialog
+            title={m.title} message={m.message} confirmLabel={m.confirm} danger={m.danger}
+            busy={busyId === pending.cleaner.id}
+            onConfirm={() => { const p = pending; setPending(null); runPending(p); }}
+            onCancel={() => setPending(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

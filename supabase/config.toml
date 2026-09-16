@@ -66,6 +66,12 @@ verify_jwt = true
 verify_jwt = true
 [functions.set-user-role]
 verify_jwt = true
+[functions.withdraw-offer]
+verify_jwt = true
+[functions.cancel-accepted]
+verify_jwt = true
+[functions.add-accepted]
+verify_jwt = true
 [functions.update-cleaner]
 verify_jwt = true
 [functions.google-oauth-start]

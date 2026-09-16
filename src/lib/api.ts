@@ -252,6 +252,17 @@ export const confirmShifts = (shiftIds: string[]) =>
 export const manualAssign = (shiftId: string, cleanerId: string) =>
   invokeFn("manual-assign", { shiftId, cleanerId });
 
+// Admin per-cleaner state changes from the Assign-manually modal. Each is
+// writer-gated + audit-logged server-side; cleaner messaging is best-effort.
+export const withdrawOffer = (assignmentId: string) =>
+  invokeFn<{ ok?: boolean; error?: string; notified?: boolean }>("withdraw-offer", { assignmentId });
+
+export const cancelAccepted = (assignmentId: string) =>
+  invokeFn<{ ok?: boolean; error?: string; notified?: boolean }>("cancel-accepted", { assignmentId });
+
+export const addAccepted = (shiftId: string, cleanerId: string) =>
+  invokeFn<{ ok?: boolean; error?: string; notified?: boolean }>("add-accepted", { shiftId, cleanerId });
+
 export const confirmCancellation = (alertId: string) =>
   invokeFn("confirm-cancellation", { alertId });
 
