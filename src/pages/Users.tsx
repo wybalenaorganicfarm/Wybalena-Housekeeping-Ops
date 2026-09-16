@@ -233,13 +233,38 @@ export function Users() {
   if (loading) return <Spinner />;
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="usr-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      {/* Responsive rules scoped to this page only via the `.usr-page` prefix —
+          same pattern as the Cleaners/Bookings tables. Toolbar wraps; role cards
+          go 3→2→1; the table card gets a min-width and its scroll container
+          scrolls horizontally so the columns stay aligned instead of crushing. */}
+      <style>{`
+        /* Default grid lives here (not inline) so the @media overrides below can
+           win — an inline style-attribute grid-template-columns beats any
+           stylesheet rule, @media included, and the stacking silently no-ops. */
+        .usr-page .usr-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        @media (max-width: 1024px) {
+          .usr-page .usr-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .usr-page .usr-scroll { padding-left: 16px; padding-right: 16px; }
+        }
+        @media (max-width: 900px) {
+          .usr-page .usr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .usr-page .usr-table  { min-width: 760px; }
+        }
+        @media (max-width: 640px) {
+          .usr-page .usr-toolbar { flex-wrap: wrap; row-gap: 10px; }
+          .usr-page .usr-scroll  { padding-left: 12px; padding-right: 12px; }
+        }
+        @media (max-width: 520px) {
+          .usr-page .usr-cards { grid-template-columns: 1fr; }
+        }
+      `}</style>
       <PageHeader title="User management" subtitle={`${users.length} users`}
         right={<Button onClick={() => setShowAdd(true)}><Icon name="plus" size={14} strokeWidth={2.2} /> Add user</Button>} />
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "22px 24px 40px" }}>
+      <div className="usr-scroll" style={{ flex: 1, overflowY: "auto", padding: "22px 24px 40px" }}>
         {/* filters */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+        <div className="usr-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             {chips.map(([k, l, dot]) => {
               const on = roleFilter === k;
@@ -258,7 +283,7 @@ export function Users() {
         </div>
 
         {/* role cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12, marginBottom: 24 }}>
+        <div className="usr-cards" style={{ display: "grid", gap: 12, marginBottom: 24 }}>
           {ROLE_CARDS.map(({ role, desc }) => {
             const b = ROLE_BADGE[role];
             return (
@@ -274,7 +299,7 @@ export function Users() {
         </div>
 
         {/* user table */}
-        <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+        <div className="usr-table" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
             <div style={{ flex: 1 }}>User</div>
             <div style={{ flex: "none", width: 180 }}>Role</div>

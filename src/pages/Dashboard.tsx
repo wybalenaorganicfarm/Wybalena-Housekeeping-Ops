@@ -177,7 +177,11 @@ export function Dashboard() {
           leaks to other pages or the shared layout. Reuses the app's established
           1024/900/640/480 breakpoints (same as the Cleaners/Shifts pages). */}
       <style>{`
-        /* Stat cards: 4 across on desktop → 2×2 tablet → stacked on phone. */
+        /* Stat cards: 4 across on desktop → 2×2 tablet → stacked on phone. The
+           default grid lives here (not inline) so these @media overrides can win —
+           an inline style-attribute grid-template-columns beats any stylesheet
+           rule, @media included, and the stacking silently no-ops. */
+        .dash-page .dash-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         @media (max-width: 1024px) { .dash-page .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 520px)  { .dash-page .dash-kpis { grid-template-columns: 1fr; } }
         /* Right rail drops below the main content (full width) once the row is
@@ -211,7 +215,7 @@ export function Dashboard() {
       <div className="dash-body" style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
         {/* center */}
         <div className="dash-main" style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "22px 26px 40px" }}>
-          <div className="dash-kpis" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 22 }}>
+          <div className="dash-kpis" style={{ display: "grid", gap: 14, marginBottom: 22 }}>
             <Kpi icon="clock" color={c.warn} label="Pending" value={kpis.pending} sub="awaiting confirm" />
             <Kpi icon="alert" color={c.danger} label="Urgent" value={kpis.urgent} sub="understaffed" />
             <Kpi icon="target" color={c.teal} label="Staffing" value={kpis.staffing} sub="in tier offers" />

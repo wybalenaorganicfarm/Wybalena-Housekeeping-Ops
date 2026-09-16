@@ -76,10 +76,30 @@ export function Bookings() {
   if (loading) return <Spinner />;
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="bkg-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      {/* Responsive rules scoped to this page only via the `.bkg-page` prefix —
+          same pattern as the Cleaners/Shifts tables: the toolbar wraps, and on
+          narrow screens the table card gets a min-width and its scroll container
+          scrolls horizontally so the 8 columns stay aligned (header + rows share
+          one track) instead of crushing. The calendar view is unaffected — only
+          `.bkg-table` gets the min-width, not the scroll container itself. */}
+      <style>{`
+        @media (max-width: 1024px) {
+          .bkg-page .bkg-toolbar { padding-left: 16px; padding-right: 16px; }
+          .bkg-page .bkg-scroll  { padding-left: 16px; padding-right: 16px; }
+        }
+        @media (max-width: 900px) {
+          .bkg-page .bkg-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .bkg-page .bkg-table  { min-width: 1040px; }
+        }
+        @media (max-width: 640px) {
+          .bkg-page .bkg-toolbar { flex-wrap: wrap; row-gap: 8px; padding-left: 12px; padding-right: 12px; }
+          .bkg-page .bkg-scroll  { padding-left: 12px; padding-right: 12px; padding-top: 12px; }
+        }
+      `}</style>
       <PageHeader title="Bookings" subtitle={`${bookings.length} synced from Google Calendar`} />
 
-      <div style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 24px" }}>
+      <div className="bkg-toolbar" style={{ flex: "none", borderBottom: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ display: "flex", gap: 7 }}>
             {chips.map(([k, l]) => {
@@ -119,11 +139,11 @@ export function Bookings() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
+      <div className="bkg-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
         {view === "calendar" ? (
           <BookingCalendar bookings={filtered} initialDate={filtered[0]?.check_in} onSelect={(b) => setBookingDrawer(b)} />
         ) : (
-          <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
+          <div className="bkg-table" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
               <div style={{ flex: 1 }}>Guest / Booking</div>
               <div style={{ flex: "none", width: COL.date }}>Date</div>

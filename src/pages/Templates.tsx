@@ -202,7 +202,7 @@ function TemplateEditorModal({ t, onClose, onSaved }: { t: MessageTemplate; onCl
     <Modal title={`Edit — ${t.label}`} width={840} onClose={onClose}>
       <div style={{ fontSize: 12.5, color: c.muted, marginTop: -6, marginBottom: 16, lineHeight: 1.45 }}>{t.description}</div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 24, alignItems: "start" }}>
+      <div className="tpl-editor" style={{ display: "grid", gap: 24, alignItems: "start" }}>
         {/* Editor column */}
         <div>
           {hasHeader && (
@@ -314,7 +314,23 @@ export function Templates() {
   const editing = templates.find((t) => t.key === editingKey) ?? null;
 
   return (
-    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="tpl-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+      {/* Scoped to this page via `.tpl-page`. The editor Modal and the card list
+          both render inside this root, so these rules reach both. On phone width
+          the editor+variables split and the 2-up card grid collapse to a single
+          column — the Modal already caps to the viewport, so this only relieves
+          the cramped inner columns, it doesn't fix an overflow. */}
+      <style>{`
+        /* Default grids live here (not inline) so the phone override can win — an
+           inline style-attribute grid-template-columns beats any stylesheet rule,
+           @media included, and the stacking silently no-ops. */
+        .tpl-page .tpl-editor { grid-template-columns: minmax(0, 1fr) 300px; }
+        .tpl-page .tpl-cards  { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (max-width: 640px) {
+          .tpl-page .tpl-editor { grid-template-columns: 1fr; }
+          .tpl-page .tpl-cards  { grid-template-columns: 1fr; }
+        }
+      `}</style>
       <PageHeader title="Message Templates" subtitle="Edit every WhatsApp message the system sends — each card shows who receives it" />
       <div style={{ flex: 1, overflowY: "auto", padding: "22px 24px 48px" }}>
         <div style={{ maxWidth: 1160, margin: "0 auto" }}>
@@ -328,7 +344,7 @@ export function Templates() {
           {groups.map(([category, items]) => (
             <div key={category} style={{ marginBottom: 26 }}>
               <div style={{ fontFamily: font.display, fontSize: 13, fontWeight: font.displayWeight, color: c.green, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{category}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, alignItems: "stretch" }}>
+              <div className="tpl-cards" style={{ display: "grid", gap: 14, alignItems: "stretch" }}>
                 {items.map((t) => <TemplateCard key={t.key} t={t} onEdit={() => setEditingKey(t.key)} />)}
               </div>
             </div>
