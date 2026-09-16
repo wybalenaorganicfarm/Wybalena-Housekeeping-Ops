@@ -217,6 +217,11 @@ export function Cleaners() {
 
   const [removing, setRemoving] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Cleaner | null>(null);
+  // Two-step guards. The status select is controlled by cl.status, so stashing a
+  // pending change without mutating state leaves the dropdown showing the old value
+  // — cancel needs no manual revert.
+  const [pendingStatus, setPendingStatus] = useState<{ cl: Cleaner; status: CleanerStatus } | null>(null);
+  const [pendingManager, setPendingManager] = useState<{ cl: Cleaner; nominate: boolean } | null>(null);
   const [notesFor, setNotesFor] = useState<Cleaner | null>(null);
   const [editing, setEditing] = useState<Cleaner | null>(null);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -240,6 +245,13 @@ export function Cleaners() {
       toastError(error);
       setCleaners((prev) => prev.map((x) => x.id === cl.id ? { ...x, status: prevStatus, is_active: prevActive } : x));
     }
+  }
+
+  // Deactivation is guarded (stops offers, and steps her down if she's the manager);
+  // reactivation is instant.
+  function requestStatus(cl: Cleaner, status: CleanerStatus) {
+    if (status === "inactive") setPendingStatus({ cl, status });
+    else changeStatus(cl, status);
   }
 
   // Nominate this cleaner as the Cleaning Manager, or (nominate=false) step the
@@ -404,7 +416,7 @@ export function Cleaners() {
                       <div style={{ ...cell, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6 }}>
                         {canManage ? (
                           <>
-                          <select value={cl.status} disabled={saving[cl.id]} onChange={(e) => changeStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[cl.id] ? "wait" : "pointer", outline: "none" }}>
+                          <select value={cl.status} disabled={saving[cl.id]} onChange={(e) => requestStatus(cl, e.target.value as CleanerStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: CLEANER_STATUS_META[cl.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[cl.id] ? "wait" : "pointer", outline: "none" }}>
                             <option value="active">Active</option>
                             <option value="inactive">Inactive</option>
                           </select>
@@ -449,8 +461,8 @@ export function Cleaners() {
                             // server RPC enforces exactly one holder atomically.
                             ...(canEdit
                               ? [cl.is_team_leader
-                                  ? { label: "Remove as Cleaning Manager", icon: "users", onClick: () => manageManager(cl, false) }
-                                  : { label: "Nominate as Cleaning Manager", icon: "users", onClick: () => manageManager(cl, true) }]
+                                  ? { label: "Remove as Cleaning Manager", icon: "users", onClick: () => setPendingManager({ cl, nominate: false }) }
+                                  : { label: "Nominate as Cleaning Manager", icon: "users", onClick: () => setPendingManager({ cl, nominate: true }) }]
                               : []),
                             // The manager is a real cleaner now, so removal is the
                             // normal cleaner removal — but remove-cleaner blocks it
@@ -485,6 +497,27 @@ export function Cleaners() {
           busy={removing === toRemove.id}
           onCancel={() => setToRemove(null)}
           onConfirm={() => remove(toRemove)}
+        />
+      )}
+      {pendingStatus && (
+        <ConfirmDialog
+          title="Deactivate cleaner"
+          message={<>Set <b>{pendingStatus.cl.full_name}</b> to Inactive? They'll stop receiving shift offers{pendingStatus.cl.is_team_leader ? ", and they'll be stepped down as Cleaning Manager (their upcoming roster rows are removed)" : ""}. You can reactivate them anytime.</>}
+          confirmLabel="Deactivate" danger busy={saving[pendingStatus.cl.id]}
+          onConfirm={() => { changeStatus(pendingStatus.cl, pendingStatus.status); setPendingStatus(null); }}
+          onCancel={() => setPendingStatus(null)}
+        />
+      )}
+      {pendingManager && (
+        <ConfirmDialog
+          title={pendingManager.nominate ? "Nominate Cleaning Manager" : "Remove Cleaning Manager"}
+          message={pendingManager.nominate
+            ? <>Make <b>{pendingManager.cl.full_name}</b> the Cleaning Manager? They'll be rostered onto every upcoming non-wipeover shift, and any current manager is stepped down.</>
+            : <>Step <b>{pendingManager.cl.full_name}</b> down as Cleaning Manager? Their upcoming roster rows are removed. No cleaner will hold the role until you nominate someone.</>}
+          confirmLabel={pendingManager.nominate ? "Nominate" : "Remove"} danger={!pendingManager.nominate}
+          busy={saving[pendingManager.cl.id]}
+          onConfirm={() => { manageManager(pendingManager.cl, pendingManager.nominate); setPendingManager(null); }}
+          onCancel={() => setPendingManager(null)}
         />
       )}
     </div>

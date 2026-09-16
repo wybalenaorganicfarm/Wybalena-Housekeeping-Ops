@@ -109,6 +109,7 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
   });
 
   const [confirming, setConfirming] = useState(false);
+  const [askConfirm, setAskConfirm] = useState(false);
   const [askCancel, setAskCancel] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -348,7 +349,7 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
         {canEdit && s.status !== "cancelled" && (
           <div style={{ flex: "none", padding: "14px 22px", borderTop: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 9 }}>
             {s.status === "pending_confirmation" && (
-              <button onClick={confirmShift} disabled={confirming} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: confirming ? "wait" : "pointer", opacity: confirming ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <button onClick={() => setAskConfirm(true)} disabled={confirming} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: confirming ? "wait" : "pointer", opacity: confirming ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                 {confirming ? <Spin size={15} color="#fff" /> : <Icon name="check" size={15} strokeWidth={2.4} />} {confirming ? "Confirming…" : "Confirm shift"}
               </button>
             )}
@@ -361,6 +362,15 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
       </div>
 
       {showEdit && <EditShiftModal shift={s} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); onChanged(); }} />}
+      {askConfirm && (
+        <ConfirmDialog
+          title="Confirm shift"
+          message="Confirm this shift? This sends Tier-1 WhatsApp offers to cleaners right away."
+          confirmLabel="Confirm shift" busy={confirming}
+          onConfirm={() => { setAskConfirm(false); confirmShift(); }}
+          onCancel={() => setAskConfirm(false)}
+        />
+      )}
       {askCancel && (
         <ConfirmDialog
           title="Cancel shift"

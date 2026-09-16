@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import { c, font } from "../theme";
 import { Icon } from "../components/Icon";
-import { Button, Card, Modal, Spinner } from "../components/ui";
+import { Button, Card, ConfirmDialog, Modal, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { getMessageTemplates, updateMessageTemplate } from "../lib/api";
 import type { MessageTemplate, TemplateButton } from "../lib/types";
@@ -155,6 +155,7 @@ function TemplateCard({ t, onEdit }: { t: MessageTemplate; onEdit: () => void })
 function TemplateEditorModal({ t, onClose, onSaved }: { t: MessageTemplate; onClose: () => void; onSaved: (next: MessageTemplate) => void }) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(t));
   const [saving, setSaving] = useState(false);
+  const [askReset, setAskReset] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const cursor = useRef<number | null>(null); // last caret position in the message box
 
@@ -269,12 +270,21 @@ function TemplateEditorModal({ t, onClose, onSaved }: { t: MessageTemplate; onCl
         <Button onClick={save} loading={saving} disabled={!dirty}>Save changes</Button>
         <Button kind="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
         <div style={{ flex: 1 }} />
-        <button type="button" onClick={resetToDefault} disabled={saving || !customised}
+        <button type="button" onClick={() => setAskReset(true)} disabled={saving || !customised}
           title={customised ? "Restore the original wording" : "Already the default"}
           style={{ border: "none", background: "none", color: customised ? c.muted : c.faint, fontSize: 12, fontWeight: 600, cursor: customised ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 5 }}>
           <Icon name="refresh" size={12} strokeWidth={2.2} /> Reset to default
         </button>
       </div>
+      {askReset && (
+        <ConfirmDialog
+          title="Reset to default"
+          message="Reset this message template to its default wording? Your customised version is replaced in the editor — Save changes to make it permanent, or Cancel to keep your version."
+          confirmLabel="Reset to default" danger
+          onConfirm={() => { resetToDefault(); setAskReset(false); }}
+          onCancel={() => setAskReset(false)}
+        />
+      )}
     </Modal>
   );
 }

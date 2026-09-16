@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font, TIER_LABEL } from "../theme";
 import { Icon } from "../components/Icon";
-import { Button, Spinner } from "../components/ui";
+import { Button, ConfirmDialog, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
 import { BookingDrawer } from "../components/BookingDrawer";
@@ -64,6 +64,9 @@ export function Shifts() {
   const [bookingDrawer, setBookingDrawer] = useState<Booking | null>(null);
   const [assign, setAssign] = useState<Shift | null>(null);
   const [showNew, setShowNew] = useState(false);
+  // Two-step guards: confirming a shift sends Tier-1 WhatsApp offers.
+  const [askConfirmId, setAskConfirmId] = useState<string | null>(null);
+  const [askBulk, setAskBulk] = useState(false);
   const [confirming, setConfirming] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
 
@@ -204,7 +207,7 @@ export function Shifts() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <button onClick={() => setSel((prev) => { const n = new Set(prev); visibleSel.forEach((id) => n.delete(id)); return n; })} style={{ background: "none", border: "none", color: "#cfe0d6", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Clear</button>
-            <Button onClick={bulkConfirm} disabled={bulkBusy} style={{ background: c.warn, padding: "7px 14px", fontSize: 12.5 }}>{bulkBusy ? "Confirming…" : `Confirm all ${visibleSel.length}`}</Button>
+            <Button onClick={() => setAskBulk(true)} disabled={bulkBusy} style={{ background: c.warn, padding: "7px 14px", fontSize: 12.5 }}>{bulkBusy ? "Confirming…" : `Confirm all ${visibleSel.length}`}</Button>
           </div>
         </div>
       )}
@@ -305,7 +308,7 @@ export function Shifts() {
                       </div>
                       <div style={{ flex: "none", width: COL.action, textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
                         {canEdit && s.status === "pending_confirmation"
-                          ? <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => confirmOne(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : "Confirm"}</Button>
+                          ? <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => setAskConfirmId(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : "Confirm"}</Button>
                           : canEdit && (s.status === "staffing" || urgent)
                             ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Offer</Button>
                             : null}
@@ -342,6 +345,24 @@ export function Shifts() {
         />
       )}
       {assign && <AssignModal shift={assign} onClose={() => setAssign(null)} onAssigned={load} />}
+      {askConfirmId && (
+        <ConfirmDialog
+          title="Confirm shift"
+          message="Confirm this shift? This sends Tier-1 WhatsApp offers to cleaners right away."
+          confirmLabel="Confirm shift" busy={confirming.has(askConfirmId)}
+          onConfirm={() => { const id = askConfirmId; setAskConfirmId(null); confirmOne(id); }}
+          onCancel={() => setAskConfirmId(null)}
+        />
+      )}
+      {askBulk && (
+        <ConfirmDialog
+          title={`Confirm ${visibleSel.length} shift${visibleSel.length === 1 ? "" : "s"}`}
+          message={`Confirm ${visibleSel.length} shift${visibleSel.length === 1 ? "" : "s"}? This sends Tier-1 WhatsApp offers for ${visibleSel.length === 1 ? "it" : "all of them"} right away.`}
+          confirmLabel="Confirm all" busy={bulkBusy}
+          onConfirm={() => { setAskBulk(false); bulkConfirm(); }}
+          onCancel={() => setAskBulk(false)}
+        />
+      )}
       {showNew && <NewShiftModal onClose={() => setShowNew(false)} onCreated={load} onManualAssign={(s) => { setShowNew(false); setAssign(s); }} />}
     </div>
   );

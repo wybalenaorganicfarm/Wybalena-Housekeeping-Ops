@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { c, font } from "../theme";
 import { Icon } from "../components/Icon";
-import { Spin, Spinner } from "../components/ui";
+import { ConfirmDialog, Spin, Spinner } from "../components/ui";
 import { PageHeader } from "../components/PageHeader";
 import { ShiftDrawer } from "../components/ShiftDrawer";
 import { AssignModal } from "../components/AssignModal";
@@ -33,6 +33,10 @@ export function Alerts() {
   const [assign, setAssign] = useState<Shift | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
+  // Two-step guards: confirming a cancellation notifies assigned cleaners; confirming
+  // a shift sends Tier-1 offers. (Dismiss stays one-click.)
+  const [askCancelId, setAskCancelId] = useState<string | null>(null);
+  const [askConfirm, setAskConfirm] = useState<{ alertId: string; shiftId: string } | null>(null);
   const [confirming, setConfirming] = useState<Record<string, boolean>>({});
 
   async function load() {
@@ -118,7 +122,7 @@ export function Alerts() {
                     <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 12 }}>
                       {a.alert_type === "booking_cancelled" ? (
                         <>
-                          <button onClick={async () => { await confirmCancellation(a.id); await load(); }} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Confirm cancellation</button>
+                          <button onClick={() => setAskCancelId(a.id)} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Confirm cancellation</button>
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Take no action</button>
                         </>
                       ) : a.alert_type === "venue_gap" || a.alert_type === "mid_retreat_needed" ? (
@@ -140,7 +144,7 @@ export function Alerts() {
                       ) : (
                         <>
                           {shift?.status === "pending_confirmation" && (
-                            <button disabled={confirming[a.id]} onClick={() => confirmFromAlert(a.id, shift.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: confirming[a.id] ? "wait" : "pointer", opacity: confirming[a.id] ? 0.7 : 1 }}>
+                            <button disabled={confirming[a.id]} onClick={() => setAskConfirm({ alertId: a.id, shiftId: shift.id })} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: c.green, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: confirming[a.id] ? "wait" : "pointer", opacity: confirming[a.id] ? 0.7 : 1 }}>
                               {confirming[a.id] ? <Spin size={13} color="#fff" /> : <Icon name="check" size={13} strokeWidth={2.4} />} Confirm shift
                             </button>
                           )}
@@ -180,6 +184,24 @@ export function Alerts() {
       </div>
       {drawer && <ShiftDrawer shift={drawer} onClose={() => setDrawer(null)} onChanged={load} onAssign={(s) => { setDrawer(null); setAssign(s); }} />}
       {assign && <AssignModal shift={assign} onClose={() => setAssign(null)} onAssigned={load} />}
+      {askCancelId && (
+        <ConfirmDialog
+          title="Confirm cancellation"
+          message="Confirm this booking cancellation? Any cleaners already assigned to the linked shift will be notified it's cancelled. This can't be undone."
+          confirmLabel="Confirm cancellation" danger
+          onConfirm={async () => { const id = askCancelId; setAskCancelId(null); await confirmCancellation(id); await load(); }}
+          onCancel={() => setAskCancelId(null)}
+        />
+      )}
+      {askConfirm && (
+        <ConfirmDialog
+          title="Confirm shift"
+          message="Confirm this shift? This sends Tier-1 WhatsApp offers to cleaners right away."
+          confirmLabel="Confirm shift" busy={confirming[askConfirm.alertId]}
+          onConfirm={() => { const a = askConfirm; setAskConfirm(null); confirmFromAlert(a.alertId, a.shiftId); }}
+          onCancel={() => setAskConfirm(null)}
+        />
+      )}
     </div>
   );
 }

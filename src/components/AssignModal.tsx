@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Avatar } from "./ui";
+import { Avatar, ConfirmDialog } from "./ui";
 import { Icon } from "./Icon";
 import { ASSIGN_STATUS } from "./ShiftDrawer";
 import { getAssignmentsForShift, getCleaners, getStaffing, manualAssign } from "../lib/api";
 import { toastError } from "../lib/toast";
 import { c, font, TIER_LABEL } from "../theme";
-import { typeLabel } from "../lib/format";
+import { dateLabel, typeLabel } from "../lib/format";
 import type { Cleaner, Shift } from "../lib/types";
 
 export function AssignModal({ shift, onClose, onAssigned }: {
@@ -19,6 +19,8 @@ export function AssignModal({ shift, onClose, onAssigned }: {
   // Cleaners who declined this shift's offer — kept visible with a LIVE "Re-offer"
   // button (the offerToCleaner upsert resets their declined row to offered).
   const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
+  // Two-step guard before an offer goes out — sending a WhatsApp to a person.
+  const [pendingOffer, setPendingOffer] = useState<Cleaner | null>(null);
   const [openSlots, setOpenSlots] = useState(shift.required_cleaners);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -75,7 +77,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
           </span>
         )}
         <button
-          onClick={() => assign(cl.id)}
+          onClick={() => setPendingOffer(cl)}
           disabled={busy || offered}
           style={{
             background: offered ? "#eef2ee" : c.green,
@@ -156,6 +158,16 @@ export function AssignModal({ shift, onClose, onAssigned }: {
           <button onClick={onClose} style={{ background: c.green, color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Done</button>
         </div>
       </div>
+      {pendingOffer && (
+        <ConfirmDialog
+          title={declinedIds.has(pendingOffer.id) ? "Re-offer shift" : "Send shift offer"}
+          message={<>Send a WhatsApp offer to <b>{pendingOffer.full_name}</b> for the {typeLabel(shift)} on {dateLabel(shift.shift_date)}? They'll get an Accept/Decline message.</>}
+          confirmLabel={declinedIds.has(pendingOffer.id) ? "Re-offer" : "Send offer"}
+          busy={busyId === pendingOffer.id}
+          onConfirm={() => { const id = pendingOffer.id; setPendingOffer(null); assign(id); }}
+          onCancel={() => setPendingOffer(null)}
+        />
+      )}
     </div>
   );
 }

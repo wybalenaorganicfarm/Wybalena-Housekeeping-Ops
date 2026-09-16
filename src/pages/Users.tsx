@@ -45,12 +45,14 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   const [national, setNational] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
-  async function save() {
+  // Validate the form, then open the confirm — sending an invitation emails a real
+  // person. doSend() runs only after they confirm.
+  function save() {
     if (!email.trim()) { setErr("Email is required"); return; }
     // Phone is required for a team leader (manager summary) and optional for other
     // roles — but if entered, it must be valid. It's used for WhatsApp system alerts.
-    let phone: string | undefined;
     const hasNumber = national.trim().length > 0;
     if (role === "team_leader" || hasNumber) {
       const e164 = toE164(country, national);
@@ -60,11 +62,18 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
           : `Enter a valid phone number for ${countryName(country)}`);
         return;
       }
-      phone = e164;
     }
+    setErr(null);
+    setConfirming(true);
+  }
+
+  async function doSend() {
+    const phone = (role === "team_leader" || national.trim().length > 0)
+      ? toE164(country, national) ?? undefined : undefined;
     setBusy(true);
     const { error } = await provisionUser({ email: email.trim(), full_name, role, phone, redirectTo: window.location.origin });
     setBusy(false);
+    setConfirming(false);
     if (error) { setErr(error); return; }
     onSaved(); onClose();
   }
@@ -92,6 +101,15 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         <Button kind="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={save} disabled={busy}>{busy ? "Sending…" : "Send invite"}</Button>
       </div>
+      {confirming && (
+        <ConfirmDialog
+          title="Send invitation"
+          message={<>Email an invitation to <b>{email.trim()}</b> as <b>{ROLE_LABEL[role as UserRole]}</b>? They'll get a link to set a password and access the portal.</>}
+          confirmLabel="Send invite" busy={busy}
+          onConfirm={doSend}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </Modal>
   );
 }
@@ -149,6 +167,8 @@ export function Users() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Profile | null>(null);
   const [editPhone, setEditPhone] = useState<Profile | null>(null);
+  const [pendingStatus, setPendingStatus] = useState<{ u: Profile; status: UserStatus } | null>(null);
+  const [pendingRole, setPendingRole] = useState<{ u: Profile; role: UserRole } | null>(null);
 
   async function load() { setUsers(await getUsers()); setLoading(false); }
   useEffect(() => { load(); }, []);
@@ -161,6 +181,18 @@ export function Users() {
     if (error) { toastError(error); return; }
     await load();
     toastOk(`${u.full_name || u.email} removed.${data?.emailed ? " Email notification sent." : ""}`);
+  }
+
+  // Guard deactivation (loses access) and any role change; reactivation is instant.
+  // The selects are controlled by u.status / u.role, so stashing a pending change
+  // without mutating state leaves the dropdown on its old value — no manual revert.
+  function requestStatus(u: Profile, status: UserStatus) {
+    if (status === "inactive") setPendingStatus({ u, status });
+    else changeStatus(u, status);
+  }
+  function requestRole(u: Profile, role: UserRole) {
+    if (role === u.role) return;
+    setPendingRole({ u, role });
   }
 
   async function changeStatus(u: Profile, status: UserStatus) {
@@ -272,7 +304,7 @@ export function Users() {
                     </span>
                   ) : (
                     <>
-                    <select value={u.role} disabled={saving[u.id]} onChange={(e) => changeRole(u, e.target.value as UserRole)} style={{ fontSize: 11.5, fontWeight: 600, color: b.fg, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
+                    <select value={u.role} disabled={saving[u.id]} onChange={(e) => requestRole(u, e.target.value as UserRole)} style={{ fontSize: 11.5, fontWeight: 600, color: b.fg, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
                       {(isYou ? SELF_ROLES : ASSIGNABLE_ROLES).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                     </select>
                     {saving[u.id] && <Spin size={13} color={c.muted2} />}
@@ -285,7 +317,7 @@ export function Users() {
                       <span style={{ width: 6, height: 6, borderRadius: "50%", background: STATUS_META[u.status].dot }} />{STATUS_META[u.status].label}
                     </span>
                   ) : (
-                    <select value={u.status} disabled={saving[u.id]} onChange={(e) => changeStatus(u, e.target.value as UserStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: STATUS_META[u.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
+                    <select value={u.status} disabled={saving[u.id]} onChange={(e) => requestStatus(u, e.target.value as UserStatus)} style={{ fontSize: 11.5, fontWeight: 600, color: STATUS_META[u.status].color, border: `1px solid ${c.border3}`, borderRadius: 6, padding: "3px 7px", background: "#fff", cursor: saving[u.id] ? "wait" : "pointer", outline: "none" }}>
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
                     </select>
@@ -317,6 +349,24 @@ export function Users() {
           busy={removing === toRemove.id}
           onCancel={() => setToRemove(null)}
           onConfirm={() => remove(toRemove)}
+        />
+      )}
+      {pendingStatus && (
+        <ConfirmDialog
+          title="Deactivate user"
+          message={<>Set <b>{pendingStatus.u.full_name || pendingStatus.u.email}</b> to Inactive? They'll lose portal access until you reactivate them.</>}
+          confirmLabel="Deactivate" danger busy={saving[pendingStatus.u.id]}
+          onConfirm={() => { changeStatus(pendingStatus.u, pendingStatus.status); setPendingStatus(null); }}
+          onCancel={() => setPendingStatus(null)}
+        />
+      )}
+      {pendingRole && (
+        <ConfirmDialog
+          title="Change user role"
+          message={<>Change <b>{pendingRole.u.full_name || pendingRole.u.email}</b>'s role to <b>{ROLE_LABEL[pendingRole.role]}</b>? This changes what they can see and do immediately.</>}
+          confirmLabel="Change role" busy={saving[pendingRole.u.id]}
+          onConfirm={() => { changeRole(pendingRole.u, pendingRole.role); setPendingRole(null); }}
+          onCancel={() => setPendingRole(null)}
         />
       )}
     </div>
