@@ -7,6 +7,8 @@ import {
   BOOKING_SYNC_RANGE_DEFAULT, BOOKING_SYNC_RANGE_LIMITS, getBookingSyncRange, getCronSchedules,
   getStaffingCatchup, STAFFING_CATCHUP_DEFAULT, STAFFING_CATCHUP_LIMITS, updateBookingSyncRange,
   updateCronSchedule, updateStaffingCatchup, type BookingSyncRange, type CronJob, type StaffingCatchup,
+  getCancellationCooloff, updateCancellationCooloff, CANCELLATION_COOLOFF_DEFAULT,
+  CANCELLATION_COOLOFF_LIMITS, type CancellationCooloff,
 } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import {
@@ -50,16 +52,21 @@ export function Schedule() {
   const [editRange, setEditRange] = useState(false);
   const [catchup, setCatchup] = useState<StaffingCatchup>(STAFFING_CATCHUP_DEFAULT);
   const [editCatchup, setEditCatchup] = useState(false);
+  const [cooloff, setCooloff] = useState<CancellationCooloff>(CANCELLATION_COOLOFF_DEFAULT);
+  const [editCooloff, setEditCooloff] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [list, r, cu] = await Promise.all([getCronSchedules(), getBookingSyncRange(), getStaffingCatchup()]);
+      const [list, r, cu, co] = await Promise.all([
+        getCronSchedules(), getBookingSyncRange(), getStaffingCatchup(), getCancellationCooloff(),
+      ]);
       const map: Record<string, CronJob> = {};
       for (const j of list) map[j.fn] = j;
       setJobs(map);
       setRange(r);
       setCatchup(cu);
+      setCooloff(co);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Failed to load schedules");
     } finally {
@@ -105,6 +112,14 @@ export function Schedule() {
     const err = await updateStaffingCatchup(next);
     if (err) return err;
     toastOk("Staffing catch-up timing updated.");
+    await load();
+    return null;
+  }
+
+  async function saveCooloff(next: CancellationCooloff) {
+    const err = await updateCancellationCooloff(next);
+    if (err) return err;
+    toastOk("Cancellation cooling-off updated.");
     await load();
     return null;
   }
@@ -165,6 +180,14 @@ export function Schedule() {
                   </div>
                 ))}
               </Section>
+
+              {/* Not a cron job — it applies the moment a cleaner cancels. It
+                  lives here because this is the page where an admin tunes how
+                  the automation behaves, and it is the only other knob that
+                  changes who gets offered a shift. */}
+              <Section title="Cancellations" hint="Applies as soon as a cleaner cancels — not on a schedule.">
+                <CooloffRow cooloff={cooloff} onEdit={() => setEditCooloff(true)} />
+              </Section>
             </>
           )}
         </div>
@@ -178,6 +201,9 @@ export function Schedule() {
       )}
       {editCatchup && (
         <CatchupModal catchup={catchup} onClose={() => setEditCatchup(false)} onSave={saveCatchup} />
+      )}
+      {editCooloff && (
+        <CooloffModal cooloff={cooloff} onClose={() => setEditCooloff(false)} onSave={saveCooloff} />
       )}
     </div>
   );
@@ -378,6 +404,101 @@ function CatchupRow({ catchup, onEdit }: { catchup: StaffingCatchup; onEdit: () 
       </div>
       <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit timing</Button>
     </div>
+  );
+}
+
+function CooloffRow({ cooloff, onEdit }: { cooloff: CancellationCooloff; onEdit: () => void }) {
+  const h = cooloff.cooloff_hours;
+  const window = h === 0 ? null : h % 24 === 0 ? `${h / 24} day${h === 24 ? "" : "s"}` : `${h} hours`;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "11px 14px", background: c.panel, border: `1px solid ${c.border3}`, borderRadius: 10, marginTop: 8 }}>
+      <div style={{ flex: 1, fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 600, marginBottom: 3 }}>
+          {window ? `Cooling-off: ${window}` : "Cooling-off: off"}
+        </div>
+        {window ? (
+          <>
+            When a cleaner cancels a shift, that shift is not automatically offered back to her
+            for <b>{window}</b>. Everyone else still available is offered it straight away.
+            You can always assign her manually in the meantime.
+          </>
+        ) : (
+          <>
+            Cooling-off is switched off — a cleaner who cancels can be offered the same shift
+            again immediately.
+          </>
+        )}
+      </div>
+      <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit</Button>
+    </div>
+  );
+}
+
+function CooloffModal({ cooloff, onClose, onSave }: {
+  cooloff: CancellationCooloff; onClose: () => void; onSave: (c: CancellationCooloff) => Promise<string | null>;
+}) {
+  const [hours, setHours] = useState(String(cooloff.cooloff_hours));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const L = CANCELLATION_COOLOFF_LIMITS;
+  const n = Number(hours);
+  const ok = Number.isInteger(n) && n >= L.cooloff_hours.min && n <= L.cooloff_hours.max;
+
+  async function submit() {
+    if (!ok) { setErr(`Cooling-off must be a whole number between ${L.cooloff_hours.min} and ${L.cooloff_hours.max} hours.`); return; }
+    setSaving(true); setErr(null);
+    const e = await onSave({ cooloff_hours: n });
+    setSaving(false);
+    if (e) { setErr(e); return; }
+    onClose();
+  }
+
+  const field: React.CSSProperties = {
+    width: 90, boxSizing: "border-box", padding: "8px 10px", fontSize: 13,
+    border: `1px solid ${c.border3}`, borderRadius: 7, outline: "none", color: c.ink, background: "#fff",
+  };
+
+  return (
+    <Modal title="Cancellation cooling-off" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: c.muted, lineHeight: 1.55, marginBottom: 16 }}>
+        When a cleaner cancels a shift she had accepted, the spot is re-offered to everyone
+        else available. This sets how long before that shift can be offered back to her.
+      </div>
+
+      <label style={{ display: "block", marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Cooling-off</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="number" min={L.cooloff_hours.min} max={L.cooloff_hours.max} value={hours}
+            onChange={(e) => setHours(e.target.value)} style={field} />
+          <span style={{ fontSize: 12.5, color: c.muted }}>hours</span>
+        </div>
+      </label>
+
+      <div style={{ background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        {!ok ? "Enter a whole number of hours." : n === 0 ? (
+          <>
+            <b>Cooling-off is off.</b> A cleaner who cancels can be offered the same shift again
+            straight away — the behaviour before this setting existed.
+          </>
+        ) : (
+          <>
+            A cleaner who cancels won't be offered that shift again for <b>{n} hours</b>
+            {n % 24 === 0 ? <> ({n / 24} day{n === 24 ? "" : "s"})</> : null}.
+            Being taken off a shift by an admin doesn't start a cooling-off — only her own
+            cancellation does. You can still assign her manually at any time, and it only
+            affects that one shift.
+          </>
+        )}
+      </div>
+
+      {err && <div style={{ marginTop: 12, fontSize: 12.5, color: c.danger }}>{err}</div>}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={submit} disabled={saving || !ok}>{saving ? "Saving…" : "Save"}</Button>
+      </div>
+    </Modal>
   );
 }
 

@@ -67,6 +67,43 @@ export async function loadStaffingCatchup(sb: SupabaseClient): Promise<StaffingC
   }
 }
 
+// How long a cleaner who cancelled her own shift stays out of that shift's
+// automatic re-offers.
+//
+// HOURS, not days: unlike escalationWaitDays above, this is compared against a
+// stored timestamp at the moment a cancellation happens, not across fixed daily
+// cron slots, so the fraction-of-a-day problem that forces days there does not
+// arise here — and a sub-day window is the whole point.
+//
+// 0 disables the cooling-off: every self-canceller is immediately offerable
+// again. Reachable on purpose, so the behaviour can be switched off from the app.
+export interface CancellationCooloff {
+  cooloffHours: number;
+}
+
+export const DEFAULT_CANCELLATION_COOLOFF: CancellationCooloff = { cooloffHours: 48 };
+
+export const COOLOFF_LIMITS = { cooloffHours: { min: 0, max: 336 } };  // up to 14 days
+
+export async function loadCancellationCooloff(sb: SupabaseClient): Promise<CancellationCooloff> {
+  try {
+    const { data } = await sb
+      .from("app_settings").select("value").eq("key", "cancellation_cooloff").maybeSingle();
+    const v = (data as { value?: Record<string, unknown> } | null)?.value;
+    if (!v) return DEFAULT_CANCELLATION_COOLOFF;
+    return {
+      cooloffHours: clampInt(
+        v.cooloff_hours,
+        COOLOFF_LIMITS.cooloffHours.min,
+        COOLOFF_LIMITS.cooloffHours.max,
+        DEFAULT_CANCELLATION_COOLOFF.cooloffHours,
+      ),
+    };
+  } catch {
+    return DEFAULT_CANCELLATION_COOLOFF;
+  }
+}
+
 export async function loadBookingSyncRange(sb: SupabaseClient): Promise<BookingSyncRange> {
   try {
     const { data } = await sb

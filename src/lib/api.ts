@@ -424,6 +424,35 @@ export async function updateStaffingCatchup(next: StaffingCatchup): Promise<stri
   return error ? friendlyError(error.message) : null;
 }
 
+// ---- Cancellation cooling-off (app_settings) -------------------------------
+// After a cleaner cancels a shift, how long before that shift can be offered
+// back to her automatically. Hours (not days like the catch-up): this is checked
+// against a timestamp when a cancellation happens, not across daily cron slots.
+// 0 switches the cooling-off off entirely.
+
+export interface CancellationCooloff { cooloff_hours: number }
+
+export const CANCELLATION_COOLOFF_DEFAULT: CancellationCooloff = { cooloff_hours: 48 };
+export const CANCELLATION_COOLOFF_LIMITS = {
+  cooloff_hours: { min: 0, max: 336 },  // up to 14 days
+};
+
+export async function getCancellationCooloff(): Promise<CancellationCooloff> {
+  const { data, error } = await supabase
+    .from("app_settings").select("value").eq("key", "cancellation_cooloff").maybeSingle();
+  if (error || !data) return CANCELLATION_COOLOFF_DEFAULT;
+  const v = (data as { value: Partial<CancellationCooloff> }).value ?? {};
+  return {
+    cooloff_hours: Number(v.cooloff_hours ?? CANCELLATION_COOLOFF_DEFAULT.cooloff_hours),
+  };
+}
+
+export async function updateCancellationCooloff(next: CancellationCooloff): Promise<string | null> {
+  const { error } = await supabase
+    .from("app_settings").update({ value: next } as never).eq("key", "cancellation_cooloff");
+  return error ? friendlyError(error.message) : null;
+}
+
 // ---- Connections / integration health (admin) ------------------------------
 
 export interface ConnectionResult {

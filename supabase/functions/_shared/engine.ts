@@ -6,6 +6,7 @@ import { sendButtons, sendMessage, titleWithCode } from "./adapters/whatsapp.ts"
 import { btnTitle, fillVars, loadTemplate, renderTemplate } from "./templates.ts";
 import { daysBetweenDays, prettyDate, prettyDateTime, prettyTime, venueDay } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
+import { loadCancellationCooloff } from "./settings.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -530,11 +531,15 @@ export async function daysSinceCurrentTierOffer(
 // asking again is the entire point of this step.
 //
 // ONE exception: a cleaner who cancelled this very shift herself
-// (self_cancelled_at set). She has just told us she cannot work it, so handing
-// it straight back to her is noise at best and looks broken at worst — which is
-// exactly what Mai and Cassie saw on the 04/10 shift. An ADMIN removal is not
-// an exception: it leaves self_cancelled_at null and she stays in the pool,
-// because being taken off a shift says nothing about her availability for it.
+// (self_cancelled_at set) within the COOLING-OFF WINDOW. She has just told us
+// she cannot work it, so handing it straight back is noise at best and looks
+// broken at worst — which is exactly what Mai and Cassie saw on the 04/10 shift.
+// Once the window has passed she is offerable again: a cancellation three days
+// ago is not a cancellation now, and by this point there is nobody new to ask.
+// The window is admin-set (app_settings.cancellation_cooloff, default 48h); 0
+// switches it off. An ADMIN removal is never an exception — it leaves
+// self_cancelled_at null, because being taken off a shift says nothing about
+// her availability for it.
 //
 // shift_assignments is UNIQUE (shift_id, cleaner_id), so an existing row is
 // RE-OPENED in place — fresh offer code, reminder stamp cleared so the reminder
@@ -563,11 +568,25 @@ export async function reofferToUnaccepted(
     .eq("shift_id", shiftId);
   const rows = existing ?? [];
   const onShift = new Set(rows.filter((r) => r.status === "accepted").map((r) => r.cleaner_id));
-  // Cleaners who dropped THIS shift themselves. Excluded below — see the note
-  // above. Scoped to this shift only: cancelling the 4 Oct shift must not make
-  // her unofferable for the 11 Oct one.
-  const selfCancelled = new Set(
-    rows.filter((r) => r.self_cancelled_at != null).map((r) => r.cleaner_id),
+  // Cleaners who dropped THIS shift themselves and are still inside the
+  // cooling-off window. Excluded below — see the note above. Scoped to this
+  // shift only: cancelling the 4 Oct shift must not make her unofferable for
+  // the 11 Oct one.
+  //
+  // Read the window per sweep rather than caching it, so an admin changing the
+  // setting takes effect on the very next cancellation.
+  const { cooloffHours } = await loadCancellationCooloff(sb);
+  const coolingOff = new Set(
+    cooloffHours > 0
+      ? rows
+        .filter((r) => {
+          if (!r.self_cancelled_at) return false;
+          const since = Date.now() - new Date(r.self_cancelled_at).getTime();
+          // Guard a malformed timestamp: NaN must not silently re-include her.
+          return !Number.isFinite(since) || since < cooloffHours * 3600_000;
+        })
+        .map((r) => r.cleaner_id)
+      : [],
   );
   const rowByCleaner = new Map(rows.map((r) => [r.cleaner_id, r]));
 
@@ -579,10 +598,10 @@ export async function reofferToUnaccepted(
     .order("tier")
     .order("full_name");
 
-  // Everyone not currently on the shift and not a self-canceller. No slice to
-  // openSpots — this is the last ask, so it goes wide, and the accepts that
-  // reach the target close the rest via markFullyStaffed.
-  const candidates = (pool ?? []).filter((c) => !onShift.has(c.id) && !selfCancelled.has(c.id));
+  // Everyone not currently on the shift and not inside their cooling-off window.
+  // No slice to openSpots — this is the last ask, so it goes wide, and the
+  // accepts that reach the target close the rest via markFullyStaffed.
+  const candidates = (pool ?? []).filter((c) => !onShift.has(c.id) && !coolingOff.has(c.id));
   if (candidates.length === 0) {
     return emptyOffer(shift.shift_date, openSpots, false);
   }
