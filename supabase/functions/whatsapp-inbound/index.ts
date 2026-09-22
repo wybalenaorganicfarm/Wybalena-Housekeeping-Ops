@@ -436,9 +436,12 @@ Deno.serve(async (req) => {
         // What Ashleigh is told has to match what the system actually did.
         // "Re-assignment in progress" is wrong when the shift has tiers left to
         // escalate through and is simply waiting its turn.
-        const outcome = await cancelOffer(sb, assignmentId);
+        // selfCancelled=true: SHE dropped the shift, so the re-offer sweep must
+        // not hand it straight back to her (the 04/10 complaint). An admin
+        // removal via cancel-accepted passes no flag and keeps her eligible.
+        const outcome = await cancelOffer(sb, assignmentId, true);
         const outcomeNote = outcome === "reoffered"
-          ? "All tiers had already been offered, so the shift has been re-offered to everyone still available."
+          ? `All tiers had already been offered, so the shift has been re-offered to everyone still available (excluding ${cleaner.full_name}).`
           : "The shift has not reached Tier 3 yet, so the freed spot is included in the next scheduled escalation. You can also assign a cleaner manually.";
         await sendOutcome(cleaner.phone, "cancelled_confirmation", "Shift Cancelled", sb, shiftRef);
         // Raise an alert so the admin sees it on the Dashboard + Alerts and can

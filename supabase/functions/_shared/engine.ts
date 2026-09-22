@@ -206,6 +206,10 @@ export async function offerToCleaner(
       offer_code: code,
       is_manual_override: true,
       responded_at: null,
+      // Deliberate admin override: Ashleigh may well know this cleaner has freed
+      // up since she cancelled. Clearing the marker both allows the offer and
+      // stops a stale flag excluding her from this shift's later sweeps.
+      self_cancelled_at: null,
     }, { onConflict: "shift_id,cleaner_id" })
     .select("id, offer_code")
     .maybeSingle();
@@ -509,12 +513,18 @@ export async function daysSinceCurrentTierOffer(
 // Last-resort re-offer after a cancellation, once the tier chain is exhausted.
 //
 // Unlike offerTier this ignores tiers entirely and re-asks EVERY offerable
-// cleaner who has not accepted this shift — the ones who declined, the ones who
-// never replied, and the one whose cancellation triggered it. By the time the
-// chain is spent everyone already has a row on the shift, so an
-// only-people-never-asked rule would find nobody and the fallback would be a
-// no-op. A decline three weeks ago is not a decline today; asking again is the
-// entire point of this step.
+// cleaner who has not accepted this shift — the ones who declined and the ones
+// who never replied. By the time the chain is spent everyone already has a row
+// on the shift, so an only-people-never-asked rule would find nobody and the
+// fallback would be a no-op. A decline three weeks ago is not a decline today;
+// asking again is the entire point of this step.
+//
+// ONE exception: a cleaner who cancelled this very shift herself
+// (self_cancelled_at set). She has just told us she cannot work it, so handing
+// it straight back to her is noise at best and looks broken at worst — which is
+// exactly what Mai and Cassie saw on the 04/10 shift. An ADMIN removal is not
+// an exception: it leaves self_cancelled_at null and she stays in the pool,
+// because being taken off a shift says nothing about her availability for it.
 //
 // shift_assignments is UNIQUE (shift_id, cleaner_id), so an existing row is
 // RE-OPENED in place — fresh offer code, reminder stamp cleared so the reminder
@@ -539,10 +549,16 @@ export async function reofferToUnaccepted(
   // regardless of tier. No slice — everyone available gets the offer.
   const { data: existing } = await sb
     .from("shift_assignments")
-    .select("id, cleaner_id, status")
+    .select("id, cleaner_id, status, self_cancelled_at")
     .eq("shift_id", shiftId);
   const rows = existing ?? [];
   const onShift = new Set(rows.filter((r) => r.status === "accepted").map((r) => r.cleaner_id));
+  // Cleaners who dropped THIS shift themselves. Excluded below — see the note
+  // above. Scoped to this shift only: cancelling the 4 Oct shift must not make
+  // her unofferable for the 11 Oct one.
+  const selfCancelled = new Set(
+    rows.filter((r) => r.self_cancelled_at != null).map((r) => r.cleaner_id),
+  );
   const rowByCleaner = new Map(rows.map((r) => [r.cleaner_id, r]));
 
   const { data: pool } = await sb
@@ -553,10 +569,10 @@ export async function reofferToUnaccepted(
     .order("tier")
     .order("full_name");
 
-  // Everyone not currently ON the shift. No slice to openSpots — this is the
-  // last ask, so it goes wide, and the accepts that reach the target close the
-  // rest via markFullyStaffed.
-  const candidates = (pool ?? []).filter((c) => !onShift.has(c.id));
+  // Everyone not currently on the shift and not a self-canceller. No slice to
+  // openSpots — this is the last ask, so it goes wide, and the accepts that
+  // reach the target close the rest via markFullyStaffed.
+  const candidates = (pool ?? []).filter((c) => !onShift.has(c.id) && !selfCancelled.has(c.id));
   if (candidates.length === 0) {
     return emptyOffer(shift.shift_date, openSpots, false);
   }
@@ -762,7 +778,17 @@ async function deepestTierOffered(sb: SupabaseClient, shiftId: string): Promise<
 //     on the shift.
 export type CancelOutcome = "reoffered" | "waiting" | "closed";
 
-export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Promise<CancelOutcome> {
+// `selfCancelled` says WHO dropped the shift, and it matters because the two
+// cases are opposites. A cleaner who taps "Yes, cancel" has just told us she
+// cannot work this shift — re-offering it to her minutes later is the bug
+// Mai and Cassie both hit on the 04/10 shift. An admin removing a cleaner
+// (cancel-accepted) has told us no such thing, so she stays eligible.
+// Stamped on the row here, then honoured by reofferToUnaccepted below.
+export async function cancelOffer(
+  sb: SupabaseClient,
+  assignmentId: string,
+  selfCancelled = false,
+): Promise<CancelOutcome> {
   const { data: a } = await sb
     .from("shift_assignments")
     .select("shift_id")
@@ -772,8 +798,14 @@ export async function cancelOffer(sb: SupabaseClient, assignmentId: string): Pro
   // failure here would tell the cleaner the shift was dropped while it stays
   // accepted (and thus wrongly counted as staffed).
   if (!a) return "closed";
+  const now = new Date().toISOString();
   const { error: cancelErr } = await sb.from("shift_assignments")
-    .update({ status: "cancelled", responded_at: new Date().toISOString() })
+    .update({
+      status: "cancelled",
+      responded_at: now,
+      // Only set on a self-cancel; an admin removal deliberately leaves it null.
+      ...(selfCancelled ? { self_cancelled_at: now } : {}),
+    })
     .eq("id", assignmentId);
   if (cancelErr) {
     console.error(`[engine] cancelOffer write failed for ${assignmentId}: ${cancelErr.message}`);
