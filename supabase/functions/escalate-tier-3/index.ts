@@ -56,7 +56,12 @@ Deno.serve(async (req) => {
     .from("shifts")
     .select("id, shift_date, shift_type, required_cleaners")
     .eq("status", "staffing")
-    .eq("current_tier", lastTier);
+    .eq("current_tier", lastTier)
+    // Same scope as Pass 2 below. Without this, a shift with no staffing_track
+    // (reachable via a manual offer on an already-`staffing` shift) was alerted
+    // and emailed as URGENT here while Pass 2 never escalated it — a recurring
+    // alert for a shift this job does not otherwise act on.
+    .in("staffing_track", ["weekly", "catchup"]);
   for (const s of lastTierShifts ?? []) {
     try {
       if (await daysSinceCurrentTierOffer(sb, s.id, lastTier) < 1) continue;

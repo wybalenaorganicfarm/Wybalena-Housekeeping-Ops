@@ -24,12 +24,19 @@ export async function raiseTier3Alert(
     .eq("status", "open")
     .maybeSingle();
   if (!dup) {
-    await sb.from("alerts").insert({
+    const { error: alertErr } = await sb.from("alerts").insert({
       alert_type: "understaffed_urgent",
       shift_id: shift.id,
       title: "Tier 3 reached — understaffed",
       body: `${shift.shift_type} on ${shift.shift_date} reached Tier 3 and still has open spots. Intervene manually.`,
     });
+    if (alertErr) {
+      // Log, but STILL send the email below. The dashboard alert is one of two
+      // channels; losing the row silently would mean Ashleigh never learns the
+      // shift hit Tier 3 understaffed. The email is the more urgent channel, so
+      // a failed insert must not suppress it.
+      console.error(`[tier3Alert] alert insert failed for shift ${shift.id}: ${alertErr.message}`);
+    }
     // Only email alongside a NEW alert. Without this the daily catch-up would
     // send the same urgent email every single day until the shift is staffed.
     await sendEmail(

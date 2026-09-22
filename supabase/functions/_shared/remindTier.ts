@@ -160,9 +160,29 @@ async function sendReminders(
     }
 
     // Stamp every offer this one message covered, in a single write.
-    await sb.from("shift_assignments")
+    //
+    // Checked: the reminder has ALREADY been sent, so a silent failure here
+    // leaves the offers unstamped and they are all reminded again on the next
+    // run — the repeat-reminder failure this file's header documents (the five
+    // separate reminders on 19 August). Surface it so a recurring stamp failure
+    // is visible instead of presenting as a fresh flood.
+    const { error: stampErr } = await sb.from("shift_assignments")
       .update({ reminder_sent_at: new Date().toISOString() })
       .in("id", rows.map((r) => r.id));
+    if (stampErr) {
+      console.error(`[remindTier] reminder_sent_at stamp failed for ${cleaner.full_name ?? "cleaner"}: ${stampErr.message}`);
+      await writeAuditLog(sb, {
+        event_type: "reminder.stamp_failed",
+        event_label: "Reminder Stamp Failed",
+        status: "warning",
+        summary: `A ${TIER_WORD[tier]} reminder was sent to ${cleaner.full_name ?? "a cleaner"} but could not be recorded, so the same offer(s) may be reminded again on the next run.`,
+        error_message: stampErr.message,
+        detail: { tier, assignment_ids: rows.map((r) => r.id) },
+        source,
+        cleaner_id: cleanerId,
+        triggered_by: "cron",
+      });
+    }
 
     reminded += rows.length;
     names.push(cleaner.full_name ?? "cleaner");

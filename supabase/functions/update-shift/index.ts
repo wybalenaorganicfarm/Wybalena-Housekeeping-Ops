@@ -8,6 +8,7 @@ import { writeAuditLog } from "../_shared/auditLog.ts";
 import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { renderTemplate } from "../_shared/templates.ts";
 import { prettyDate, prettyDateTime, prettyTime } from "../_shared/datetime.ts";
+import { acceptedCount, markFullyStaffed, tierChain } from "../_shared/engine.ts";
 
 // Fields the Edit Shift modal may change — anything else the client sends is ignored.
 //
@@ -99,8 +100,55 @@ Deno.serve(async (req) => {
     const { error: clearErr } = await sb.from("shifts").update({ offer_code: null }).eq("id", shiftId);
     if (clearErr) console.error(`[update-shift] clearing offer_code failed for ${shiftId}: ${clearErr.message}`);
     else {
-      const { error: codeErr } = await sb.rpc("assign_shift_offer_code", { p_shift_id: shiftId });
+      const { data: newCode, error: codeErr } = await sb.rpc("assign_shift_offer_code", { p_shift_id: shiftId });
       if (codeErr) console.error(`[update-shift] reissuing offer_code failed for ${shiftId}: ${codeErr.message}`);
+      else {
+        // Carry the new code onto this shift's assignment rows too. shifts.offer_code
+        // is UNIQUE but shift_assignments.offer_code is not, so leaving the old code
+        // on the rows frees it on `shifts` while the rows still answer to it: a later
+        // shift could be issued that same code, and a typed "ACCEPT 0409" (the path
+        // used when a button payload is stripped) resolves newest-row-first and would
+        // land the cleaner on the WRONG shift.
+        const { error: rowCodeErr } = await sb.from("shift_assignments")
+          .update({ offer_code: (newCode as string | null) ?? null })
+          .eq("shift_id", shiftId);
+        if (rowCodeErr) console.error(`[update-shift] updating assignment offer_code failed for ${shiftId}: ${rowCodeErr.message}`);
+      }
+    }
+  }
+
+  // required_cleaners is editable, and changing it changes whether the shift is
+  // full — but nothing here recomputed that, so the two directions both broke:
+  //
+  //   raised  on a fully_staffed shift -> stayed fully_staffed with a spot open.
+  //           offerTier bails on fully_staffed and every escalate job filters
+  //           status='staffing', so the extra spot was never offered to anyone
+  //           and the shift silently went short on the day.
+  //   lowered to at or below the accepted count -> stayed `staffing`, so
+  //           escalations and reminders kept chasing cleaners for a full shift.
+  //
+  // Recompute here rather than in the engine: this is the only place the target
+  // changes without a response arriving.
+  if (Object.prototype.hasOwnProperty.call(clean, "required_cleaners")) {
+    const { data: after } = await sb
+      .from("shifts").select("status, required_cleaners, current_tier").eq("id", shiftId).maybeSingle();
+    if (after && after.status !== "cancelled") {
+      const accepted = await acceptedCount(sb, shiftId);
+      if (accepted >= (after.required_cleaners as number)) {
+        // Now full (target lowered, or unchanged and already met).
+        if (after.status !== "fully_staffed") await markFullyStaffed(sb, shiftId);
+      } else if (after.status === "fully_staffed") {
+        // Target raised past what is accepted — reopen so the chain can fill it.
+        // Restore a tier, or the escalate jobs cannot find the shift: they match
+        // on current_tier, which markFullyStaffed nulled when it filled.
+        const chain = await tierChain(sb);
+        const { error: reopenErr } = await sb.from("shifts")
+          .update({ status: "staffing", current_tier: after.current_tier ?? chain[0] ?? "tier_1" })
+          .eq("id", shiftId);
+        if (reopenErr) {
+          console.error(`[update-shift] reopen after required_cleaners raise failed for ${shiftId}: ${reopenErr.message}`);
+        }
+      }
     }
   }
 

@@ -82,11 +82,21 @@ async function hasAnyOffer(
   sb: ReturnType<typeof serviceClient>,
   shiftId: string,
 ): Promise<boolean> {
+  // Test the STATUS, not offered_at. offered_at is `timestamptz not null default
+  // now()` and was never made nullable, so `.not("offered_at","is",null)` matched
+  // every row unconditionally — and since roster_manager_on_shift() adds a
+  // team_lead row at shift creation, this returned true for every non-wipeover
+  // shift before a single offer had been sent. That made the rescue branch below
+  // unreachable: a catch-up shift whose every send failed was skipped forever.
+  //
+  // A real offer is one that reached (or was meant to reach) a cleaner.
+  // send_failed is deliberately NOT here — that is precisely the stranded case
+  // this check exists to rescue. team_lead is a roster reservation, not an offer.
   const { count } = await sb
     .from("shift_assignments")
     .select("id", { count: "exact", head: true })
     .eq("shift_id", shiftId)
-    .not("offered_at", "is", null);
+    .in("status", ["offered", "accepted", "declined", "cancelled", "no_response"]);
   return (count ?? 0) > 0;
 }
 

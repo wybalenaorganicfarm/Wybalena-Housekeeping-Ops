@@ -150,9 +150,16 @@ async function sendAndRecordOffer(
   const res = await sendOfferMessage(sb, phone, shift, assignmentId, cleaner.offer_code, templateKey);
   if (!res.ok) return false;
   if (res.providerMessageId) {
-    await sb.from("shift_assignments")
+    // Best-effort: this id only helps correlate a reply that arrives with a
+    // quoted-message context. The offer itself has landed and the button payload
+    // carries the assignment id, so a failure here degrades correlation rather
+    // than breaking the offer — but it must not pass silently.
+    const { error: msgIdErr } = await sb.from("shift_assignments")
       .update({ offer_message_id: res.providerMessageId })
       .eq("id", assignmentId);
+    if (msgIdErr) {
+      console.error(`[engine] offer_message_id stamp failed for ${assignmentId}: ${msgIdErr.message}`);
+    }
   }
   // The offer landed, but as plain text — WhatsApp refused the buttons on every
   // attempt. Recorded here, at the one point every send path passes through, so
@@ -246,7 +253,7 @@ export async function offerToCleaner(
 
   // Reflect that the shift is actively being staffed (only once delivered).
   if (shift.status === "pending_confirmation" || shift.status === "confirmed") {
-    await sb.from("shifts")
+    const { error: trackErr } = await sb.from("shifts")
       .update({
         status: "staffing",
         current_tier: shift.current_tier ?? cleaner.tier,
@@ -255,6 +262,11 @@ export async function offerToCleaner(
         staffing_track: shift.staffing_track ?? "weekly",
       })
       .eq("id", shiftId);
+    if (trackErr) {
+      // The offer is already out; log rather than fail the caller. Left
+      // unflagged, the shift is invisible to the escalate/remind jobs.
+      console.error(`[engine] offerToCleaner shift update failed for ${shiftId}: ${trackErr.message}`);
+    }
   }
   return "offered";
 }
@@ -425,7 +437,24 @@ export async function offerTier(
     const patch: Record<string, unknown> = { status: "staffing", current_tier: tier };
     // First delivered offer decides the chain; after that the track is fixed.
     if (track && !shift.staffing_track) patch.staffing_track = track;
-    await sb.from("shifts").update(patch).eq("id", shiftId);
+    // Surfaced, not swallowed: offers are already out, so a silent failure here
+    // leaves the shift `confirmed` with live offers against it — invisible to
+    // every escalate job (they filter status='staffing') and to the reminders.
+    const { error: shiftErr } = await sb.from("shifts").update(patch).eq("id", shiftId);
+    if (shiftErr) {
+      console.error(`[engine] offerTier shift update failed for ${shiftId}: ${shiftErr.message}`);
+      await writeAuditLog(sb, {
+        event_type: "shift.staffing_flag_failed",
+        event_label: "Shift Not Flagged As Staffing",
+        status: "warning",
+        summary: `Offers for the shift on ${prettyDate(shift.shift_date)} went out, but the shift could not be flagged as being staffed. The offers are live and can still be accepted; escalations and reminders will not pick it up until this is corrected.`,
+        error_message: shiftErr.message,
+        detail: { shift_id: shiftId, tier, offered: offered.length },
+        source: "engine",
+        shift_id: shiftId,
+        triggered_by: "system",
+      });
+    }
     // Offers still open at a tier this shift has now passed are LEFT open — see
     // the note above the (removed) closeSupersededOffers: they stay acceptable
     // and visible, and are never re-reminded because remindTier gates on
@@ -479,9 +508,16 @@ export async function nextOfferableTier(
 
   const { data: rows } = await sb
     .from("shift_assignments")
-    .select("cleaner_id")
+    .select("cleaner_id, status")
     .eq("shift_id", shiftId);
-  const taken = new Set((rows ?? []).map((r) => r.cleaner_id));
+  // Must match offerTier's definition of "taken" exactly. offerTier deliberately
+  // treats send_failed as retryable; this counted it as occupied, so a tier whose
+  // cleaners all failed to receive their offer was judged full, stepped over, and
+  // never revisited — this function only ever scans tiers AFTER the current one.
+  // Three available cleaners could be dropped from a shift permanently.
+  const taken = new Set(
+    (rows ?? []).filter((r) => r.status !== "send_failed").map((r) => r.cleaner_id),
+  );
 
   for (let i = from; i < chain.length; i++) {
     const { data: pool } = await sb
@@ -512,6 +548,10 @@ export async function daysSinceCurrentTierOffer(
     .select("offered_at")
     .eq("shift_id", shiftId)
     .eq("tier_at_offer", tier)
+    // Same exclusion as deepestTierOffered: her roster row carries shift-CREATION
+    // time in offered_at, so a shift adopted today could read as days old and be
+    // escalated the same day — exactly what the caller's <1 day guard prevents.
+    .neq("status", "team_lead")
     .not("offered_at", "is", null)
     .order("offered_at", { ascending: false })
     .limit(1)
@@ -621,7 +661,7 @@ export async function reofferToUnaccepted(
       continue;
     }
     const offer_code = shiftCode;
-    await sb.from("shift_assignments")
+    const { error: reopenErr } = await sb.from("shift_assignments")
       .update({
         status: "offered",
         offer_code,
@@ -633,6 +673,15 @@ export async function reofferToUnaccepted(
         responded_at: null,
       })
       .eq("id", row.id);
+    // Only queue the send if the row really reopened. Unchecked, a failed write
+    // left the row `declined`/`cancelled` while the cleaner still received "a
+    // spot has opened up" — and claim_shift_slot refuses any status outside
+    // offered/no_response, so tapping Accept answered "this offer is no longer
+    // open" on a shift she had just been offered, with the spot left unfilled.
+    if (reopenErr) {
+      console.error(`[engine] re-offer reopen failed for ${row.id}: ${reopenErr.message}`);
+      continue;
+    }
     assignments.push({ id: row.id, cleaner_id: c.id, offer_code });
   }
 
@@ -672,10 +721,31 @@ export async function reofferToUnaccepted(
 
 // Mark a shift fully staffed and close + notify any remaining open offers.
 export async function markFullyStaffed(sb: SupabaseClient, shiftId: string): Promise<void> {
-  await sb
+  // Check this write BEFORE telling anyone the shift is full. If it fails and we
+  // carry on, every open offer is closed to no_response and its holder is told
+  // "now fully booked" — while the shift is still `staffing` with current_tier
+  // intact, so escalate-tier-3 keeps chasing it and raises an URGENT understaffed
+  // alert for a shift that is actually full. Bail instead: the offers stay open,
+  // the next accept or cancel re-runs this, and nobody is told a falsehood.
+  const { error } = await sb
     .from("shifts")
     .update({ status: "fully_staffed", current_tier: null })
     .eq("id", shiftId);
+  if (error) {
+    console.error(`[engine] markFullyStaffed write failed for ${shiftId}: ${error.message}`);
+    await writeAuditLog(sb, {
+      event_type: "shift.mark_full_failed",
+      event_label: "Shift Could Not Be Marked Full",
+      status: "failed",
+      summary: "A shift reached its full complement but could not be marked fully staffed. Open offers were left open and no cleaner was told it was full — it will settle on the next response. Check the shift if this repeats.",
+      error_message: error.message,
+      detail: { shift_id: shiftId },
+      source: "engine",
+      shift_id: shiftId,
+      triggered_by: "system",
+    });
+    return;
+  }
 
   // Name the shift being closed — a cleaner may hold offers on several.
   const closed = await loadShift(sb, shiftId);
@@ -786,6 +856,14 @@ async function deepestTierOffered(sb: SupabaseClient, shiftId: string): Promise<
     .from("shift_assignments")
     .select("tier_at_offer")
     .eq("shift_id", shiftId)
+    // EXCLUDE the Cleaning Manager's roster row. roster_manager_on_shift() puts a
+    // status='team_lead' row on every non-wipeover shift AT CREATION, stamped with
+    // her own cleaner tier purely to satisfy the NOT NULL constraint — that
+    // migration's comment says it "is never read for a team_lead-status row", and
+    // this query was reading it. With a tier_3 manager every shift looked like it
+    // had already reached tier_3 the moment it was created, so the first
+    // cancellation skipped the entire tier chain and fired the last-resort blast.
+    .neq("status", "team_lead")
     .not("tier_at_offer", "is", null);
   let best: Tier | null = null;
   for (const r of data ?? []) {
