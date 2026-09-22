@@ -267,7 +267,11 @@ Deno.serve(async (req) => {
     if (!assignmentId) {
       // A button action with no open offer to apply it to. Record it internally,
       // but never message the cleaner — they get no error replies at all.
-      if (r.action !== "unknown") {
+      //
+      // No "is this unknown?" guard here: the hard gate at 2a already returned
+      // for action === "unknown", so by this point it cannot be. The guard that
+      // used to wrap this block was dead code and failed `deno check`.
+      {
         await writeAuditLog(sb, {
           event_type: "response.unknown",
           event_label: "WhatsApp Reply Received",
@@ -279,7 +283,8 @@ Deno.serve(async (req) => {
           triggered_by: "webhook",
         });
       }
-      results.push({ id: r.providerMessageId, skipped: r.action === "unknown" ? "ignored chatter" : "no matching offer" });
+      // Always "no matching offer" — ignored chatter already returned at gate 2a.
+      results.push({ id: r.providerMessageId, skipped: "no matching offer" });
       continue;
     }
 

@@ -92,8 +92,13 @@ export async function loadCancellationCooloff(sb: SupabaseClient): Promise<Cance
     const v = (data as { value?: Record<string, unknown> } | null)?.value;
     if (!v) return DEFAULT_CANCELLATION_COOLOFF;
     return {
+      // `?? undefined` before clamping: Number(null) is 0, not NaN, so a row
+      // holding an explicit null would clamp to 0 and silently DISABLE the
+      // cooling-off rather than fall back to the default. 0 is a legitimate
+      // value here ("off"), so it must only ever come from someone actually
+      // choosing it.
       cooloffHours: clampInt(
-        v.cooloff_hours,
+        v.cooloff_hours ?? undefined,
         COOLOFF_LIMITS.cooloffHours.min,
         COOLOFF_LIMITS.cooloffHours.max,
         DEFAULT_CANCELLATION_COOLOFF.cooloffHours,
