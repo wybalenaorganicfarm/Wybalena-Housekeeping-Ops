@@ -9,6 +9,13 @@ import { writeAuditLog } from "./auditLog.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
+// Which wording an offer goes out with. Normal tier offers use `shift_offer`;
+// the post-cancellation sweep uses `reoffer_after_cancellation`, which tells the
+// cleaner a spot has come free — otherwise someone who declined weeks ago gets a
+// message identical to the original and assumes the system is repeating itself.
+// See supabase/migrations/20260922120000_reoffer_after_cancellation_template.sql.
+export type OfferTemplate = "shift_offer" | "reoffer_after_cancellation";
+
 // Which automation chain owns a shift. Decided at the first delivered offer and
 // never changed — see supabase/migrations/20260819120000_staffing_track.sql.
 export type StaffingTrack = "weekly" | "catchup";
@@ -83,11 +90,12 @@ async function sendOfferMessage(
   shift: ShiftRow,
   assignmentId: string | undefined,
   offerCode: string | null | undefined,
+  templateKey: OfferTemplate = "shift_offer",
 ) {
   // Cleaners read these — spell the day out and use am/pm, never raw ISO.
   const date = prettyDate(shift.shift_date);
   const time = prettyTime(shift.start_time);
-  const t = await loadTemplate(sb, "shift_offer");
+  const t = await loadTemplate(sb, templateKey);
   // The fallback text is what a cleaner gets when the buttons could not be sent,
   // so it must never tell them to tap one. It asks for a keyword reply carrying
   // the offer code, which is how whatsapp-inbound pins a typed reply to this
@@ -135,9 +143,10 @@ async function sendAndRecordOffer(
   shift: ShiftRow,
   assignmentId: string | undefined,
   cleaner: { id: string; full_name: string; offer_code?: string | null },
+  templateKey: OfferTemplate = "shift_offer",
 ): Promise<boolean> {
   if (!phone || !assignmentId) return false;
-  const res = await sendOfferMessage(sb, phone, shift, assignmentId, cleaner.offer_code);
+  const res = await sendOfferMessage(sb, phone, shift, assignmentId, cleaner.offer_code, templateKey);
   if (!res.ok) return false;
   if (res.providerMessageId) {
     await sb.from("shift_assignments")
@@ -279,6 +288,7 @@ async function deliverOffers(
   shift: ShiftRow,
   candidates: { id: string; full_name: string; phone: string | null }[],
   inserted: { id: string; cleaner_id: string; offer_code?: string | null }[],
+  templateKey: OfferTemplate = "shift_offer",
 ): Promise<{ offered: { id: string; full_name: string }[]; failedIds: string[]; failedNames: string[] }> {
   const byId = new Map(inserted.map((r) => [r.cleaner_id, r]));
   const offered: { id: string; full_name: string }[] = [];
@@ -290,7 +300,7 @@ async function deliverOffers(
       id: c.id,
       full_name: c.full_name,
       offer_code: row?.offer_code,
-    });
+    }, templateKey);
     if (ok) offered.push({ id: c.id, full_name: c.full_name });
     else {
       if (row?.id) failedIds.push(row.id);
@@ -621,7 +631,11 @@ export async function reofferToUnaccepted(
     assignments.push(...(inserted ?? []));
   }
 
-  const { offered, failedNames } = await deliverOffers(sb, shift, candidates, assignments);
+  // Distinct wording: this is the "someone cancelled, a spot is free" sweep, and
+  // most of these cleaners have already seen (and declined) the standard offer.
+  const { offered, failedNames } = await deliverOffers(
+    sb, shift, candidates, assignments, "reoffer_after_cancellation",
+  );
 
   if (offered.length > 0) {
     await sb.from("shifts").update({ status: "staffing" }).eq("id", shiftId);

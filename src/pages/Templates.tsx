@@ -22,6 +22,10 @@ const SAMPLE: Record<string, string> = {
   shift_date: "Saturday 25th July 2026",
   start_time: "9:30am",
   shift_type: "standard",
+  // Matches the real format: the shift date as DDMM (2507 = 25 July). Without
+  // this the offer templates preview a literal {{offer_code}}, which is not what
+  // a cleaner receives.
+  offer_code: "2507",
 };
 
 function fillVars(text: string, vars: Record<string, string>): string {
