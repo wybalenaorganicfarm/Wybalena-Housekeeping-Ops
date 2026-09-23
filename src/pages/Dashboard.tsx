@@ -11,8 +11,7 @@ import { ShiftCalendar } from "../components/ShiftCalendar";
 import { NewShiftModal } from "../components/NewShiftModal";
 import { AssignModal } from "../components/AssignModal";
 import {
-  confirmCancellation, confirmShifts, dismissAlert, getAlerts, getBookings,
-  getShifts, getStaffing,
+  confirmShifts, getAlerts, getBookings, getShifts, getStaffing,
 } from "../lib/api";
 import {
   countLabel, dateLabel, dateTimeLabel, longDateLabel, shiftBookingName,
@@ -59,27 +58,6 @@ function todayKey(): string {
 // crushing. Booking flexes to fill the remainder.
 const AGENDA_GRID = "150px 96px 140px minmax(140px,1fr) 190px 172px 110px";
 const agendaRow = { display: "grid", gridTemplateColumns: AGENDA_GRID, alignItems: "center" } as const;
-
-const ALERT_ICON: Record<string, string> = {
-  understaffed_urgent: "alert",
-  booking_cancelled: "calendar",
-  venue_gap: "cloud",
-  mid_retreat_needed: "sunrise",
-  unconfirmed_shifts: "clock",
-  cleaner_cancelled: "user",
-  connection_down: "cloud",
-  shift_moved: "calendar",
-};
-const ALERT_COLOR: Record<string, string> = {
-  understaffed_urgent: c.danger,
-  booking_cancelled: c.teal,
-  venue_gap: c.muted2,
-  mid_retreat_needed: c.warn,
-  unconfirmed_shifts: c.warn,
-  cleaner_cancelled: c.danger,
-  shift_moved: c.warn,
-  connection_down: c.danger,
-};
 
 export function Dashboard() {
   const { canEdit, isTeamLead, profile } = useAuth();
@@ -128,7 +106,6 @@ export function Dashboard() {
 
   const pendingShifts = useMemo(() => active.filter((s) => s.status === "pending_confirmation"), [active]);
 
-  const openAlerts = alerts.filter((a) => a.status === "open");
   const urgentIds = useMemo(
     () => new Set(alerts.filter((a) => a.status === "open" && a.alert_type === "understaffed_urgent" && a.shift_id).map((a) => a.shift_id!)),
     [alerts],
@@ -241,7 +218,7 @@ export function Dashboard() {
           </div>
 
           {view === "calendar" ? (
-            <ShiftCalendar shifts={active} bookings={bookings} showBookings initialDate={agenda[0]?.shift_date} onSelect={(s) => setDrawer(s)} onSelectBooking={(b) => setBookingDrawer(b)} />
+            <ShiftCalendar shifts={active} bookings={bookings} showBookings onSelect={(s) => setDrawer(s)} onSelectBooking={(b) => setBookingDrawer(b)} />
           ) : agenda.length === 0 ? (
             <Card style={{ padding: 34, textAlign: "center", color: c.faint, fontSize: 13 }}>{scope === "past" ? "No past shifts." : scope === "all" ? "No shifts." : "No upcoming shifts."}</Card>
           ) : (
@@ -315,7 +292,7 @@ export function Dashboard() {
                           {canEdit && s.status === "pending_confirmation"
                             ? <Button kind="secondary" disabled={confirming[s.id]} onClick={() => confirm(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming[s.id] ? "Confirming…" : "Confirm"}</Button>
                             : canEdit && (s.status === "staffing" || urgent)
-                              ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Offer</Button>
+                              ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Override</Button>
                               : <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "7px 13px", fontSize: 12 }}>View</Button>}
                         </div>
                       </div>
@@ -327,84 +304,32 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* right rail — pending shifts + alerts queue. Hidden for the team lead:
-            neither is theirs to action, so their dashboard is just the agenda. */}
-        {!isTeamLead && (
+        {/* right rail — pending shifts only. The alerts queue lives on the Alerts
+            page (left nav) and was duplicating it here, squeezing the agenda off
+            the right edge. Hidden for the team lead: pending shifts aren't theirs
+            to action, and the rail collapses entirely when the queue is empty so
+            the agenda gets the full width. */}
+        {!isTeamLead && canEdit && pendingShifts.length > 0 && (
         <div className="dash-rail" style={{ flex: "none", width: 296, background: c.rail, borderLeft: `1px solid ${c.border2}`, overflowY: "auto", padding: "22px 18px 40px" }}>
-          {canEdit && pendingShifts.length > 0 && (
-            <div style={{ marginBottom: 22 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight }}>Shifts to be scheduled</div>
-                  <span style={{ background: "#FBF1DF", color: c.warn, fontSize: 11, fontWeight: 700, borderRadius: 20, padding: "1px 9px" }}>{pendingShifts.length}</span>
-                </div>
-              </div>
-              {pendingShifts.map((s) => {
-                const tp = timeParts(s.start_time);
-                return (
-                  <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: 13, marginBottom: 10, cursor: "pointer" }}>
-                    <div style={{ display: "flex", gap: 9 }}>
-                      <Icon name="clock" size={15} color={c.warn} strokeWidth={2} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{shiftTitle(s)}</div>
-                        <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2, lineHeight: 1.4 }}>{dateLabel(s.shift_date)} · {tp.hour}:{tp.min}</div>
-                        <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 9 }} onClick={(e) => e.stopPropagation()}>
-                          <Button onClick={() => confirm(s.id)} loading={confirming[s.id]} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm</Button>
-                          <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "6px 11px", fontSize: 11.5 }}>View</Button>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight }}>Alerts</div>
-              <span style={{ background: c.dangerBg, color: c.danger, fontSize: 11, fontWeight: 700, borderRadius: 20, padding: "1px 9px" }}>{openAlerts.length}</span>
+              <div style={{ fontFamily: font.display, fontSize: 15, fontWeight: font.displayWeight }}>Shifts to be scheduled</div>
+              <span style={{ background: "#FBF1DF", color: c.warn, fontSize: 11, fontWeight: 700, borderRadius: 20, padding: "1px 9px" }}>{pendingShifts.length}</span>
             </div>
-            <button onClick={() => navigate("/alerts")} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>View all</button>
           </div>
-          {openAlerts.length === 0 && <Card style={{ padding: 16, textAlign: "center", fontSize: 12.5, color: c.faint }}>No active alerts. All clear!</Card>}
-          {openAlerts.map((a) => {
-            const ic = ALERT_ICON[a.alert_type] ?? "alert";
-            const col = ALERT_COLOR[a.alert_type] ?? c.muted2;
-            const shift = a.shift_id ? active.find((s) => s.id === a.shift_id) : undefined;
+          {pendingShifts.map((s) => {
+            const tp = timeParts(s.start_time);
             return (
-              <Card key={a.id} style={{ padding: 13, marginBottom: 10 }}>
+              <Card key={s.id} onClick={() => setDrawer(s)} style={{ padding: 13, marginBottom: 10, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 9 }}>
-                  <Icon name={ic} size={15} color={col} strokeWidth={2} />
+                  <Icon name="clock" size={15} color={c.warn} strokeWidth={2} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>{a.title}</div>
-                    {a.body && <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2, lineHeight: 1.4 }}>{a.body}</div>}
-                    {canEdit && (
-                      <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 9 }}>
-                        {a.alert_type === "booking_cancelled" ? (
-                          <>
-                            <Button kind="danger" onClick={async () => { await confirmCancellation(a.id); await load(); }} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm cancel</Button>
-                            <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>No action</button>
-                          </>
-                        ) : a.alert_type === "understaffed_urgent" || a.alert_type === "cleaner_cancelled" ? (
-                          <>
-                            <button onClick={() => shift && setAssign(shift)} style={{ background: "none", border: "none", color: c.danger, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Assign manually <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
-                            {a.alert_type === "cleaner_cancelled" && <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>}
-                          </>
-                        ) : a.alert_type === "venue_gap" || a.alert_type === "mid_retreat_needed" ? (
-                          <button onClick={() => setShowNew(true)} style={{ background: "none", border: "none", color: c.teal, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Plan a clean <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
-                        ) : a.alert_type === "connection_down" ? (
-                          // Same route as the Alerts page: Connections re-probes on
-                          // open, which is what clears this alert once it's fixed.
-                          <>
-                            <button onClick={() => navigate("/connections")} style={{ background: "none", border: "none", color: c.danger, fontSize: 11.5, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>Reconnect <Icon name="arrowRight" size={13} strokeWidth={2.2} /></button>
-                            <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
-                          </>
-                        ) : (
-                          <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
-                        )}
-                      </div>
-                    )}
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>{shiftTitle(s)}</div>
+                    <div style={{ fontSize: 11.5, color: c.muted, marginTop: 2, lineHeight: 1.4 }}>{dateLabel(s.shift_date)} · {tp.hour}:{tp.min}</div>
+                    <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 9 }} onClick={(e) => e.stopPropagation()}>
+                      <Button onClick={() => confirm(s.id)} loading={confirming[s.id]} style={{ padding: "6px 11px", fontSize: 11.5 }}>Confirm</Button>
+                      <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "6px 11px", fontSize: 11.5 }}>View</Button>
+                    </div>
                   </div>
                 </div>
               </Card>

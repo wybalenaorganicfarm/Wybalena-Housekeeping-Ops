@@ -141,7 +141,7 @@ export function Bookings() {
 
       <div className="bkg-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
         {view === "calendar" ? (
-          <BookingCalendar bookings={filtered} initialDate={filtered[0]?.check_in} onSelect={(b) => setBookingDrawer(b)} />
+          <BookingCalendar bookings={filtered} onSelect={(b) => setBookingDrawer(b)} />
         ) : (
           <div className="bkg-table" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>

@@ -85,6 +85,46 @@ export const DEFAULT_CANCELLATION_COOLOFF: CancellationCooloff = { cooloffHours:
 
 export const COOLOFF_LIMITS = { cooloffHours: { min: 0, max: 336 } };  // up to 14 days
 
+// Event-driven notification switches.
+//
+// These fire on an EVENT (a cleaner cancels), not on a schedule, so they have no
+// cron row and cannot live on the Automation Schedule page as a timed job. They
+// are still operational behaviour the venue must be able to turn off, so they
+// get a plain on/off here and a toggle in the app.
+//
+// Default TRUE for every switch: the behaviour existed before the setting did,
+// so a missing/!malformed row must reproduce what the system already does rather
+// than silently going quiet.
+export interface NotificationSwitches {
+  leadCleanerCancelled: boolean;  // alert the Cleaning Manager when a cleaner cancels
+}
+
+export const DEFAULT_NOTIFICATION_SWITCHES: NotificationSwitches = {
+  leadCleanerCancelled: true,
+};
+
+// Only an explicit `false` turns a switch off. Anything else — absent key, null,
+// a string, a mis-edit — keeps the notification ON, because the failure mode of
+// "sent when you didn't expect it" is far safer here than a silent miss.
+function boolOn(v: unknown, dflt: boolean): boolean {
+  if (v === false || v === true) return v;
+  return dflt;
+}
+
+export async function loadNotificationSwitches(sb: SupabaseClient): Promise<NotificationSwitches> {
+  try {
+    const { data } = await sb
+      .from("app_settings").select("value").eq("key", "notification_switches").maybeSingle();
+    const v = (data as { value?: Record<string, unknown> } | null)?.value;
+    if (!v) return DEFAULT_NOTIFICATION_SWITCHES;
+    return {
+      leadCleanerCancelled: boolOn(v.lead_cleaner_cancelled, DEFAULT_NOTIFICATION_SWITCHES.leadCleanerCancelled),
+    };
+  } catch {
+    return DEFAULT_NOTIFICATION_SWITCHES;
+  }
+}
+
 export async function loadCancellationCooloff(sb: SupabaseClient): Promise<CancellationCooloff> {
   try {
     const { data } = await sb

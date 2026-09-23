@@ -8,7 +8,7 @@ import { CleanerNotesModal } from "../components/CleanerNotesModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { parsePhoneNumber, type CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
-import { addCleaner, getCleaners, getLatestCleanerNotes, getReliability, removeCleaner, setCleanerStatus, setManager, updateCleaner } from "../lib/api";
+import { addCleanerReturning, getCleaners, getLatestCleanerNotes, getReliability, removeCleaner, setCleanerStatus, setManager, stepDownManager, updateCleaner } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { acceptRate, monthYear } from "../lib/format";
 import type { Cleaner, CleanerNote, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
@@ -31,9 +31,13 @@ function AddCleanerModal({ existing, onClose, onSaved }: { existing: Cleaner[]; 
   const [country, setCountry] = useState<CountryCode>("AU");
   const [national, setNational] = useState("");
   const [email, setEmail] = useState("");
-  const [tier, setTier] = useState<CleanerTier>("tier_1");
+  // "manager" is not a tier in the DB — it is the is_team_leader role, which sits
+  // above the tiers. Picking it here creates the cleaner and then nominates them,
+  // so the role can be filled from this one form rather than add-then-nominate.
+  const [tier, setTier] = useState<CleanerTier | "manager">("tier_1");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const managerCount = existing.filter((x) => x.is_team_leader && x.is_active).length;
 
   async function save() {
     if (!full_name.trim()) { setErr("Name is required"); return; }
@@ -58,13 +62,34 @@ function AddCleanerModal({ existing, onClose, onSaved }: { existing: Cleaner[]; 
     }
 
     setBusy(true);
-    const e = await addCleaner({ full_name: full_name.trim(), phone: e164, email: emailNorm || undefined, tier });
+    // The manager still needs a tier stored (cleaners.tier is NOT NULL); tier_1
+    // is a placeholder that is never read for her, because every tier lookup
+    // excludes is_team_leader rows.
+    const asManager = tier === "manager";
+    const created = await addCleanerReturning({
+      full_name: full_name.trim(), phone: e164, email: emailNorm || undefined,
+      tier: asManager ? "tier_1" : tier,
+    });
+    if (typeof created === "string") { setBusy(false); setErr(created); return; }
+    if (asManager) {
+      // Nominate in the same flow. set-manager steps down any current holder and
+      // backfills the new one onto upcoming shifts, atomically.
+      const e = await setManager(created.id);
+      if (e) {
+        setBusy(false);
+        // The cleaner DID save — say so, rather than implying nothing happened.
+        setErr(`${full_name.trim()} was added, but making them Cleaning Manager failed: ${e}. Use the row menu to nominate.`);
+        onSaved();
+        return;
+      }
+    }
     setBusy(false);
-    if (e) { setErr(e); return; }
     onSaved(); onClose();
   }
 
-  const tiers: [CleanerTier, string][] = [["tier_1", "First to be offered"], ["tier_2", "After 24 hours"], ["tier_3", "Last-resort backup"]];
+  const tiers: [CleanerTier | "manager", string][] = [
+    ["tier_1", "First to be offered"], ["tier_2", "After 24 hours"], ["tier_3", "Last-resort backup"],
+  ];
 
   return (
     <Modal title="New cleaner profile" onClose={onClose}>
@@ -74,7 +99,7 @@ function AddCleanerModal({ existing, onClose, onSaved }: { existing: Cleaner[]; 
       </Field>
       <Field label="Email"><Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="name@email.com" /></Field>
       <div style={{ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: c.muted2, fontWeight: 600, marginBottom: 10 }}>Tier</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
         {tiers.map(([t, sub]) => {
           const on = tier === t;
           return (
@@ -83,13 +108,40 @@ function AddCleanerModal({ existing, onClose, onSaved }: { existing: Cleaner[]; 
                 {on && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.green }} />}
               </span>
               <span>
-                <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{TIER_LABEL[t]}</span>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{TIER_LABEL[t as CleanerTier]}</span>
                 <span style={{ display: "block", fontSize: 11, color: c.muted2 }}>{sub}</span>
               </span>
             </button>
           );
         })}
       </div>
+      {/* The role, offered alongside the tiers because that is how an admin thinks
+          of it ("which tier is this person?"), even though it is not a tier in the
+          data. Full width on its own row — it is a different KIND of choice. */}
+      {(() => {
+        const on = tier === "manager";
+        return (
+          <button onClick={() => setTier("manager")} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1.5px solid ${on ? c.warn : c.border3}`, borderRadius: 8, padding: "11px 12px", cursor: "pointer", marginBottom: 6 }}>
+            <span style={{ width: 14, height: 14, flex: "none", borderRadius: "50%", border: `2px solid ${on ? c.warn : c.border3}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {on && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.warn }} />}
+            </span>
+            <span>
+              <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>Cleaning Manager</span>
+              <span style={{ display: "block", fontSize: 11, color: c.muted2 }}>
+                Above the tiers · rostered onto every shift, never offered
+              </span>
+            </span>
+          </button>
+        );
+      })()}
+      {tier === "manager" && (
+        <div style={{ fontSize: 11.5, color: c.muted, lineHeight: 1.5, background: "#FBF1DF", border: `1px solid #EBD9B4`, borderRadius: 7, padding: "9px 11px", marginBottom: 6 }}>
+          They'll be rostered onto every upcoming standard shift automatically and get a
+          "you've been rostered" message — no accept needed, and it doesn't fill a cleaner slot.
+          On a wipeover clean they're assigned by hand and accept like anyone else.
+          {managerCount > 0 && <> The {managerCount === 1 ? "existing Cleaning Manager keeps" : `${managerCount} existing Cleaning Managers keep`} the role — you can have more than one.</>}
+        </div>
+      )}
       {err && <div style={{ color: c.danger, fontSize: 12.5, margin: "10px 0 0" }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <Button kind="secondary" onClick={onClose}>Cancel</Button>
@@ -107,9 +159,13 @@ function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cl
   const [country, setCountry] = useState<CountryCode>((parsed?.country as CountryCode) ?? "AU");
   const [national, setNational] = useState(parsed?.nationalNumber ? String(parsed.nationalNumber) : "");
   const [email, setEmail] = useState(cleaner.email ?? "");
-  const [tier, setTier] = useState<CleanerTier>(cleaner.tier);
+  // Same role-or-tier choice as the Add form, so the Cleaning Manager's details
+  // (and who holds the role) can be updated from the one place the client asked
+  // for. "manager" is the is_team_leader role, not a stored tier.
+  const [tier, setTier] = useState<CleanerTier | "manager">(cleaner.is_team_leader ? "manager" : cleaner.tier);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const otherManagers = existing.filter((x) => x.is_team_leader && x.is_active && x.id !== cleaner.id).length;
 
   async function save() {
     const e164 = toE164(country, national);
@@ -126,9 +182,25 @@ function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cl
     }
 
     setBusy(true);
-    const e = await updateCleaner(cleaner.id, { phone: e164, email: emailNorm || null, tier });
+    // Contact details always save. The stored tier keeps its existing value when
+    // the person is the manager, since that column is not read for them.
+    const asManager = tier === "manager";
+    const e = await updateCleaner(cleaner.id, {
+      phone: e164, email: emailNorm || null,
+      tier: asManager ? cleaner.tier : tier,
+    });
+    if (e) { setBusy(false); setErr(e); return; }
+
+    // Then apply any change to WHO holds the role. Promoting steps down the
+    // previous holder atomically; demoting clears the role entirely.
+    if (asManager && !cleaner.is_team_leader) {
+      const me = await setManager(cleaner.id);
+      if (me) { setBusy(false); setErr(`Details saved, but making them Cleaning Manager failed: ${me}`); onSaved(); return; }
+    } else if (!asManager && cleaner.is_team_leader) {
+      const me = await stepDownManager(cleaner.id);
+      if (me) { setBusy(false); setErr(`Details saved, but stepping them down failed: ${me}`); onSaved(); return; }
+    }
     setBusy(false);
-    if (e) { setErr(e); return; }
     onSaved(); onClose();
   }
 
@@ -155,7 +227,37 @@ function EditCleanerModal({ cleaner, existing, onClose, onSaved }: { cleaner: Cl
           );
         })}
       </div>
-      {tier !== cleaner.tier && (
+      {(() => {
+        const on = tier === "manager";
+        return (
+          <button onClick={() => setTier("manager")} style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1.5px solid ${on ? c.warn : c.border3}`, borderRadius: 8, padding: "11px 12px", cursor: "pointer", marginTop: 8 }}>
+            <span style={{ width: 14, height: 14, flex: "none", borderRadius: "50%", border: `2px solid ${on ? c.warn : c.border3}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {on && <span style={{ width: 7, height: 7, borderRadius: "50%", background: c.warn }} />}
+            </span>
+            <span>
+              <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>Cleaning Manager</span>
+              <span style={{ display: "block", fontSize: 11, color: c.muted2 }}>
+                Above the tiers · rostered onto every shift, never offered
+              </span>
+            </span>
+          </button>
+        );
+      })()}
+      {/* Spell out the consequence of the specific change being made — promotion,
+          step-down, or an ordinary tier move. */}
+      {tier === "manager" && !cleaner.is_team_leader && (
+        <div style={{ fontSize: 11.5, color: c.muted, lineHeight: 1.5, background: "#FBF1DF", border: `1px solid #EBD9B4`, borderRadius: 7, padding: "9px 11px", marginTop: 8 }}>
+          {cleaner.full_name} will be rostered onto every upcoming standard shift automatically.
+          {otherManagers > 0 && <> The {otherManagers === 1 ? "other Cleaning Manager keeps" : `other ${otherManagers} Cleaning Managers keep`} the role — you can have more than one.</>}
+        </div>
+      )}
+      {tier !== "manager" && cleaner.is_team_leader && (
+        <div style={{ fontSize: 11.5, color: c.muted, lineHeight: 1.5, background: "#FBF1DF", border: `1px solid #EBD9B4`, borderRadius: 7, padding: "9px 11px", marginTop: 8 }}>
+          {cleaner.full_name} will stop being a Cleaning Manager and their upcoming roster rows are
+          removed. Any other Cleaning Managers are unaffected. They stay a cleaner on {TIER_LABEL[tier]}.
+        </div>
+      )}
+      {tier !== "manager" && !cleaner.is_team_leader && tier !== cleaner.tier && (
         <div style={{ fontSize: 11.5, color: c.muted2, marginTop: 8 }}>
           Moving from {TIER_LABEL[cleaner.tier]} to {TIER_LABEL[tier]} changes when they're offered shifts. Offers already sent aren't affected.
         </div>
@@ -211,7 +313,7 @@ export function Cleaners() {
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
   const [latestNotes, setLatestNotes] = useState<Record<string, CleanerNote>>({});
   const [loading, setLoading] = useState(true);
-  const [tierFilter, setTierFilter] = useState<string>(() => storedFilter(TIER_KEY, ["all", "tier_1", "tier_2", "tier_3"]));
+  const [tierFilter, setTierFilter] = useState<string>(() => storedFilter(TIER_KEY, ["all", "manager", "tier_1", "tier_2", "tier_3"]));
   const [statusFilter, setStatusFilter] = useState<string>(() => storedFilter(STATUS_KEY, ["all", "active", "inactive"]));
   const [showAdd, setShowAdd] = useState(false);
 
@@ -259,7 +361,7 @@ export function Cleaners() {
   // refetch afterwards rather than optimistically toggle the flag on one row.
   async function manageManager(cl: Cleaner, nominate: boolean) {
     setSaving((s) => ({ ...s, [cl.id]: true }));
-    const error = await setManager(nominate ? cl.id : null);
+    const error = nominate ? await setManager(cl.id) : await stepDownManager(cl.id);
     setSaving((s) => ({ ...s, [cl.id]: false }));
     if (error) { toastError(error); return; }
     toastOk(nominate ? `${cl.full_name} is now the Cleaning Manager` : "Cleaning Manager cleared");
@@ -288,11 +390,14 @@ export function Cleaners() {
   );
 
   // Each chip row counts against the other filter's current selection.
+  // Tier counts EXCLUDE the manager — she is above the tiers, so counting her in
+  // one would make the chips add up to more than the list actually shows.
   const counts = useMemo(() => ({
     all: byStatus.length,
-    tier_1: byStatus.filter((c) => c.tier === "tier_1").length,
-    tier_2: byStatus.filter((c) => c.tier === "tier_2").length,
-    tier_3: byStatus.filter((c) => c.tier === "tier_3").length,
+    manager: byStatus.filter((c) => c.is_team_leader).length,
+    tier_1: byStatus.filter((c) => !c.is_team_leader && c.tier === "tier_1").length,
+    tier_2: byStatus.filter((c) => !c.is_team_leader && c.tier === "tier_2").length,
+    tier_3: byStatus.filter((c) => !c.is_team_leader && c.tier === "tier_3").length,
   }), [byStatus]);
 
   const statusCounts = useMemo(() => ({
@@ -304,7 +409,8 @@ export function Cleaners() {
   const activeCount = cleaners.filter((c) => c.is_active).length;
 
   const tierOptions: [string, string][] = [
-    ["all", "All tiers"], ["tier_1", "Tier 1"], ["tier_2", "Tier 2"], ["tier_3", "Tier 3"],
+    ["all", "All tiers"], ["manager", "Cleaning Manager"],
+    ["tier_1", "Tier 1"], ["tier_2", "Tier 2"], ["tier_3", "Tier 3"],
   ];
   const statusOptions: [string, string][] = [
     ["all", "All statuses"],
@@ -317,11 +423,27 @@ export function Cleaners() {
     (acceptRate(rel[b.id]?.accepted_count ?? 0, rel[b.id]?.declined_count ?? 0, rel[b.id]?.cancelled_count ?? 0) ?? -1) -
     (acceptRate(rel[a.id]?.accepted_count ?? 0, rel[a.id]?.declined_count ?? 0, rel[a.id]?.cancelled_count ?? 0) ?? -1));
 
-  const visible = byStatus.filter((x) => tierFilter === "all" || x.tier === tierFilter);
-  const groups: { key: string; label: string; sub: string; rows: Cleaner[] }[] =
-    (["tier_1", "tier_2", "tier_3"] as CleanerTier[])
+  // The Cleaning Manager sits ABOVE the tier system, so she is matched on the
+  // role rather than on `tier` — her cleaner row still carries a tier value (the
+  // column is NOT NULL and the roster trigger stamps it), but it is meaningless
+  // for her and must not file her into a tier bucket.
+  const visible = byStatus.filter((x) =>
+    tierFilter === "all" || (tierFilter === "manager" ? x.is_team_leader : !x.is_team_leader && x.tier === tierFilter));
+  const managerRows = byRate(visible.filter((cl) => cl.is_team_leader));
+  const groups: { key: string; label: string; sub: string; rows: Cleaner[] }[] = [
+    // Own section, first — she is offered nothing and rostered onto everything,
+    // which is not a tier. Rendered even when empty (rows: []) is pointless, so
+    // the map below drops it; the empty-state hint covers "nobody nominated".
+    ...(tierFilter === "all" || tierFilter === "manager"
+      ? [{ key: "manager", label: "Cleaning Manager", sub: "above the tiers · auto-rostered, never offered", rows: managerRows }]
+      : []),
+    ...(["tier_1", "tier_2", "tier_3"] as CleanerTier[])
       .filter((t) => tierFilter === "all" || tierFilter === t)
-      .map((t) => ({ key: t, label: TIER_LABEL[t], sub: TIER_SUB[t], rows: byRate(visible.filter((cl) => cl.tier === t)) }));
+      .map((t) => ({
+        key: t, label: TIER_LABEL[t], sub: TIER_SUB[t],
+        rows: byRate(visible.filter((cl) => !cl.is_team_leader && cl.tier === t)),
+      })),
+  ];
 
   return (
     <div className="cln-page" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
@@ -512,8 +634,8 @@ export function Cleaners() {
         <ConfirmDialog
           title={pendingManager.nominate ? "Nominate Cleaning Manager" : "Remove Cleaning Manager"}
           message={pendingManager.nominate
-            ? <>Make <b>{pendingManager.cl.full_name}</b> the Cleaning Manager? They'll be rostered onto every upcoming non-wipeover shift, and any current manager is stepped down.</>
-            : <>Step <b>{pendingManager.cl.full_name}</b> down as Cleaning Manager? Their upcoming roster rows are removed. No cleaner will hold the role until you nominate someone.</>}
+            ? <>Make <b>{pendingManager.cl.full_name}</b> a Cleaning Manager? They'll be rostered onto every upcoming non-wipeover shift. Any existing Cleaning Managers keep the role — you can have more than one.</>
+            : <>Step <b>{pendingManager.cl.full_name}</b> down as Cleaning Manager? Their upcoming roster rows are removed. Any other Cleaning Managers keep the role.</>}
           confirmLabel={pendingManager.nominate ? "Nominate" : "Remove"} danger={!pendingManager.nominate}
           busy={saving[pendingManager.cl.id]}
           onConfirm={() => { manageManager(pendingManager.cl, pendingManager.nominate); setPendingManager(null); }}

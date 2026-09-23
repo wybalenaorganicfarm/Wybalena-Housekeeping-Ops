@@ -21,6 +21,10 @@ const KNOWN_FNS = new Set([
   "remind-tier-1", "remind-tier-2", "remind-tier-3",
   "escalate-tier-2", "escalate-tier-3", "pre-shift-reminder", "cancellation-followup",
   "health-check", "wipeover-notify", "mid-retreat-notify", "staffing-catchup",
+  // Runs every 15 min to send the Cleaning Manager her "you've been rostered"
+  // messages. It was scheduled in the DB but missing from this allowlist and
+  // from the Schedule page, so it could not be paused or re-timed from the app.
+  "notify-manager-roster",
 ]);
 
 // Guard: "m h dom mon dow", each field digits / * / , / - / /. Keeps obviously

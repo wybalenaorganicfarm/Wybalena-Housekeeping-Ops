@@ -52,11 +52,12 @@ Deno.serve(async (req) => {
   // Deactivating the Cleaning Manager clears the role: the trigger/notify/staffing
   // all gate on is_active=true, so an inactive manager silently stops being
   // rostered — but the flag would linger on an inactive cleaner and their upcoming
-  // roster rows would orphan. clear_cleaning_manager() unflags and drops those
-  // rows atomically, keeping the "one active manager" invariant. Re-nominate from
-  // the Cleaners page once someone is set as manager again.
+  // roster rows would orphan. clear_one_cleaning_manager() unflags THIS cleaner
+  // and drops only their upcoming rows atomically. It must not be the
+  // clear-everyone call: the role is multi-holder, so deactivating one manager
+  // has to leave the others in place. Re-nominate from the Cleaners page.
   if (cleaner.is_team_leader && status === "inactive") {
-    await sb.rpc("clear_cleaning_manager");
+    await sb.rpc("clear_one_cleaning_manager", { p_cleaner_id: cleanerId });
   }
 
   return json({ ok: true });

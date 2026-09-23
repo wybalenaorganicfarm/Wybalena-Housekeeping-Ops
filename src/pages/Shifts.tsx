@@ -214,7 +214,7 @@ export function Shifts() {
 
       <div className="shf-scroll" style={{ flex: 1, overflowY: "auto", padding: "18px 24px 40px" }}>
         {view === "calendar" ? (
-          <ShiftCalendar shifts={visible} bookings={bookings} initialDate={visible[visible.length - 1]?.shift_date} onSelect={(s) => setDrawer(s)} />
+          <ShiftCalendar shifts={visible} bookings={bookings} showBookings onSelect={(s) => setDrawer(s)} onSelectBooking={(b) => setBookingDrawer(b)} />
         ) : (
           <div className="shf-table" style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", padding: "0 18px", height: 38, background: c.tableHead, borderBottom: `1px solid ${c.border}`, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>
@@ -310,7 +310,7 @@ export function Shifts() {
                         {canEdit && s.status === "pending_confirmation"
                           ? <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => setAskConfirmId(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : "Confirm"}</Button>
                           : canEdit && (s.status === "staffing" || urgent)
-                            ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Offer</Button>
+                            ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Override</Button>
                             : null}
                       </div>
                     </div>

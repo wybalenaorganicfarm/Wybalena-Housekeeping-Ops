@@ -9,6 +9,8 @@ import {
   updateCronSchedule, updateStaffingCatchup, type BookingSyncRange, type CronJob, type StaffingCatchup,
   getCancellationCooloff, updateCancellationCooloff, CANCELLATION_COOLOFF_DEFAULT,
   CANCELLATION_COOLOFF_LIMITS, type CancellationCooloff,
+  getNotificationSwitches, updateNotificationSwitches, NOTIFICATION_SWITCHES_DEFAULT,
+  type NotificationSwitches,
 } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import {
@@ -39,9 +41,27 @@ const META: JobMeta[] = [
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
+  { fn: "notify-manager-roster", label: "Cleaning Manager Roster Messages", desc: "Runs every 15 minutes. Sends each Cleaning Manager the \"you've been rostered onto this shift\" WhatsApp for any shift they haven't been told about yet. A notification only — no accept, and it doesn't fill a cleaner slot. Turn off to stop these messages without changing who is rostered.", group: "daily", order: 10 },
 ];
 
 type Row = JobMeta & { schedule: string | null; active: boolean };
+
+// The weekly sequence as an admin reads it, top to bottom. `understaffed-alert`
+// is a real step in the chain but has no cron job of its own (it is raised
+// inside the Tier 3 Escalation run), so it appears here and in the rendered
+// list, but never in META / the cron table. Numbering is driven off THIS list so
+// the alert gets its own number and the jobs after it stay in step.
+const WEEKLY_STEPS = [
+  "sync-bookings", "confirm-reminder", "offer-tier-1", "remind-tier-1",
+  "escalate-tier-2", "remind-tier-2", "escalate-tier-3", "remind-tier-3",
+  "understaffed-alert", "wipeover-notify", "mid-retreat-notify",
+] as const;
+// Returns undefined for anything missing from the list above, so a job added to
+// META without a step here renders with NO number rather than a bogus "0".
+const stepNo = (fn: string): number | undefined => {
+  const i = WEEKLY_STEPS.indexOf(fn as typeof WEEKLY_STEPS[number]);
+  return i === -1 ? undefined : i + 1;
+};
 
 export function Schedule() {
   const [jobs, setJobs] = useState<Record<string, CronJob>>({});
@@ -54,12 +74,15 @@ export function Schedule() {
   const [editCatchup, setEditCatchup] = useState(false);
   const [cooloff, setCooloff] = useState<CancellationCooloff>(CANCELLATION_COOLOFF_DEFAULT);
   const [editCooloff, setEditCooloff] = useState(false);
+  const [switches, setSwitches] = useState<NotificationSwitches>(NOTIFICATION_SWITCHES_DEFAULT);
+  const [switchBusy, setSwitchBusy] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [list, r, cu, co] = await Promise.all([
+      const [list, r, cu, co, sw] = await Promise.all([
         getCronSchedules(), getBookingSyncRange(), getStaffingCatchup(), getCancellationCooloff(),
+        getNotificationSwitches(),
       ]);
       const map: Record<string, CronJob> = {};
       for (const j of list) map[j.fn] = j;
@@ -67,6 +90,7 @@ export function Schedule() {
       setRange(r);
       setCatchup(cu);
       setCooloff(co);
+      setSwitches(sw);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Failed to load schedules");
     } finally {
@@ -81,6 +105,18 @@ export function Schedule() {
   );
   const weekly = rows.filter((r) => r.group === "weekly").sort((a, b) => a.order - b.order);
   const daily = rows.filter((r) => r.group === "daily").sort((a, b) => a.order - b.order);
+
+  // Flip one event-driven notification. Optimistic-free: we write, then reload
+  // from the row, so what is shown is always what will actually be sent.
+  async function toggleSwitch(key: keyof NotificationSwitches) {
+    const next = { ...switches, [key]: !switches[key] };
+    setSwitchBusy(true);
+    const err = await updateNotificationSwitches(next);
+    setSwitchBusy(false);
+    if (err) { toastError(err); return; }
+    setSwitches(next);
+    toastOk(next[key] ? "Notification turned on." : "Notification turned off.");
+  }
 
   async function toggle(row: Row) {
     if (!row.schedule) { setEditing(row); return; }
@@ -147,9 +183,13 @@ export function Schedule() {
           {loading ? <Spinner /> : (
             <>
               <Section title="Weekly booking & staffing cycle" hint="Runs once a week, in the order shown.">
-                {weekly.map((r, i) => (
+                {weekly.map((r) => (
                   <div key={r.fn}>
-                    <JobRow row={r} step={i + 1} busy={toggling === r.fn}
+                    {/* `step` is NOT the array index: the understaffed alert is a
+                        numbered step in this sequence but has no cron row of its
+                        own, so it is not in `weekly`. Numbering off the index
+                        would skip it and mis-number everything after it. */}
+                    <JobRow row={r} step={stepNo(r.fn)} busy={toggling === r.fn}
                       onEdit={() => setEditing(r)} onToggle={() => toggle(r)} />
                     {/* The sync's date range sits with the job it belongs to,
                         rather than in a separate settings screen. */}
@@ -162,7 +202,16 @@ export function Schedule() {
                         exactly where an admin looks when offers for a late-confirmed
                         shift went out a day later, at the catch-up's time, not 3pm. */}
                     {r.fn === "offer-tier-1" && (
-                      <CatchupNote schedule={jobs["staffing-catchup"]?.schedule ?? null} />
+                      <CatchupNote schedule={jobs["staffing-catchup"]?.schedule ?? null} tier1Schedule={r.schedule} />
+                    )}
+                    {/* The understaffed alert has no cron job of its own — it is
+                        raised inside the Tier 3 Escalation run, but only once the
+                        Tier 3 offer is a day old. It sits here, after the Tier 3
+                        reminder, because that is the order it happens in and
+                        where an admin looks to ask "when do I get told?". */}
+                    {r.fn === "remind-tier-3" && (
+                      <UnderstaffedAlertNote schedule={jobs["escalate-tier-3"]?.schedule ?? null}
+                        step={stepNo("understaffed-alert")} />
                     )}
                   </div>
                 ))}
@@ -187,6 +236,15 @@ export function Schedule() {
                   changes who gets offered a shift. */}
               <Section title="Cancellations" hint="Applies as soon as a cleaner cancels — not on a schedule.">
                 <CooloffRow cooloff={cooloff} onEdit={() => setEditCooloff(true)} />
+                {/* Event-driven notification: fires on the cleaner's reply, so it
+                    has no cron row and no time to set — just on or off. */}
+                <SwitchRow
+                  label="Alert the Cleaning Manager"
+                  desc="Sends the Cleaning Manager a WhatsApp the moment a cleaner cancels, naming the shift and how many are still confirmed. Wording is on the Message Templates page."
+                  on={switches.lead_cleaner_cancelled}
+                  busy={switchBusy}
+                  onToggle={() => toggleSwitch("lead_cleaner_cancelled")}
+                />
               </Section>
             </>
           )}
@@ -367,10 +425,17 @@ function RangeModal({ range, onClose, onSave }: {
 // run time (one hour after the weekly slot), which is why a late-confirmed
 // shift's offers go out a day later, at 4pm rather than 3pm. The time is read
 // from the catch-up's own schedule so it stays right if that job is rescheduled.
-function CatchupNote({ schedule }: { schedule: string | null }) {
+function CatchupNote({ schedule, tier1Schedule }: { schedule: string | null; tier1Schedule: string | null }) {
   const form = schedule ? parseCron(schedule) : null;
   // "Every day at 4:00 PM AEST" -> "4:00 PM AEST" so it reads naturally after "at".
   const when = form ? describe(form).replace(/^Every day at /, "") : "its next daily run";
+  // Read the Tier 1 slot from the live cron rather than naming a time in prose —
+  // this used to say "this 3pm slot", which no longer matched the schedule and
+  // would go stale again the moment an admin edits the job.
+  const t1form = tier1Schedule ? parseCron(tier1Schedule) : null;
+  // describe() is "Every day at X" or "Every <day list> at X" — strip whatever
+  // precedes the final " at " so a multi-weekday list reduces cleanly too.
+  const t1when = t1form ? describe(t1form).replace(/^Every .* at /, "") : null;
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "10px 16px 12px 52px", borderTop: `1px dashed ${c.rowBd}`, background: "#fcfbf8" }}>
       <span style={{ color: c.green, flex: "none", marginTop: 1 }}><Icon name="info" size={14} /></span>
@@ -380,7 +445,43 @@ function CatchupNote({ schedule }: { schedule: string | null }) {
         offer at <b>{when}</b>. From there its reminders and escalations run at the same
         scheduled times as every other shift (the Tier 1/2/3 reminder and escalation jobs above),
         so a late-confirmed shift is chased on the same clock as the rest — only its first offer
-        goes out at the catch-up's time rather than this 3pm slot.
+        goes out at the catch-up's time rather than {t1when ? <>this <b>{t1when}</b> slot</> : "this weekly slot"}.
+      </div>
+    </div>
+  );
+}
+
+// Step 9 of the sequence, and deliberately NOT a JobRow: the understaffed alert
+// has no schedule of its own to edit or pause. It is raised by the Tier 3
+// Escalation job (step 7), which re-checks every day and only alerts once the
+// shift's Tier 3 offer is at least a day old — so the Tier 3 cleaners get the
+// first message AND the next-morning reminder before Ashleigh is pulled in.
+function UnderstaffedAlertNote({ schedule, step }: { schedule: string | null; step?: number }) {
+  const form = schedule ? parseCron(schedule) : null;
+  const when = form ? describe(form).replace(/^Every .* at /, "") : "its next daily run";
+  return (
+    // Laid out like a JobRow (same padding, same numbered circle) so it reads as
+    // step N of the sequence — but with no Toggle/Edit, because there is no
+    // schedule of its own to change. The amber circle marks that difference.
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 16px", borderTop: `1px solid ${c.rowBd}`, background: "#fcfbf8" }}>
+      {step != null && (
+        <span style={{ flex: "none", width: 22, height: 22, borderRadius: "50%", background: "#FBF1DF", color: c.warn, border: `1px solid #EBD9B4`, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{step}</span>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: c.ink }}>Understaffed Alert</span>
+          <span style={{ background: "#FBF1DF", color: "#8a6410", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, padding: "1px 7px", borderRadius: 5 }}>No separate schedule</span>
+        </div>
+        <div style={{ fontSize: 12, color: c.muted, marginTop: 3, lineHeight: 1.45 }}>
+          Once a shift has sat at Tier 3 for a full day and still has open spots, this raises
+          the dashboard alert and emails Ashleigh. It is checked as part of <b>Tier 3 Escalation</b> (step {stepNo("escalate-tier-3")}),
+          so it follows that job's time — the alert lands the <b>morning after</b> the Tier 3 offer,
+          giving those cleaners the first message and the next-morning reminder before anyone is
+          pulled in. One alert per shift: not repeated while it stays open, and never sent if the shift fills.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12.5, color: c.warn, fontWeight: 600 }}>
+          <Icon name="clock" size={13} /> {when}, 24h after the Tier 3 offer
+        </div>
       </div>
     </div>
   );
@@ -403,6 +504,29 @@ function CatchupRow({ catchup, onEdit }: { catchup: StaffingCatchup; onEdit: () 
         </div>
       </div>
       <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit timing</Button>
+    </div>
+  );
+}
+
+// An on/off row for behaviour that has no schedule — same shape as a JobRow so
+// the page reads consistently, but with a Toggle and no time or Edit button,
+// because there is nothing to time.
+function SwitchRow({ label, desc, on, busy, onToggle }: {
+  label: string; desc: string; on: boolean; busy: boolean; onToggle: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderTop: `1px solid ${c.rowBd}` }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: c.ink }}>{label}</span>
+          {!on && <span style={{ background: "#f0eee9", color: "#6b665c", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, padding: "1px 7px", borderRadius: 5 }}>Off</span>}
+        </div>
+        <div style={{ fontSize: 12, color: c.muted, marginTop: 3, lineHeight: 1.45 }}>{desc}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12.5, color: on ? c.green : c.faint, fontWeight: 600 }}>
+          <Icon name="activity" size={13} /> {on ? "Sends as it happens" : "Not sending"}
+        </div>
+      </div>
+      <Toggle on={on} busy={busy} onClick={onToggle} />
     </div>
   );
 }

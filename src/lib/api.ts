@@ -230,13 +230,17 @@ export async function updateShift(id: string, patch: Partial<Shift>): Promise<st
   return null;
 }
 
-export async function addCleaner(input: {
+// Yields the NEW cleaner's id on success so the caller can act on the row it just
+// created (nominating a Cleaning Manager in the same flow). Returns the error
+// string on failure, matching the other mutating helpers' convention.
+export async function addCleanerReturning(input: {
   full_name: string; phone: string; email?: string; tier: string;
-}): Promise<string | null> {
+}): Promise<{ id: string } | string> {
   const { data, error } = await invokeFn<{ ok?: boolean; error?: string; id?: string }>("add-cleaner", input);
   if (error) return error;
   if (data?.error) return data.error;
-  return null;
+  if (!data?.id) return "Cleaner was created but no id came back — reload the page to see them.";
+  return { id: data.id };
 }
 
 export async function dismissAlert(id: string): Promise<string | null> {
@@ -289,6 +293,14 @@ export async function setUserRole(userId: string, role: string): Promise<string 
 // (atomic single-holder RPC + audit log + service-role write).
 export async function setManager(cleanerId: string | null): Promise<string | null> {
   const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("set-manager", { cleanerId });
+  return error ?? data?.error ?? null;
+}
+
+// Step ONE holder down. The role is multi-holder, so this must target the named
+// cleaner — setManager(null) clears EVERY manager and is not what a single
+// "remove as Cleaning Manager" means.
+export async function stepDownManager(cleanerId: string): Promise<string | null> {
+  const { data, error } = await invokeFn<{ ok?: boolean; error?: string }>("set-manager", { stepDownId: cleanerId });
   return error ?? data?.error ?? null;
 }
 
@@ -450,6 +462,36 @@ export async function getCancellationCooloff(): Promise<CancellationCooloff> {
 export async function updateCancellationCooloff(next: CancellationCooloff): Promise<string | null> {
   const { error } = await supabase
     .from("app_settings").update({ value: next } as never).eq("key", "cancellation_cooloff");
+  return error ? friendlyError(error.message) : null;
+}
+
+// ---- Event-driven notification switches -------------------------------------
+// Behaviour that fires on an EVENT rather than a schedule, so it has no cron job
+// and cannot appear on the Schedule page as a timed row. Still fully on/off-able
+// by an admin, per the venue's standing requirement that everything the system
+// does is visible and editable.
+
+export interface NotificationSwitches { lead_cleaner_cancelled: boolean }
+
+// Defaults ON: each notification existed before its switch did, so an absent or
+// malformed row must reproduce current behaviour, not silently go quiet.
+export const NOTIFICATION_SWITCHES_DEFAULT: NotificationSwitches = { lead_cleaner_cancelled: true };
+
+export async function getNotificationSwitches(): Promise<NotificationSwitches> {
+  const { data, error } = await supabase
+    .from("app_settings").select("value").eq("key", "notification_switches").maybeSingle();
+  if (error || !data) return NOTIFICATION_SWITCHES_DEFAULT;
+  const v = (data as { value: Partial<NotificationSwitches> }).value ?? {};
+  // Only an explicit false is off — mirrors loadNotificationSwitches() on the
+  // Edge Function side so the app and the sender never disagree.
+  return { lead_cleaner_cancelled: v.lead_cleaner_cancelled !== false };
+}
+
+export async function updateNotificationSwitches(next: NotificationSwitches): Promise<string | null> {
+  // upsert, not update: the row may not exist yet if the seed migration has not
+  // run, and an update against no row succeeds silently while changing nothing.
+  const { error } = await supabase
+    .from("app_settings").upsert({ key: "notification_switches", value: next } as never, { onConflict: "key" });
   return error ? friendlyError(error.message) : null;
 }
 

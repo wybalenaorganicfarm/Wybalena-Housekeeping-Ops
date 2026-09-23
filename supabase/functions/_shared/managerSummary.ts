@@ -10,6 +10,7 @@ import { sendEmail } from "./adapters/email.ts";
 import { opsManager } from "./admin.ts";
 import { prettyDate, prettyTime } from "./datetime.ts";
 import { renderTemplate } from "./templates.ts";
+import { loadNotificationSwitches } from "./settings.ts";
 import { writeAuditLog } from "./auditLog.ts";
 
 // One of tomorrow's shifts and the cleaners who accepted it.
@@ -162,6 +163,12 @@ export async function notifyLeadCancellation(
     triggeredBy?: "webhook" | "manual" | "cron";
   },
 ): Promise<void> {
+  // Admin switch (Schedule page -> Event notifications). Checked BEFORE the
+  // lookup so turning it off costs nothing and sends nothing. Defaults to ON, so
+  // a missing setting reproduces the pre-setting behaviour.
+  const switches = await loadNotificationSwitches(sb);
+  if (!switches.leadCleanerCancelled) return;
+
   const { data: lead } = await sb
     .from("profiles").select("phone").eq("role", "team_leader").eq("is_active", true).limit(1).maybeSingle();
   if (!lead?.phone) return;

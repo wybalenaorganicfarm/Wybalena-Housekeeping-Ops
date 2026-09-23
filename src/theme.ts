@@ -52,15 +52,32 @@ export const STATUS = {
   cancelled: { label: "Cancelled", dot: "#a39d91", bg: "#f0eee9", fg: "#6b665c" },
 } as const;
 
-// Booking event styling — one source of truth for the green booking pills/bars,
-// referenced by BOTH the Dashboard (ShiftCalendar) and the Bookings-tab
-// (BookingCalendar). Shifts stay status-coloured (see STATUS above, e.g. the
-// purple `staffing` accent); bookings are always this brand green so they read
-// identically wherever they appear. `cancelledBg/Fg/Dot` mute a cancelled stay.
+// Calendar event styling — the two colours that tell the month grid apart at a
+// glance: bookings GREEN, shifts PURPLE. One source of truth, referenced by both
+// the ShiftCalendar (Dashboard + Shifts tabs) and the Bookings-tab
+// BookingCalendar. `cancelledBg/Fg/Dot` mute a cancelled stay.
 export const BOOKING = {
   dot: c.greenMid,     // left-border accent (matches the sidebar/brand green family)
   bg: "#e7f0ed",
   fg: "#21564b",
+  cancelledDot: "#a39d91",
+  cancelledBg: "#f0eee9",
+  cancelledFg: "#6b665c",
+} as const;
+
+// Shifts in a CALENDAR are always purple, whatever their status. The STATUS map
+// above is green for both `confirmed` and `fully_staffed`, which made shift bars
+// indistinguishable from the green booking bars sitting right next to them — the
+// status is still carried by the darker left-border accent and the tooltip, and
+// the list/table views keep the full status palette.
+// Deliberately a deeper purple than STATUS.staffing's `#f2ecfb`: that tint has
+// the SAME luminance as the booking green, so the two bars separated by hue
+// alone — invisible to anyone with a colour-vision deficiency, and washy for
+// everyone else. This one is a clear brightness step darker as well as purple.
+export const SHIFT_EVENT = {
+  dot: "#6d3fb8",      // purple accent, darker than the STATUS.staffing dot
+  bg: "#ddcef3",
+  fg: "#4b2f8a",
   cancelledDot: "#a39d91",
   cancelledBg: "#f0eee9",
   cancelledFg: "#6b665c",

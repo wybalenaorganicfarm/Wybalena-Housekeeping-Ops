@@ -35,3 +35,25 @@ uninstall with `npx sipcode rules --uninstall`.)
 - Do NOT create new branches. Work on the current branch (usually `main`).
 - Do NOT commit or push. Leave changes staged/unstaged in the working tree.
 - Committing and pushing is done manually by the user.
+
+## Client rule: everything must be visible and editable
+
+Standing requirement from the venue (raised 23 Sep 2026, and from the start of
+the project): **every automated behaviour must be visible and switchable from
+the app** — no behaviour that only a developer can change.
+
+When adding anything that sends a message, writes an alert, or acts on a
+schedule, it is not done until an admin can see it and turn it off:
+
+- **Runs on a clock (cron)** → add to `META` in `src/pages/Schedule.tsx` AND to
+  `KNOWN_FNS` in `supabase/functions/manage-cron/index.ts`. Missing from either
+  one and it cannot be paused or re-timed from the app.
+- **Fires on an event** (a reply, a cancellation, a booking change) → it has no
+  cron row, so give it a switch in `app_settings.notification_switches`, read it
+  via `loadNotificationSwitches()` before sending, and add a `SwitchRow` to the
+  Schedule page.
+- **Sends a message** → the wording belongs in `message_templates`, never
+  hardcoded, so it shows on the Message Templates page.
+
+Switches default to ON and treat a missing/malformed value as ON: the behaviour
+predates the setting, so a silent miss is worse than an unexpected send.

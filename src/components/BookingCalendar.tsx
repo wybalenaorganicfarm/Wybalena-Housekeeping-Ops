@@ -1,81 +1,11 @@
 import { useMemo, useState } from "react";
 import { c, font, BOOKING } from "../theme";
 import { Icon } from "./Icon";
+import {
+  WEEKDAYS, ymd, dayStart, addDays,
+  layoutWeek, initialMonth, type Segment, type Span,
+} from "../lib/calendarLayout";
 import type { Booking } from "../lib/types";
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-// Midnight of the day `d` falls on. A stay is a range of DAYS, not of instants —
-// comparing the raw timestamps would put a 10:00 check-out and a 14:00 check-in
-// on the same day into different buckets.
-function dayStart(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function addDays(d: Date, n: number): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-}
-
-// Whole days from a to b. Rounded because a DST changeover makes a "day" 23 or
-// 25 hours long, which would otherwise drift the span by one column.
-function daysBetween(a: Date, b: Date): number {
-  return Math.round((dayStart(b).getTime() - dayStart(a).getTime()) / 86400000);
-}
-
-// One booking's bar within ONE week row. A stay crossing a Sunday produces a
-// segment per week, each drawn flat on the side where it continues.
-interface Segment {
-  b: Booking;
-  col: number;        // 0-6, Monday-based
-  span: number;       // columns covered in this week
-  startsHere: boolean; // the real check-in falls in this week
-  endsHere: boolean;   // the real check-out falls in this week
-  lane: number;        // stacking row, so overlapping stays don't collide
-}
-
-// Place every stay overlapping this week into the fewest stacked lanes
-// (greedy interval partitioning: first lane whose last bar has already ended).
-function layoutWeek(bookings: Booking[], weekStart: Date): Segment[] {
-  const weekEnd = addDays(weekStart, 6);
-
-  const spans = bookings
-    .map((b) => {
-      const s = dayStart(new Date(b.check_in));
-      const e = dayStart(new Date(b.check_out));
-      // Check-out day is included: the guest is still on site that morning, and
-      // it is the day the cleaning shift is created for.
-      return { b, s, e: e < s ? s : e };
-    })
-    .filter(({ s, e }) => e >= weekStart && s <= weekEnd)
-    // Earliest start first, longest first on a tie — keeps long stays on the
-    // upper lanes so the block reads as one run rather than a staircase.
-    .sort((x, y) =>
-      (x.s.getTime() - y.s.getTime()) ||
-      (y.e.getTime() - x.e.getTime()) ||
-      x.b.check_in.localeCompare(y.b.check_in));
-
-  const laneLastCol: number[] = [];
-  return spans.map(({ b, s, e }) => {
-    const segStart = s > weekStart ? s : weekStart;
-    const segEnd = e < weekEnd ? e : weekEnd;
-    const col = daysBetween(weekStart, segStart);
-    const span = daysBetween(segStart, segEnd) + 1;
-
-    let lane = laneLastCol.findIndex((last) => last < col);
-    if (lane === -1) { lane = laneLastCol.length; laneLastCol.push(-1); }
-    laneLastCol[lane] = col + span - 1;
-
-    return {
-      b, col, span, lane,
-      startsHere: s.getTime() === segStart.getTime(),
-      endsHere: e.getTime() === segEnd.getTime(),
-    };
-  });
-}
 
 const navBtn = { width: 30, height: 30, border: `1px solid ${c.border3}`, background: "#fff", borderRadius: 7, color: c.body, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } as const;
 
@@ -83,8 +13,18 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
   bookings: Booking[]; initialDate?: string; onSelect: (b: Booking) => void;
 }) {
   const today = new Date();
-  const init = initialDate ? new Date(initialDate) : today;
-  const [cursor, setCursor] = useState(new Date(init.getFullYear(), init.getMonth(), 1));
+
+  // Open on a month that holds bookings rather than an empty one.
+  const [cursor, setCursor] = useState(() =>
+    initialMonth(initialDate, bookings.map((b) => b.check_in.slice(0, 10)), today));
+
+  // Check-out day is included: the guest is still on site that morning, and it
+  // is the day the cleaning shift is created for.
+  const spans = useMemo<Span<Booking>[]>(() => bookings.map((b) => {
+    const s = dayStart(new Date(b.check_in));
+    const e = dayStart(new Date(b.check_out));
+    return { item: b, start: s, end: e < s ? s : e, sort: b.check_in };
+  }), [bookings]);
 
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = addDays(first, -((first.getDay() + 6) % 7)); // back to Monday
@@ -95,10 +35,10 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
       return {
         weekStart,
         days: Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
-        segments: layoutWeek(bookings, weekStart),
+        segments: layoutWeek(spans, weekStart),
       };
     }),
-    [bookings, gridStart.getTime()],
+    [spans, gridStart.getTime()],
   );
 
   const todayStr = ymd(today);
@@ -143,16 +83,17 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
               );
             })}
 
-            {week.segments.map((s) => {
-              const cancelled = s.b.is_cancelled;
-              const checkIn = new Date(s.b.check_in);
+            {week.segments.map((s: Segment<Booking>) => {
+              const b = s.item;
+              const cancelled = b.is_cancelled;
+              const checkIn = new Date(b.check_in);
               const time = checkIn.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" });
-              const range = `${checkIn.toLocaleDateString("en-AU", { day: "numeric", month: "short" })} → ${new Date(s.b.check_out).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
+              const range = `${checkIn.toLocaleDateString("en-AU", { day: "numeric", month: "short" })} → ${new Date(b.check_out).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}`;
               return (
                 <button
-                  key={`${s.b.id}-${s.col}`}
-                  onClick={() => onSelect(s.b)}
-                  title={`${s.b.guest_name || "Unnamed"} · ${range} · check-in ${time}${cancelled ? " · cancelled" : ""}`}
+                  key={`${b.id}-${s.col}`}
+                  onClick={() => onSelect(b)}
+                  title={`${b.guest_name || "Unnamed"} · ${range} · check-in ${time}${cancelled ? " · cancelled" : ""}`}
                   style={{
                     gridColumn: `${s.col + 1} / span ${s.span}`,
                     gridRow: s.lane + 2,
@@ -174,7 +115,7 @@ export function BookingCalendar({ bookings, initialDate, onSelect }: {
                   }}
                 >
                   {s.startsHere && <span style={{ flex: "none", opacity: 0.85 }}>{time}</span>}
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{s.b.guest_name || "Unnamed"}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{b.guest_name || "Unnamed"}</span>
                 </button>
               );
             })}

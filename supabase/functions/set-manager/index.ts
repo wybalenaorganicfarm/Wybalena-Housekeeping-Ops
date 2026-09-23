@@ -21,7 +21,30 @@ Deno.serve(async (req) => {
   const caller = await getCaller(req, sb);
   if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
 
-  const { cleanerId } = await req.json().catch(() => ({}));
+  const { cleanerId, stepDownId } = await req.json().catch(() => ({}));
+
+  // stepDownId -> step THAT holder down, leaving any other managers in place.
+  // The role is multi-holder, so a step-down must never clear everyone.
+  if (stepDownId) {
+    const { data: cl } = await sb.from("cleaners").select("full_name, is_team_leader").eq("id", stepDownId).maybeSingle();
+    if (!cl) return json({ error: "cleaner not found" }, 404);
+    if (!cl.is_team_leader) return json({ error: "that cleaner is not a Cleaning Manager" }, 400);
+
+    const { error } = await sb.rpc("clear_one_cleaning_manager", { p_cleaner_id: stepDownId });
+    if (error) return json({ error: error.message }, 400);
+
+    await writeAuditLog(sb, {
+      event_type: "cleaner.manager_cleared",
+      event_label: "Cleaning Manager Stepped Down",
+      status: "success",
+      summary: `${cl.full_name} is no longer a Cleaning Manager. Their upcoming roster rows were removed; any other managers are unaffected.`,
+      detail: { cleaner_id: stepDownId, by: caller.userId },
+      source: "set-manager",
+      cleaner_id: stepDownId,
+      triggered_by: "manual",
+    });
+    return json({ ok: true });
+  }
 
   // cleanerId present -> nominate that cleaner; absent -> clear the role entirely.
   if (cleanerId) {
@@ -36,7 +59,7 @@ Deno.serve(async (req) => {
       event_type: "cleaner.manager_set",
       event_label: "Cleaning Manager Nominated",
       status: "success",
-      summary: `${cl.full_name} is now the Cleaning Manager. They are rostered onto all upcoming shifts (silently) and new shifts going forward.`,
+      summary: `${cl.full_name} is now a Cleaning Manager. They are rostered onto all upcoming shifts (silently) and new shifts going forward. Any existing managers keep the role.`,
       detail: { cleaner_id: cleanerId, by: caller.userId },
       source: "set-manager",
       cleaner_id: cleanerId,
