@@ -488,11 +488,21 @@ export async function getNotificationSwitches(): Promise<NotificationSwitches> {
 }
 
 export async function updateNotificationSwitches(next: NotificationSwitches): Promise<string | null> {
-  // upsert, not update: the row may not exist yet if the seed migration has not
-  // run, and an update against no row succeeds silently while changing nothing.
-  const { error } = await supabase
-    .from("app_settings").upsert({ key: "notification_switches", value: next } as never, { onConflict: "key" });
-  return error ? friendlyError(error.message) : null;
+  // UPDATE, not upsert. app_settings has RLS policies for SELECT and UPDATE
+  // only — no INSERT policy exists, so an upsert against a missing row is
+  // refused outright and surfaces as "You don't have permission to do that",
+  // which points the reader at their account rather than at the real cause.
+  //
+  // `select()` makes the no-op detectable: an UPDATE matching zero rows is a
+  // success with an empty result, so without this a missing settings row would
+  // silently discard the change and the toggle would spring back on reload.
+  const { data, error } = await supabase
+    .from("app_settings").update({ value: next } as never).eq("key", "notification_switches").select("key");
+  if (error) return friendlyError(error.message);
+  if (!data || data.length === 0) {
+    return "Notification settings aren't set up in the database yet — the 'notification_switches' row is missing. Run the pending migration (supabase db push), then try again.";
+  }
+  return null;
 }
 
 // ---- Connections / integration health (admin) ------------------------------
