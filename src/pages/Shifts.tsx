@@ -12,7 +12,7 @@ import { AssignModal } from "../components/AssignModal";
 import { confirmShifts, getAlerts, getBookings, getShifts, getStaffing } from "../lib/api";
 import { useEscalationLabel } from "../lib/useEscalation";
 import {
-  countLabel, dateTimeLabel, shiftBookingName, staffingDots, statusOf, timeParts, typeLabel, weekKey, weekRangeLabel,
+  countLabel, dateTimeLabel, rowAction, shiftBookingName, staffingDots, statusOf, timeParts, typeLabel, weekKey, weekRangeLabel,
 } from "../lib/format";
 import type { Alert, Booking, Shift, ShiftStaffing } from "../lib/types";
 
@@ -307,11 +307,18 @@ export function Shifts() {
                         <span style={{ fontSize: 11.5, color: urgent ? "#a8392b" : c.muted2, fontWeight: urgent ? 600 : 400, whiteSpace: "nowrap" }}>{countLabel(staffing[s.id], s.required_cleaners).replace(" confirmed", "")}</span>
                       </div>
                       <div style={{ flex: "none", width: COL.action, textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                        {canEdit && s.status === "pending_confirmation"
-                          ? <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => setAskConfirmId(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : "Confirm"}</Button>
-                          : canEdit && (s.status === "staffing" || urgent)
-                            ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Override</Button>
-                            : null}
+                        {/* One shared decision (lib/format rowAction) drives this
+                            column on both this table and the Dashboard agenda, so
+                            they cannot drift apart and no status can silently
+                            render an empty cell. */}
+                        {(() => {
+                          const act = rowAction(s, { canEdit, urgent });
+                          if (act.kind === "none") return null;
+                          if (act.kind === "confirm") {
+                            return <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => setAskConfirmId(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : act.label}</Button>;
+                          }
+                          return <Button kind={act.urgent ? "danger" : "secondary"} onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>{act.label}</Button>;
+                        })()}
                       </div>
                     </div>
                   );

@@ -188,3 +188,53 @@ export function countLabel(st: ShiftStaffing | undefined, required: number): str
   const assigned = lead > 0 ? `${lead} + ${accepted}` : `${accepted}`;
   return `${assigned}/${required} confirmed`;
 }
+
+// ---- Row action (Shifts table + Dashboard agenda) ---------------------------
+//
+// The Action column's button, decided in ONE place for both tables.
+//
+// This used to be a chain of inline ternaries duplicated across the two pages,
+// which is how `fully_staffed` came to fall through to `null`: the column
+// rendered nothing at all once every shift was booked, even though that is
+// precisely when an admin wants to swap a cleaner out. A `switch` over the
+// status union means a new status cannot be added without deciding its action —
+// TypeScript flags the missing case rather than silently rendering an empty cell.
+//
+// `urgent` is the open understaffed_urgent alert, not a status; it only raises
+// the emphasis, never changes which action is offered.
+export type RowActionKind = "confirm" | "override" | "swap" | "none";
+export interface RowAction {
+  kind: RowActionKind;
+  label: string;
+  /** true = red/danger emphasis: this row needs attention now. */
+  urgent: boolean;
+}
+
+export function rowAction(s: Shift, opts: { canEdit: boolean; urgent: boolean }): RowAction {
+  if (!opts.canEdit) return { kind: "none", label: "", urgent: false };
+
+  switch (s.status) {
+    // Nothing has been sent yet — confirming is what starts the offer chain.
+    case "pending_confirmation":
+      return { kind: "confirm", label: "Confirm", urgent: false };
+
+    // Offers are out and spots remain. "Override" is the right word here: it
+    // steps over the automated tier chain to assign someone by hand.
+    case "staffing":
+      return { kind: "override", label: "Override", urgent: true };
+
+    // Confirmed but the first offers have not gone out yet (between the confirm
+    // and the next Tier 1 run). Same manual route, no urgency.
+    case "confirmed":
+      return { kind: "override", label: "Override", urgent: opts.urgent };
+
+    // Fully booked. There is nothing to override — the automation is done — so
+    // the action is swapping a cleaner out, and it is named for that.
+    case "fully_staffed":
+      return { kind: "swap", label: "Change staff", urgent: opts.urgent };
+
+    // Cancelled shifts are filtered out of both tables; no action if one appears.
+    case "cancelled":
+      return { kind: "none", label: "", urgent: false };
+  }
+}

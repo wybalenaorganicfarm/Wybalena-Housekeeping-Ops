@@ -14,7 +14,7 @@ import {
   confirmShifts, getAlerts, getBookings, getShifts, getStaffing,
 } from "../lib/api";
 import {
-  countLabel, dateLabel, dateTimeLabel, longDateLabel, shiftBookingName,
+  countLabel, dateLabel, dateTimeLabel, longDateLabel, rowAction, shiftBookingName,
   shiftTitle, staffingDots, statusOf, timeParts, typeLabel, weekKey,
   weekRangeLabel,
 } from "../lib/format";
@@ -289,11 +289,20 @@ export function Dashboard() {
                           <span style={{ fontSize: 11.5, color: urgent ? "#a8392b" : c.muted2, fontWeight: urgent ? 600 : 400, whiteSpace: "nowrap" }}>{countLabel(staffing[s.id], s.required_cleaners).replace(" confirmed", "")}</span>
                         </div>
                         <div style={{ minWidth: 0, textAlign: "right", display: "flex", justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
-                          {canEdit && s.status === "pending_confirmation"
-                            ? <Button kind="secondary" disabled={confirming[s.id]} onClick={() => confirm(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming[s.id] ? "Confirming…" : "Confirm"}</Button>
-                            : canEdit && (s.status === "staffing" || urgent)
-                              ? <Button kind="danger" onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>Override</Button>
-                              : <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "7px 13px", fontSize: 12 }}>View</Button>}
+                          {/* Same shared decision as the Shifts table — these two
+                              had already drifted (this one fell back to "View",
+                              that one to nothing). */}
+                          {(() => {
+                            const act = rowAction(s, { canEdit, urgent });
+                            if (act.kind === "none") {
+                              // Read-only users still get a way into the details.
+                              return <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "7px 13px", fontSize: 12 }}>View</Button>;
+                            }
+                            if (act.kind === "confirm") {
+                              return <Button kind="secondary" disabled={confirming[s.id]} onClick={() => confirm(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming[s.id] ? "Confirming…" : act.label}</Button>;
+                            }
+                            return <Button kind={act.urgent ? "danger" : "secondary"} onClick={() => setAssign(s)} style={{ padding: "7px 13px", fontSize: 12 }}>{act.label}</Button>;
+                          })()}
                         </div>
                       </div>
                     );
