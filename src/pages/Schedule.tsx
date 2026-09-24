@@ -473,15 +473,15 @@ function UnderstaffedAlertNote({ schedule, step }: { schedule: string | null; st
           <span style={{ background: "#FBF1DF", color: "#8a6410", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 700, padding: "1px 7px", borderRadius: 5 }}>No separate schedule</span>
         </div>
         <div style={{ fontSize: 12, color: c.muted, marginTop: 3, lineHeight: 1.45 }}>
-          Once a shift has sat at Tier 3 for a full day and still has open spots, this raises
-          the dashboard alert and emails Ashleigh. It is checked as part of <b>Tier 3 Escalation</b> (step {stepNo("escalate-tier-3")}),
-          so it follows that job's time — the alert lands a <b>full day after</b> the Tier 3 offer, which
-          means the Tier 3 cleaners have had both the first offer <b>and</b> the following-day reminder,
-          with time to respond, before anyone is pulled in. One alert per shift: not repeated while it
+          When a shift still has open spots and its Tier 3 cleaners have already had the
+          <b> non-responder reminder</b> (step {stepNo("remind-tier-3")}), this raises the dashboard alert and emails
+          Ashleigh. It is checked as part of <b>Tier 3 Escalation</b> (step {stepNo("escalate-tier-3")}) — which runs
+          after the reminder — so the Tier 3 cleaners get the first offer <b>and</b> the reminder, with a
+          chance to respond, before anyone is pulled in. One alert per shift: not repeated while it
           stays open, and never sent if the shift fills.
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12.5, color: c.warn, fontWeight: 600 }}>
-          <Icon name="clock" size={13} /> {when}, 24h after the Tier 3 offer
+          <Icon name="clock" size={13} /> {when}, after the Tier 3 reminder
         </div>
       </div>
     </div>

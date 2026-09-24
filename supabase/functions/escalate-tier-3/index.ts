@@ -1,15 +1,21 @@
-// escalate-tier-3 — cron (admin-scheduled, daily, runs AFTER remind-tier-3).
+// escalate-tier-3 — cron (admin-scheduled, daily). MUST run AFTER remind-tier-3
+// on any given venue day, because Pass 1 now gates the understaffed alert on the
+// Tier 3 reminder having been sent. Keep escalate-tier-3's Schedule-tab time
+// LATER than remind-tier-3's. If it is ever set earlier, the alert simply waits
+// until the next escalation run that follows a reminder — a safe delay, never an
+// early fire — and the 2-day backstop in Pass 1 guarantees it still lands.
 // Two passes:
 //   1. Delayed understaffed alert — a shift that reached the last tier is alerted
-//      only once its last-tier offer is >=1 venue-day old, so Tier 3 cleaners get
-//      the initial WhatsApp AND the next-morning remind-tier-3 reminder (20:00 UTC,
-//      earlier the same day) before a human is pulled in. The alert is no longer
-//      raised at the moment of escalation.
+//      only once its Tier 3 cleaners have been REMINDED (remind-tier-3 has stamped
+//      reminder_sent_at on every open offer), so they get the initial WhatsApp AND
+//      the follow-up reminder, with a chance to respond, before a human is pulled
+//      in. Backstopped at >=2 venue-days so a reminder that never sends can't
+//      suppress the alert forever. Not raised at the moment of escalation.
 //   2. Escalation — any shift still in Tier-2 staffing is offered Tier 3. The admin
 //      controls the spacing after Tier 2 via this job's schedule (Spec §2, §7.1).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { acceptedCount, daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
+import { acceptedCount, allCurrentTierOffersReminded, daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
 import { raiseTier3Alert } from "../_shared/tier3Alert.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
@@ -46,12 +52,25 @@ Deno.serve(async (req) => {
 
   // ── Pass 1: delayed understaffed alert ────────────────────────────────────
   // A shift qualifies once ALL hold: still staffing, sitting at the last tier,
-  // still has open spots, and its last-tier offer is >=1 venue-day old. The
-  // day-old gate is the 24h window — measured from shift_assignments.offered_at
-  // via daysSinceCurrentTierOffer, DST-safe on this fixed daily slot (an hours
-  // gate would slip a day — see staffing-catchup). raiseTier3Alert dedupes one
-  // open alert per shift and emails only alongside a newly-raised one, so a
-  // shift already alerted, or staffed in the meantime, is never re-alerted.
+  // still has open spots, and its last-tier cleaners have already been REMINDED.
+  //
+  // The gate is "the tier's non-responder reminder has gone out" — not merely
+  // "24h since the offer". The venue wants Tier 3 cleaners to receive the initial
+  // offer AND the follow-up reminder, with a chance to respond to the reminder,
+  // before a human is pulled in. allCurrentTierOffersReminded() is true only once
+  // every still-open Tier 3 offer has reminder_sent_at set (remind-tier-3 runs
+  // earlier, at its own admin-set slot).
+  //
+  // SAFETY BACKSTOP: if a reminder never sends (WhatsApp outage, a cleaner with
+  // no phone — remindTier skips those without stamping), gating on the reminder
+  // alone would suppress the alert forever. So the alert also fires once the
+  // offer is >=2 venue-days old regardless, guaranteeing a human is eventually
+  // told. In normal operation the reminder lands first and the alert follows it.
+  //
+  // raiseTier3Alert dedupes one open alert per shift and emails only alongside a
+  // newly-raised one, so a shift already alerted, or staffed in the meantime, is
+  // never re-alerted.
+  const REMINDER_BACKSTOP_DAYS = 2;
   const { data: lastTierShifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type, required_cleaners")
@@ -64,8 +83,10 @@ Deno.serve(async (req) => {
     .in("staffing_track", ["weekly", "catchup"]);
   for (const s of lastTierShifts ?? []) {
     try {
-      if (await daysSinceCurrentTierOffer(sb, s.id, lastTier) < 1) continue;
       if ((s.required_cleaners - await acceptedCount(sb, s.id)) <= 0) continue;
+      const reminded = await allCurrentTierOffersReminded(sb, s.id, lastTier);
+      const overdue = await daysSinceCurrentTierOffer(sb, s.id, lastTier) >= REMINDER_BACKSTOP_DAYS;
+      if (!reminded && !overdue) continue;
       await raiseTier3Alert(sb, s);
     } catch (e) {
       console.error(`[escalate-tier-3] delayed alert check failed for ${s.id}: ${String(e)}`);

@@ -35,7 +35,7 @@
 // stamps staffing_track on the first delivered offer, so a shift is adopted once.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { offerTier, type Tier } from "../_shared/engine.ts";
+import { allCurrentTierOffersReminded, daysSinceCurrentTierOffer, offerTier, type Tier } from "../_shared/engine.ts";
 import { raiseTier3Alert } from "../_shared/tier3Alert.ts";
 import { loadStaffingCatchup } from "../_shared/settings.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
@@ -241,10 +241,16 @@ Deno.serve(async (req) => {
       }
       if (res.count === 0 && res.failed === 0) skipped++;
 
-      // Reaching Tier 3 always needs a human, whether or not a Tier 3 cleaner was
-      // free to offer. The helper dedupes, so the daily run can't re-alert. Only
-      // reachable via the safety re-offer of a shift already sitting at tier_3.
-      if (p.tier === "tier_3") await raiseTier3Alert(sb, s);
+      // Reaching Tier 3 always needs a human — but, like escalate-tier-3, only
+      // AFTER the Tier 3 cleaners have been reminded (or the offer is well
+      // overdue), so the alert never pre-empts the reminder. This path is only
+      // reachable via the safety re-offer of a shift already sitting at tier_3;
+      // raiseTier3Alert dedupes, so the daily run can't re-alert.
+      if (p.tier === "tier_3") {
+        const reminded = await allCurrentTierOffersReminded(sb, s.id, "tier_3");
+        const overdue = await daysSinceCurrentTierOffer(sb, s.id, "tier_3") >= 2;
+        if (reminded || overdue) await raiseTier3Alert(sb, s);
+      }
     } catch (e) {
       await writeAuditLog(sb, {
         event_type: "staffing.caught_up",

@@ -561,6 +561,34 @@ export async function daysSinceCurrentTierOffer(
   return daysBetweenDays(venueDay(new Date(at)), venueDay(new Date()));
 }
 
+// Have ALL open (status='offered') offers at `tier` on this shift already had a
+// reminder sent? The understaffed alert gates on this so it only fires AFTER the
+// tier's non-responder reminder has gone out — the venue wants cleaners to get
+// the reminder and a chance to respond before a human is pulled in, not merely
+// 24h after the initial offer.
+//
+// Returns false while any open offer is still unreminded (reminder_sent_at is
+// null). Accepted/declined/withdrawn offers are irrelevant — only 'offered' rows
+// are ones still awaiting a reply, so only they need to have been reminded.
+// team_lead roster rows are excluded (they are never offered or reminded).
+//
+// No open offers at all (all responded, or none exist) returns TRUE: there is no
+// one left to remind, so the reminder step imposes no further wait.
+export async function allCurrentTierOffersReminded(
+  sb: SupabaseClient,
+  shiftId: string,
+  tier: Tier,
+): Promise<boolean> {
+  const { data } = await sb
+    .from("shift_assignments")
+    .select("reminder_sent_at")
+    .eq("shift_id", shiftId)
+    .eq("tier_at_offer", tier)
+    .eq("status", "offered");
+  const rows = (data ?? []) as { reminder_sent_at: string | null }[];
+  return rows.every((r) => r.reminder_sent_at != null);
+}
+
 // Last-resort re-offer after a cancellation, once the tier chain is exhausted.
 //
 // Unlike offerTier this ignores tiers entirely and re-asks EVERY offerable
