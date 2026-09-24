@@ -82,12 +82,26 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
   const cleanerRows: ResponderRow[] = assignments
     .map((a) => ({ a, cl: cleaners[a.cleaner_id] }))
     .filter((r) => r.cl && r.a.status !== "no_response")
-    .map(({ a, cl }) => ({ key: a.id, name: cl!.full_name, statusKey: a.status, tierLabel: TIER_LABEL[a.tier_at_offer], isLead: false }));
+    // A Cleaning Manager is auto-rostered via a team_lead-status assignment row
+    // carrying a placeholder tier. Show her as "Cleaning Manager" (isLead) with
+    // no tier, not "Tier 1" — otherwise she reads as an ordinary tier cleaner.
+    .map(({ a, cl }) => a.status === "team_lead"
+      ? { key: a.id, name: cl!.full_name, statusKey: a.status, tierLabel: null, isLead: true }
+      : { key: a.id, name: cl!.full_name, statusKey: a.status, tierLabel: TIER_LABEL[a.tier_at_offer], isLead: false });
   // The team lead (a profiles row, not a cleaner) is auto-assigned to every shift
   // except wipeover cleans — inject them at the top with a "Team Lead" status.
-  const responders: ResponderRow[] = teamLead && s.shift_type !== "wipeover"
+  //
+  // A Cleaning Manager is now rostered via a real team_lead assignment row, which
+  // already appears in cleanerRows. If the profiles team lead is the SAME person,
+  // injecting them too lists them twice. Suppress the injection only when an
+  // assignment row already covers that exact name — a different team lead is
+  // still shown.
+  const alreadyListed = teamLead != null && cleanerRows.some((r) => r.name === teamLead.full_name);
+  const responders: ResponderRow[] = (teamLead && s.shift_type !== "wipeover" && !alreadyListed
     ? [{ key: "team-lead", name: teamLead.full_name, statusKey: "team_lead", tierLabel: null, isLead: true }, ...cleanerRows]
-    : cleanerRows;
+    : cleanerRows)
+    // Cleaning Manager / team lead always first, above the tier cleaners.
+    .slice().sort((a, b) => Number(b.isLead) - Number(a.isLead));
 
   // The link control only appears where the parent supplied the bookings map and
   // the user can edit. Options are filtered by the search box (guest name or the

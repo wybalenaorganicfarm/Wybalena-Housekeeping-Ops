@@ -97,7 +97,13 @@ export function AssignModal({ shift, onClose, onAssigned }: {
     else runOffer(p.cleaner.id); // offer | reoffer
   }
 
-  const avBg = (cl: Cleaner) => cl.is_team_leader ? c.green : cl.tier === "tier_1" ? c.greenMid : cl.tier === "tier_2" ? c.warn : c.teal;
+  // The tier a cleaner counts as ON THIS SHIFT. Once they have an assignment,
+  // that is the tier they were OFFERED at — not their live cleaners.tier, which
+  // can change after they respond and would then contradict the shift drawer and
+  // escalation timeline (both key off tier_at_offer). No assignment yet → live
+  // tier, i.e. where a fresh offer would go.
+  const tierOf = (cl: Cleaner) => byCleaner.get(cl.id)?.tier_at_offer ?? cl.tier;
+  const avBg = (cl: Cleaner) => cl.is_team_leader ? c.green : tierOf(cl) === "tier_1" ? c.greenMid : tierOf(cl) === "tier_2" ? c.warn : c.teal;
 
   // Shared row-button styles. Compact by design: in a 480px modal a dozen rows of
   // full-size buttons is what made this screen feel cluttered.
@@ -184,7 +190,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
             {cl.full_name}
             {/* The manager's status column already reads "Cleaning Manager", so
                 repeating it here would say the same word twice on one row. */}
-            {!cl.is_team_leader && <span style={{ fontSize: 10, color: c.muted2, marginLeft: 6 }}>{TIER_LABEL[cl.tier]}</span>}
+            {!cl.is_team_leader && <span style={{ fontSize: 10, color: c.muted2, marginLeft: 6 }}>{TIER_LABEL[tierOf(cl)]}</span>}
           </div>
         </div>
         {/* Status column — fixed width so every dot lines up. */}
@@ -284,7 +290,7 @@ export function AssignModal({ shift, onClose, onAssigned }: {
               return 2;                                                           // settled
             };
             const inTier = cleaners
-              .filter((cl) => cl.tier === t && !cl.is_team_leader)
+              .filter((cl) => tierOf(cl) === t && !cl.is_team_leader)
               .sort((a2, b2) => rank(a2) - rank(b2) || a2.full_name.localeCompare(b2.full_name));
             if (!inTier.length) return null;
             return (
