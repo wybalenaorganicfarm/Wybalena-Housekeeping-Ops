@@ -79,9 +79,18 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
   const currentIdx = s.current_tier ? order.indexOf(s.current_tier) : -1;
 
   type ResponderRow = { key: string; name: string; statusKey: string; tierLabel: string | null; isLead: boolean };
+  // A cleaner can end up with TWO assignment rows on one shift: a team_lead
+  // auto-roster row AND a tier row (e.g. she was offered Tier 1 on a shift created
+  // before she became Cleaning Manager, then auto-rostered too). Both are real
+  // rows, so without this she'd list twice. Collapse to one row per cleaner,
+  // preferring the team_lead row so she shows once, at the top, as Cleaning Manager.
+  const seenCleaner = new Set<string>();
   const cleanerRows: ResponderRow[] = assignments
     .map((a) => ({ a, cl: cleaners[a.cleaner_id] }))
     .filter((r) => r.cl && r.a.status !== "no_response")
+    // team_lead rows first so the manager row wins the dedup over any tier row.
+    .sort((x, y) => Number(y.a.status === "team_lead") - Number(x.a.status === "team_lead"))
+    .filter(({ a }) => (seenCleaner.has(a.cleaner_id) ? false : (seenCleaner.add(a.cleaner_id), true)))
     // A Cleaning Manager is auto-rostered via a team_lead-status assignment row
     // carrying a placeholder tier. Show her as "Cleaning Manager" (isLead) with
     // no tier, not "Tier 1" — otherwise she reads as an ordinary tier cleaner.
@@ -336,7 +345,7 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
           {/* responders */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>Cleaner responses</span>
-            {canEdit && <button onClick={() => onAssign(s)} style={{ background: "none", border: "none", fontSize: 12, fontWeight: 600, color: c.green, cursor: "pointer" }}>Override →</button>}
+            {canEdit && <button onClick={() => onAssign(s)} style={{ background: "none", border: "none", fontSize: 12, fontWeight: 600, color: c.green, cursor: "pointer" }}>Edit Roster →</button>}
           </div>
           <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
             {responders.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: c.faint, textAlign: "center" }}>No offers yet.</div>}
@@ -367,8 +376,8 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
                 {confirming ? <Spin size={15} color="#fff" /> : <Icon name="check" size={15} strokeWidth={2.4} />} {confirming ? "Confirming…" : "Confirm shift"}
               </button>
             )}
-            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: s.status === "pending_confirmation" ? "#fff" : c.green, color: s.status === "pending_confirmation" ? c.body : "#fff", border: s.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit shift</button>
-            <button onClick={() => onAssign(s)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Override</button>
+            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: s.status === "pending_confirmation" ? "#fff" : c.green, color: s.status === "pending_confirmation" ? c.body : "#fff", border: s.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit Shift</button>
+            <button onClick={() => onAssign(s)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit Roster</button>
             <button onClick={() => setAskCancel(true)} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
             <button onClick={() => setAskDelete(true)} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>
           </div>

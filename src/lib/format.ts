@@ -218,20 +218,20 @@ export function rowAction(s: Shift, opts: { canEdit: boolean; urgent: boolean })
     case "pending_confirmation":
       return { kind: "confirm", label: "Confirm", urgent: false };
 
-    // Offers are out and spots remain. "Override" is the right word here: it
-    // steps over the automated tier chain to assign someone by hand.
+    // Offers are out and spots remain — open the manual assign screen. The venue
+    // calls this action "Edit Roster" (one label for every status, matching the
+    // drawer button), so it reads the same wherever it appears.
     case "staffing":
-      return { kind: "override", label: "Override", urgent: true };
+      return { kind: "override", label: "Edit Roster", urgent: true };
 
     // Confirmed but the first offers have not gone out yet (between the confirm
     // and the next Tier 1 run). Same manual route, no urgency.
     case "confirmed":
-      return { kind: "override", label: "Override", urgent: opts.urgent };
+      return { kind: "override", label: "Edit Roster", urgent: opts.urgent };
 
-    // Fully booked. There is nothing to override — the automation is done — so
-    // the action is swapping a cleaner out, and it is named for that.
+    // Fully booked. Same screen — swap a cleaner out — under the same label.
     case "fully_staffed":
-      return { kind: "swap", label: "Change staff", urgent: opts.urgent };
+      return { kind: "swap", label: "Edit Roster", urgent: opts.urgent };
 
     // Cancelled shifts are filtered out of both tables; no action if one appears.
     case "cancelled":

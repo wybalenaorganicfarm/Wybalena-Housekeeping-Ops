@@ -132,7 +132,7 @@ export function Alerts() {
                         </>
                       ) : a.alert_type === "understaffed_urgent" || a.alert_type === "cleaner_cancelled" ? (
                         <>
-                          <button onClick={() => shift ? setAssign(shift) : navigate("/shifts")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Assign manually</button>
+                          <button onClick={() => shift ? setAssign(shift) : navigate("/shifts")} style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Edit Roster</button>
                           {shift && <button onClick={() => setDrawer(shift)} style={{ background: "none", border: "none", color: c.green, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>View shift →</button>}
                           <button onClick={async () => { await dismissAlert(a.id); await load(); }} style={{ background: "none", border: "none", color: c.muted2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
                         </>

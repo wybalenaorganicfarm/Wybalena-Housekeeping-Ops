@@ -34,7 +34,7 @@ export function EditShiftModal({ shift, onClose, onSaved }: { shift: Shift; onCl
       <div onClick={(e) => e.stopPropagation()} style={{ width: 540, maxHeight: "90vh", background: c.sand, borderRadius: 14, boxShadow: "0 24px 70px rgba(0,0,0,.32)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ flex: "none", padding: "20px 24px", borderBottom: `1px solid ${c.border}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, background: c.sand }}>
           <div>
-            <div style={{ ...labelStyle, marginBottom: 6 }}>Edit shift</div>
+            <div style={{ ...labelStyle, marginBottom: 6 }}>Edit Shift</div>
             <h2 style={{ fontFamily: font.display, fontSize: 21, fontWeight: font.displayWeight, margin: 0 }}>{typeLabel(shift)}</h2>
           </div>
           <button onClick={onClose} style={{ width: 30, height: 30, border: `1px solid ${c.border3}`, background: "#fff", borderRadius: 7, color: c.muted2, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="x" size={15} strokeWidth={2} /></button>

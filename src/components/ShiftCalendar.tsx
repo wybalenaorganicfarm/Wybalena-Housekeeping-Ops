@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { c, font, BOOKING, SHIFT_EVENT } from "../theme";
 import { Icon } from "./Icon";
-import { shiftBookingName, statusOf, typeColumn } from "../lib/format";
+import { shiftBookingName, statusOf, typeLabel } from "../lib/format";
 import {
   WEEKDAYS, ymd, dayStart, addDays, localDate,
   layoutWeek, laneCount, initialMonth, type Segment, type Span,
@@ -164,10 +164,14 @@ export function ShiftCalendar({ shifts, bookings = {}, showBookings = false, ini
               const shift = s.item;
               const st = statusOf(shift);
               const cancelled = shift.status === "cancelled";
+              // The bar shows the CLEANING TYPE ("Standard Clean"), not the booking
+              // name — the green booking bar directly above already carries the
+              // guest name, so repeating it on the shift bar was redundant. The
+              // booking name stays in the hover tooltip for quick identification.
               const name = shiftBookingName(shift, bookings);
               return (
                 <button key={`s-${shift.id}`} onClick={() => onSelect(shift)}
-                  title={`${shift.start_time.slice(0, 5)} · ${name} · ${typeColumn(shift)} · ${st.label}`}
+                  title={`${shift.start_time.slice(0, 5)} · ${typeLabel(shift)} · ${name} · ${st.label}`}
                   style={{
                     ...barStyle(s,
                       // Accent keeps the status colour (amber pending, purple
@@ -180,7 +184,7 @@ export function ShiftCalendar({ shifts, bookings = {}, showBookings = false, ini
                     textDecoration: cancelled ? "line-through" : "none",
                   }}>
                   <span style={{ flex: "none", opacity: 0.85 }}>{shift.start_time.slice(0, 5)}</span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{typeLabel(shift)}</span>
                 </button>
               );
             })}
