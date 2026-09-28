@@ -53,6 +53,13 @@ Deno.serve(async (req) => {
         await sb.from("shift_assignments").update({ lead_notified_at: new Date().toISOString() }).eq("id", r.id);
         continue;
       }
+      // A shift the admin hasn't confirmed yet is still a draft: the date, time,
+      // or cleaner-count can all still change before it goes live. The manager's
+      // "you've been rostered" note is a CONFIRMATION, so it must not fire on a
+      // draft — it would tell her about a shift that may still move. Skip WITHOUT
+      // stamping, so once the admin confirms (status leaves pending_confirmation)
+      // the next tick picks the row up and she gets the message then.
+      if (sh.status === "pending_confirmation") continue;
 
       // The manager's cleaner row — phone + active state at send time.
       const { data: mgr } = await sb

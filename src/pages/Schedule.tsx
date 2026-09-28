@@ -41,7 +41,7 @@ const META: JobMeta[] = [
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
-  { fn: "notify-manager-roster", label: "Cleaning Manager Roster Messages", desc: "Runs every 15 minutes. Sends each Cleaning Manager the \"you've been rostered onto this shift\" WhatsApp for any shift they haven't been told about yet. A notification only — no accept, and it doesn't fill a cleaner slot. Turn off to stop these messages without changing who is rostered.", group: "daily", order: 10 },
+  { fn: "notify-manager-roster", label: "Cleaning Manager Roster Messages", desc: "Runs every 15 minutes. Sends each Cleaning Manager the \"you've been rostered onto this shift\" WhatsApp for any shift they haven't been told about yet. Only sends once a shift is confirmed — draft shifts are skipped so the message can't go out before you confirm the roster. A notification only — no accept, and it doesn't fill a cleaner slot. Turn off to stop these messages without changing who is rostered.", group: "daily", order: 10 },
 ];
 
 type Row = JobMeta & { schedule: string | null; active: boolean };
