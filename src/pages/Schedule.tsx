@@ -262,8 +262,8 @@ export function Schedule() {
                 {/* Event-driven notification: fires on the cleaner's reply, so it
                     has no cron row and no time to set — just on or off. */}
                 <SwitchRow
-                  label="Alert the Cleaning Manager"
-                  desc="Sends the Cleaning Manager a WhatsApp the moment a cleaner cancels, naming the shift and how many are still confirmed. Wording is on the Message Templates page."
+                  label="Alert the Cleaning Manager (urgent cancellations)"
+                  desc="Sends the Cleaning Manager a WhatsApp when a cleaner cancels an URGENT shift — one within the 72-hour window, re-offered immediately. Cancellations with plenty of notice are handled quietly by the 3pm re-offer run and don't ping her. Wording is on the Message Templates page."
                   on={switches.lead_cleaner_cancelled}
                   busy={switchBusy}
                   onToggle={() => toggleSwitch("lead_cleaner_cancelled")}

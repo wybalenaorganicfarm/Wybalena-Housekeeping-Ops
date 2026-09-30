@@ -475,6 +475,9 @@ Deno.serve(async (req) => {
           cleanerId: cleaner.id,
           remaining: afterCancel.accepted,
           required: afterCancel.required ?? null,
+          // Only ping Zara for urgent (within-72h) cancellations — a deferred one
+          // has plenty of notice and is handled by the 3pm run.
+          urgent: outcome === "urgent",
           source: SOURCE,
           triggeredBy: "webhook",
         });

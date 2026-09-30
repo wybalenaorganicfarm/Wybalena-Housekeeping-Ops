@@ -38,25 +38,55 @@ export function prettyType(t: string): string {
 // Build the day-before roster message: one block per shift with date/time, type
 // and every confirmed cleaner. Shifts with nobody confirmed are still listed so
 // the lead can chase them.
-// The per-shift blocks — substituted into the editable `lead_roster` template as
-// {{shift_blocks}}. Kept separate so the wording around them stays editable
-// while the generated list itself remains code-owned.
-export function buildRosterBlocks(rosters: ShiftRoster[]): string {
-  return rosters.map((r) => {
-    const time = r.startTime ? ` · ⏰ ${prettyTime(r.startTime)}` : "";
-    const roster = r.names.length
-      ? `👥 ${r.names.length} cleaner(s) confirmed:\n` +
-        r.names.map((n) => `   • ${n}`).join("\n")
+//
+// Each per-shift block is rendered through the EDITABLE `lead_roster_block`
+// template, so the venue can change the block's layout, emoji and spacing from the
+// Message Templates page (e.g. move the time onto its own line, drop the broom
+// emoji, add a blank line before the cleaners). Only the dynamic pieces stay
+// code-owned: the formatted date/time/type and the bullet list of cleaners, which
+// are passed in as variables. `{{cleaner_list}}` is the already-formatted list (or
+// the "nobody confirmed" line) so a template author never has to loop.
+//
+// Falls back to the built-in block layout if the template row is missing, so the
+// message can never fail to send. Async now because it loads the template.
+export async function buildRosterBlocks(
+  sb: SupabaseClient,
+  rosters: ShiftRoster[],
+): Promise<string> {
+  const blocks = await Promise.all(rosters.map(async (r) => {
+    const cleanerList = r.names.length
+      ? r.names.map((n) => `   • ${n}`).join("\n")
       : "⚠️ No cleaners confirmed yet.";
-    return `📅 ${prettyDate(r.shiftDate)}${time}\n🧹 ${prettyType(r.shiftType)}\n${roster}`;
-  }).join("\n\n");
+    // The whole cleaners section, ready to drop in: the "N confirmed:" header +
+    // list when someone's on it, or just the warning line when nobody is. A
+    // template author who doesn't want to handle the empty case can use this one
+    // variable and get sensible output either way.
+    const cleanerBlock = r.names.length
+      ? `👥 ${r.names.length} cleaner(s) confirmed:\n${cleanerList}`
+      : cleanerList;
+    // Built-in fallback keeps the original single-block layout exactly.
+    const time = r.startTime ? ` · ⏰ ${prettyTime(r.startTime)}` : "";
+    const fallback = `📅 ${prettyDate(r.shiftDate)}${time}\n🧹 ${prettyType(r.shiftType)}\n${cleanerBlock}`;
+    return await renderTemplate(sb, "lead_roster_block", fallback, {
+      shift_date: prettyDate(r.shiftDate),
+      start_time: r.startTime ? prettyTime(r.startTime) : "",
+      shift_type: prettyType(r.shiftType),
+      cleaner_count: r.names.length,
+      cleaner_list: cleanerList,
+      cleaner_block: cleanerBlock,
+    });
+  }));
+  return blocks.join("\n\n");
 }
 
-export function buildLeadRoster(rosters: ShiftRoster[]): string {
+export async function buildLeadRoster(
+  sb: SupabaseClient,
+  rosters: ShiftRoster[],
+): Promise<string> {
   const total = rosters.reduce((n, r) => n + r.names.length, 0);
   return (
     `*Tomorrow's Roster* 📋\n\n` +
-    buildRosterBlocks(rosters) +
+    (await buildRosterBlocks(sb, rosters)) +
     `\n\n_Total: ${total} cleaner(s) across ${rosters.length} shift(s)._`
   );
 }
@@ -124,8 +154,8 @@ export async function notifyLeadRoster(
   if (!lead?.phone) return;
 
   const total = rosters.reduce((n, r) => n + r.names.length, 0);
-  const text = await renderTemplate(sb, "lead_roster", buildLeadRoster(rosters), {
-    shift_blocks: buildRosterBlocks(rosters),
+  const text = await renderTemplate(sb, "lead_roster", await buildLeadRoster(sb, rosters), {
+    shift_blocks: await buildRosterBlocks(sb, rosters),
     total_cleaners: total,
     total_shifts: rosters.length,
   });
@@ -159,6 +189,13 @@ export async function notifyLeadCancellation(
     cleanerId?: string | null;
     remaining?: number | null;  // cleaners still confirmed
     required?: number | null;   // cleaners the shift needs
+    // Whether the cancellation was URGENT (within the 72h window, re-offered
+    // immediately) or DEFERRED (plenty of notice, waits for the 3pm run). The
+    // venue only wants Zara pinged for urgent, last-minute cancellations — a
+    // cancellation weeks out is handled quietly by the 3pm run and doesn't need
+    // her attention. Absent (e.g. a caller that predates this) is treated as
+    // urgent, so a miss errs toward telling her rather than staying silent.
+    urgent?: boolean;
     source: string;
     triggeredBy?: "webhook" | "manual" | "cron";
   },
@@ -168,6 +205,12 @@ export async function notifyLeadCancellation(
   // a missing setting reproduces the pre-setting behaviour.
   const switches = await loadNotificationSwitches(sb);
   if (!switches.leadCleanerCancelled) return;
+
+  // Only urgent (within-72h) cancellations reach Zara. A deferred one has plenty
+  // of notice and is re-offered by the 3pm run, so it isn't hers to chase. `false`
+  // is the only value that suppresses — undefined stays ON, per the switch's own
+  // "a silent miss is worse than an unexpected send" contract.
+  if (opts.urgent === false) return;
 
   const { data: lead } = await sb
     .from("profiles").select("phone").eq("role", "team_leader").eq("is_active", true).limit(1).maybeSingle();
