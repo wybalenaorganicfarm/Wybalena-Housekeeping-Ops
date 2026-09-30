@@ -23,8 +23,12 @@ const CLEAN_TYPES: [string, string][] = [
 ];
 
 // Crew size pre-filled per clean type (still editable on the form).
+// A wipeover is a one-person job — the Cleaning Manager (Zara) does it alone — so
+// it defaults to 1, not the standard 6. Without this the form pre-filled 6 and the
+// admin had to know to drop it to 1 before Zara could be the single cleaner.
 const DEFAULT_REQUIRED: Record<string, number> = {
   deep_full_venue: 7,
+  wipeover: 1,
 };
 
 const labelStyle = { fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase" as const, color: c.muted2, fontWeight: 600 };
@@ -96,7 +100,15 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Clean type */}
           <label style={{ display: "flex", flexDirection: "column", gap: 7 }}><span style={labelStyle}>Clean type</span>
-            <select value={type} onChange={(e) => { setType(e.target.value); setRequired(DEFAULT_REQUIRED[e.target.value] ?? 6); }} style={fieldStyle}>
+            <select value={type} onChange={(e) => {
+              const t = e.target.value;
+              setType(t);
+              setRequired(DEFAULT_REQUIRED[t] ?? 6);
+              // A wipeover is Zara's one-person job — default to picking her by hand
+              // (manual) so the roster screen with her "Add directly" button opens
+              // after creating. Any other type goes back to the tier auto-offers.
+              setMode(t === "wipeover" ? "manual" : "auto");
+            }} style={fieldStyle}>
               {CLEAN_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
@@ -145,7 +157,9 @@ export function NewShiftModal({ onClose, onCreated, onManualAssign }: {
               <button onClick={() => setMode("manual")} style={toggleBtn(mode === "manual")}>Assign cleaners</button>
             </div>
             <span style={{ fontSize: 11.5, color: c.faint }}>
-              {mode === "auto" ? "Offers go out automatically, Tier 1 first." : "Pick cleaners yourself after creating the shift."}
+              {type === "wipeover"
+                ? "Wipeover is a one-person job. Keep “Assign cleaners”, then on the next screen tap “Add directly” beside the Cleaning Manager (Zara) to roster her on her own."
+                : mode === "auto" ? "Offers go out automatically, Tier 1 first." : "Pick cleaners yourself after creating the shift."}
             </span>
           </div>
 
