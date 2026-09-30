@@ -4,9 +4,9 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendButtons, sendMessage, titleWithCode } from "./adapters/whatsapp.ts";
 import { btnTitle, fillVars, loadTemplate, renderTemplate } from "./templates.ts";
-import { daysBetweenDays, prettyDate, prettyDateTime, prettyTime, venueDay } from "./datetime.ts";
+import { daysBetweenDays, hoursUntilShift, prettyDate, prettyDateTime, prettyTime, venueDay } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
-import { loadCancellationCooloff } from "./settings.ts";
+import { loadCancellationCooloff, loadCancellationReoffer } from "./settings.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
 
@@ -904,18 +904,23 @@ async function deepestTierOffered(sb: SupabaseClient, shiftId: string): Promise<
 
 // Cancel an accepted/offered assignment and decide what the shift is owed next.
 //
-// The decision ignores staffing status entirely — fully_staffed, staffing and
-// understaffed all behave the same. What it asks is whether the OFFER CHAIN has
-// anywhere left to go:
+// TIMING (venue request, Sep 2026): a freed spot is no longer acted on the instant
+// someone cancels, because that pinged cleaners at whatever random hour a
+// cancellation happened. Instead:
 //
-//   • a tier still has someone free -> "waiting". Free the spot and stop. Every
-//     escalation recomputes openSpots when it runs, so the next one covers the
-//     freed spot on its own. Blasting now would jump those cleaners' turn and
-//     defeat the tiering.
-//   • no tier has anyone left     -> "reoffered". Everyone has been asked once
-//     and there is no later tier to fall back on, so re-ask everyone who is not
-//     on the shift.
-export type CancelOutcome = "reoffered" | "waiting" | "closed";
+//   • MORE than `urgentWithinHours` notice (default 72h) -> "deferred". Mark the
+//     shift (reoffer_pending_at) and let the daily 3pm cancellation-reoffer run
+//     handle it, at the same time the normal tier offers go out. That 3pm run
+//     resumes the tier chain from where the shift is up to — so this applies
+//     whether or not the shift already reached Tier 3.
+//   • `urgentWithinHours` or LESS -> "urgent". Too close to wait for 3pm: re-offer
+//     immediately to everyone available (reofferToUnaccepted), which goes wide
+//     across all tiers because a last-minute spot needs filling now.
+//
+// The old immediate "waiting vs reoffered" branch is gone: the 3pm run now owns
+// that tier-vs-blast decision, so a deferred cancellation and a shift that simply
+// hasn't escalated yet are handled by the same code path at the same time.
+export type CancelOutcome = "deferred" | "urgent" | "closed";
 
 // `selfCancelled` says WHO dropped the shift, and it matters because the two
 // cases are opposites. A cleaner who taps "Yes, cancel" has just told us she
@@ -968,9 +973,63 @@ export async function cancelOffer(
       .eq("id", a.shift_id);
   }
 
-  if (await nextOfferableTier(sb, a.shift_id, reached)) return "waiting";
-  await reofferToUnaccepted(sb, a.shift_id);
-  return "reoffered";
+  // Urgent vs deferred, on the notice against the shift's venue-local start.
+  const { urgentWithinHours } = await loadCancellationReoffer(sb);
+  const hoursOut = hoursUntilShift(shift.shift_date, shift.start_time);
+  if (hoursOut <= urgentWithinHours) {
+    // Too close to wait for the next 3pm run — fill it now, wide, across all
+    // tiers. Clear any pending mark so the 3pm run doesn't also sweep it.
+    await sb.from("shifts").update({ reoffer_pending_at: null }).eq("id", a.shift_id);
+    await reofferToUnaccepted(sb, a.shift_id);
+    return "urgent";
+  }
+
+  // Plenty of notice: mark the shift so the 3pm cancellation-reoffer run picks it
+  // up and resumes the tier chain then, rather than messaging cleaners now.
+  // Idempotent — several cancels before 3pm collapse to one pending mark, and one
+  // 3pm sweep fills every spot they freed.
+  await sb.from("shifts").update({ reoffer_pending_at: now }).eq("id", a.shift_id);
+  return "deferred";
+}
+
+// The action the 3pm cancellation-reoffer run takes on ONE shift marked pending.
+// Mirrors what cancelOffer used to do inline, but at 3pm instead of the moment of
+// cancellation: resume the tier chain from where the shift is up to — offer the
+// next tier that still has someone free, and only once every tier is exhausted
+// re-ask everyone still available. Clears the pending mark either way.
+//
+// Returns what it did, for the run's audit line. "filled" means the shift needed
+// nothing (already staffed / cancelled). Never throws on a single shift — the
+// caller sweeps many and one bad row must not stop the rest.
+export type ReofferAction = "escalated" | "reoffered" | "nothing";
+
+export async function resumePendingReoffer(
+  sb: SupabaseClient,
+  shiftId: string,
+): Promise<{ action: ReofferAction; tier?: Tier; offered: number }> {
+  // Clear the mark FIRST so a mid-run failure can't leave it stuck pending and
+  // re-swept every day. The re-offer below is itself idempotent (offers are keyed
+  // per cleaner), so re-running is safe if it ever comes to that.
+  await sb.from("shifts").update({ reoffer_pending_at: null }).eq("id", shiftId);
+
+  const shift = await loadShift(sb, shiftId);
+  if (!shift || shift.status === "cancelled" || shift.status === "fully_staffed") {
+    return { action: "nothing", offered: 0 };
+  }
+  const accepted = await acceptedCount(sb, shiftId);
+  if (shift.required_cleaners - accepted <= 0) {
+    await markFullyStaffed(sb, shiftId);
+    return { action: "nothing", offered: 0 };
+  }
+
+  const reached = maxTier(await deepestTierOffered(sb, shiftId), shift.current_tier ?? null);
+  const next = await nextOfferableTier(sb, shiftId, reached);
+  if (next) {
+    const res = await offerTier(sb, shiftId, next);
+    return { action: "escalated", tier: next, offered: res.count };
+  }
+  const res = await reofferToUnaccepted(sb, shiftId);
+  return { action: "reoffered", offered: res.count };
 }
 
 // Withdraw an UNACCEPTED offer (admin action). The deliberate opposite of

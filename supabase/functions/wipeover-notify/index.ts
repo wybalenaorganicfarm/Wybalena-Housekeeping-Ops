@@ -9,6 +9,7 @@ import { sendEmail } from "../_shared/adapters/email.ts";
 import { wipeoverEmail } from "../_shared/emailTemplates.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { loadBookingSyncRange } from "../_shared/settings.ts";
 
 const DAY = 86400000;
 const SOURCE = "wipeover-notify";
@@ -18,13 +19,25 @@ Deno.serve(async (req) => {
   if (pre) return pre;
   const sb = serviceClient();
 
-  // All upcoming, non-cancelled bookings (from the start of today), in date order.
+  // Scan the SAME horizon the weekly Booking Sync (schedule 1) plans into:
+  // `leadWeeks + windowDays` ahead (default 5 weeks + 7 days). Previously this
+  // scanned every upcoming booking with no upper bound, which flagged gaps far
+  // beyond the planning window — e.g. a gap before the roster's first booking
+  // read as a "3-day gap this week" when it was really just the empty run-up to
+  // when bookings start. Bounding to the sync horizon means a gap is only
+  // flagged once it falls inside the window we actually schedule cleans for, so
+  // Ashleigh can plan a wipeover for that week in advance and never sooner.
+  const { leadWeeks, windowDays } = await loadBookingSyncRange(sb);
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
+  // +1 day of slack on the upper bound so a check-in on the very last day of the
+  // window still has its preceding gap measured, matching sync's fetch padding.
+  const horizonEnd = new Date(todayStart.getTime() + (leadWeeks * 7 + windowDays + 1) * DAY);
   const { data: window } = await sb
     .from("bookings")
     .select("id, check_in, check_out, is_cancelled, guest_name, gcal_event_id")
     .gte("check_out", todayStart.toISOString())
+    .lte("check_in", horizonEnd.toISOString())
     .eq("is_cancelled", false)
     .order("check_in");
 

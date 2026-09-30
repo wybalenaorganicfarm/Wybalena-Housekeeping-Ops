@@ -49,6 +49,11 @@ Deno.serve(async (req) => {
     return json({ error: "the Cleaning Manager can't be removed from a shift here" }, 400);
   }
 
+  // Admin removal follows the same timing rule as a cleaner self-cancel: a spot
+  // freed with plenty of notice waits for the next 3pm re-offer run ("deferred");
+  // one freed close to the shift goes out immediately ("urgent"). selfCancelled is
+  // still false — being removed says nothing about the cleaner's availability, so
+  // she stays eligible for the re-offer, unlike a self-canceller in cooling-off.
   const outcome = await cancelOffer(sb, assignmentId);
   if (outcome === "closed") {
     return json({ error: "could not remove — the shift or assignment is no longer active" }, 409);

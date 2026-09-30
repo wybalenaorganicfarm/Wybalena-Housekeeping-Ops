@@ -61,3 +61,35 @@ export function daysBetweenDays(from: string, to: string): number {
   if (Number.isNaN(a) || Number.isNaN(b)) return 0;
   return Math.round((b - a) / 86400000);
 }
+
+// The Australia/Sydney UTC offset in minutes AT a given instant, DST-aware.
+// Derived by formatting the instant in the venue zone and diffing from UTC —
+// avoids hardcoding +10/+11 and the switchover dates.
+function sydneyOffsetMinutes(at: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Australia/Sydney",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(at);
+  const g = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  // A wall-clock read of `at` in Sydney, reinterpreted as if it were UTC, minus
+  // the true UTC instant, is the offset.
+  const asUtc = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second"));
+  return Math.round((asUtc - at.getTime()) / 60000);
+}
+
+// Hours from now until a shift's VENUE-LOCAL start (shift_date + start_time),
+// DST-aware. Used to tell an urgent, last-minute cancellation (little notice)
+// from one with plenty of lead time. Returns +Infinity on a malformed input so a
+// bad row is never mistaken for "urgent".
+export function hoursUntilShift(dateStr: string, timeStr: string, now: Date = new Date()): number {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr ?? ""));
+  const tm = /^(\d{1,2}):(\d{2})/.exec(String(timeStr ?? ""));
+  if (!dm || !tm) return Infinity;
+  // Build the naive UTC instant for the local wall-clock time, then subtract the
+  // venue offset for that instant to get the true UTC instant of the shift start.
+  const naiveUtc = Date.UTC(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]));
+  const offsetMin = sydneyOffsetMinutes(new Date(naiveUtc));
+  const startUtc = naiveUtc - offsetMin * 60000;
+  return (startUtc - now.getTime()) / 3600000;
+}

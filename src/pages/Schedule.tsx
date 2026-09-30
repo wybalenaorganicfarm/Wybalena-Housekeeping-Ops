@@ -9,6 +9,8 @@ import {
   updateCronSchedule, updateStaffingCatchup, type BookingSyncRange, type CronJob, type StaffingCatchup,
   getCancellationCooloff, updateCancellationCooloff, CANCELLATION_COOLOFF_DEFAULT,
   CANCELLATION_COOLOFF_LIMITS, type CancellationCooloff,
+  getCancellationReoffer, updateCancellationReoffer, CANCELLATION_REOFFER_DEFAULT,
+  CANCELLATION_REOFFER_LIMITS, type CancellationReoffer,
   getNotificationSwitches, updateNotificationSwitches, NOTIFICATION_SWITCHES_DEFAULT,
   type NotificationSwitches,
 } from "../lib/api";
@@ -40,6 +42,7 @@ const META: JobMeta[] = [
   { fn: "staffing-catchup", label: "Staffing Catch-Up", desc: "Sends the first Tier 1 offer for any shift confirmed too late for the weekly Tier 1 slot. Its reminders and escalations then follow at the same scheduled per-tier times as every other shift. Shifts already on the weekly schedule are left alone.", group: "daily", order: 6.5 },
   { fn: "pre-shift-reminder", label: "Pre-Shift Reminders", desc: "Reminds assigned cleaners about tomorrow's shift and sends the team lead one roster summary.", group: "daily", order: 7 },
   { fn: "cancellation-followup", label: "Cancellation Follow-up", desc: "Handles guest cancellations and frees the affected shifts.", group: "daily", order: 8 },
+  { fn: "cancellation-reoffer", label: "Cancellation Re-Offers (3pm)", desc: "Runs EVERY DAY at 3pm (not just Mondays). Re-offers spots freed by cancellations that had plenty of notice — so a deferred re-offer is at most a day away, never tied to the weekly run. It resumes the tier chain (offers the next tier that still has cleaners, or re-asks everyone available once tiers are spent). Cancellations within the urgent window are re-offered immediately instead and never wait for this run. Change the urgent window under Cancellations below.", group: "daily", order: 8.5 },
   { fn: "health-check", label: "Connection Health Check", desc: "Checks that calendar, WhatsApp and email integrations are reachable.", group: "daily", order: 9 },
   { fn: "notify-manager-roster", label: "Cleaning Manager Roster Messages", desc: "Runs every 15 minutes. Sends each Cleaning Manager the \"you've been rostered onto this shift\" WhatsApp for any shift they haven't been told about yet. Only sends once a shift is confirmed — draft shifts are skipped so the message can't go out before you confirm the roster. A notification only — no accept, and it doesn't fill a cleaner slot. Turn off to stop these messages without changing who is rostered.", group: "daily", order: 10 },
 ];
@@ -74,15 +77,17 @@ export function Schedule() {
   const [editCatchup, setEditCatchup] = useState(false);
   const [cooloff, setCooloff] = useState<CancellationCooloff>(CANCELLATION_COOLOFF_DEFAULT);
   const [editCooloff, setEditCooloff] = useState(false);
+  const [reoffer, setReoffer] = useState<CancellationReoffer>(CANCELLATION_REOFFER_DEFAULT);
+  const [editReoffer, setEditReoffer] = useState(false);
   const [switches, setSwitches] = useState<NotificationSwitches>(NOTIFICATION_SWITCHES_DEFAULT);
   const [switchBusy, setSwitchBusy] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [list, r, cu, co, sw] = await Promise.all([
+      const [list, r, cu, co, ro, sw] = await Promise.all([
         getCronSchedules(), getBookingSyncRange(), getStaffingCatchup(), getCancellationCooloff(),
-        getNotificationSwitches(),
+        getCancellationReoffer(), getNotificationSwitches(),
       ]);
       const map: Record<string, CronJob> = {};
       for (const j of list) map[j.fn] = j;
@@ -90,6 +95,7 @@ export function Schedule() {
       setRange(r);
       setCatchup(cu);
       setCooloff(co);
+      setReoffer(ro);
       setSwitches(sw);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Failed to load schedules");
@@ -156,6 +162,14 @@ export function Schedule() {
     const err = await updateCancellationCooloff(next);
     if (err) return err;
     toastOk("Cancellation cooling-off updated.");
+    await load();
+    return null;
+  }
+
+  async function saveReoffer(next: CancellationReoffer) {
+    const err = await updateCancellationReoffer(next);
+    if (err) return err;
+    toastOk("Cancellation re-offer timing updated.");
     await load();
     return null;
   }
@@ -235,6 +249,15 @@ export function Schedule() {
                   the automation behaves, and it is the only other knob that
                   changes who gets offered a shift. */}
               <Section title="Cancellations" hint="Applies as soon as a cleaner cancels — not on a schedule.">
+                {/* Spells out the re-offer timing the client asked to see here:
+                    the 3pm run is DAILY, so a deferred re-offer is at most a day
+                    away — never tied to the Monday weekly run. */}
+                <ReofferNote />
+                {/* How a freed spot is re-offered: the 3pm-batch vs immediate
+                    threshold. The 3pm run itself is the Cancellation Re-Offers job
+                    above; this is the knob that decides which cancellations wait
+                    for it. */}
+                <ReofferRow reoffer={reoffer} onEdit={() => setEditReoffer(true)} />
                 <CooloffRow cooloff={cooloff} onEdit={() => setEditCooloff(true)} />
                 {/* Event-driven notification: fires on the cleaner's reply, so it
                     has no cron row and no time to set — just on or off. */}
@@ -259,6 +282,9 @@ export function Schedule() {
       )}
       {editCatchup && (
         <CatchupModal catchup={catchup} onClose={() => setEditCatchup(false)} onSave={saveCatchup} />
+      )}
+      {editReoffer && (
+        <ReofferModal reoffer={reoffer} onClose={() => setEditReoffer(false)} onSave={saveReoffer} />
       )}
       {editCooloff && (
         <CooloffModal cooloff={cooloff} onClose={() => setEditCooloff(false)} onSave={saveCooloff} />
@@ -529,6 +555,106 @@ function SwitchRow({ label, desc, on, busy, onToggle }: {
       </div>
       <Toggle on={on} busy={busy} onClick={onToggle} />
     </div>
+  );
+}
+
+function ReofferNote() {
+  return (
+    <div style={{ padding: "11px 14px", fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+      The <b>Cancellation Re-Offers</b> run happens <b>every day at 3pm</b> — it is not tied to the
+      Monday weekly offers. So a deferred re-offer is at most a day away: a cancellation at 1pm goes
+      out that same day at 3pm (about 2 hours later); one at 4pm goes out the next day at 3pm. Change
+      that run's time on its row above; change what counts as "urgent" (skipping the wait) below.
+    </div>
+  );
+}
+
+function ReofferRow({ reoffer, onEdit }: { reoffer: CancellationReoffer; onEdit: () => void }) {
+  const h = reoffer.urgent_within_hours;
+  const window = h % 24 === 0 ? `${h / 24} day${h === 24 ? "" : "s"}` : `${h} hours`;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "11px 14px", background: c.panel, border: `1px solid ${c.border3}`, borderRadius: 10, marginTop: 8 }}>
+      <div style={{ flex: 1, fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 600, marginBottom: 3 }}>
+          {h === 0 ? "Re-offer: always immediate" : `Re-offer: urgent within ${window}`}
+        </div>
+        {h === 0 ? (
+          <>Every cancellation is treated as urgent — the freed spot goes out immediately to everyone available, whatever the notice.</>
+        ) : (
+          <>
+            A cancellation with <b>more than {window}</b>' notice waits for the daily 3pm
+            re-offer run (so cleaners aren't messaged at a random hour). One with <b>{window}</b>
+            or less is urgent and goes out immediately to everyone available.
+          </>
+        )}
+      </div>
+      <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit</Button>
+    </div>
+  );
+}
+
+function ReofferModal({ reoffer, onClose, onSave }: {
+  reoffer: CancellationReoffer; onClose: () => void; onSave: (r: CancellationReoffer) => Promise<string | null>;
+}) {
+  const [hours, setHours] = useState(String(reoffer.urgent_within_hours));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const L = CANCELLATION_REOFFER_LIMITS;
+  const n = Number(hours);
+  const ok = Number.isInteger(n) && n >= L.urgent_within_hours.min && n <= L.urgent_within_hours.max;
+
+  async function submit() {
+    if (!ok) { setErr(`Enter a whole number between ${L.urgent_within_hours.min} and ${L.urgent_within_hours.max} hours.`); return; }
+    setSaving(true); setErr(null);
+    const e = await onSave({ urgent_within_hours: n });
+    setSaving(false);
+    if (e) { setErr(e); return; }
+    onClose();
+  }
+
+  const field: React.CSSProperties = {
+    width: 90, boxSizing: "border-box", padding: "8px 10px", fontSize: 13,
+    border: `1px solid ${c.border3}`, borderRadius: 7, outline: "none", color: c.ink, background: "#fff",
+  };
+
+  return (
+    <Modal title="Cancellation re-offers" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: c.muted, lineHeight: 1.55, marginBottom: 16 }}>
+        When a cleaner cancels (or is taken off a shift), the freed spot is re-offered. A
+        cancellation with plenty of notice waits for the daily 3pm re-offer run, so cleaners
+        aren't pinged at a random hour. A last-minute one goes out immediately. This sets where
+        that line falls.
+      </div>
+
+      <label style={{ display: "block", marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>Urgent if the shift is within</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="number" min={L.urgent_within_hours.min} max={L.urgent_within_hours.max} value={hours}
+            onChange={(e) => setHours(e.target.value)} style={field} />
+          <span style={{ fontSize: 12.5, color: c.muted }}>hours</span>
+        </div>
+      </label>
+
+      <div style={{ background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        {!ok ? "Enter a whole number of hours." : n === 0 ? (
+          <><b>Always immediate.</b> Every cancellation re-offers straight away, with no wait for the 3pm run.</>
+        ) : (
+          <>
+            A cancellation with more than <b>{n} hours</b>
+            {n % 24 === 0 ? <> ({n / 24} day{n === 24 ? "" : "s"})</> : null} notice waits for
+            the next 3pm re-offer run. Within <b>{n} hours</b> of the shift, it goes out
+            immediately to everyone available.
+          </>
+        )}
+      </div>
+
+      {err && <div style={{ color: c.danger, fontSize: 12.5, marginTop: 12 }}>{err}</div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={submit} disabled={saving || !ok}>{saving ? "Saving…" : "Save"}</Button>
+      </div>
+    </Modal>
   );
 }
 

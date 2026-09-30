@@ -25,6 +25,7 @@ import { midRetreatEmail } from "../_shared/emailTemplates.ts";
 import { prettyDate } from "../_shared/datetime.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { loadBookingSyncRange } from "../_shared/settings.ts";
 
 const DAY = 86400000;
 const SOURCE = "mid-retreat-notify";
@@ -58,15 +59,22 @@ Deno.serve(async (req) => {
   if (pre) return pre;
   const sb = serviceClient();
 
-  // Every upcoming, non-cancelled long stay (from the start of today), in date
-  // order. Bookings only reach the table via the sync's look-ahead window, so
-  // this is naturally bounded to the near term without a second date filter.
+  // Every upcoming, non-cancelled long stay within the SAME horizon the weekly
+  // Booking Sync (schedule 1) plans into: `leadWeeks + windowDays` ahead (default
+  // 5 weeks + 7 days). Previously this scanned every upcoming booking with no
+  // upper bound — a long stay months out was flagged the moment it appeared,
+  // long before it fell into the planning window. Bounding it to the sync horizon
+  // means a 7+ night stay is only flagged once it's inside the window we actually
+  // schedule cleans for, matching the wipeover alert and schedule 1.
+  const { leadWeeks, windowDays } = await loadBookingSyncRange(sb);
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
+  const horizonEnd = new Date(todayStart.getTime() + (leadWeeks * 7 + windowDays + 1) * DAY);
   const { data: bookings, error } = await sb
     .from("bookings")
     .select("id, gcal_event_id, guest_name, check_in, check_out, nights")
     .gte("check_out", todayStart.toISOString())
+    .lte("check_in", horizonEnd.toISOString())
     .eq("is_cancelled", false)
     .gte("nights", MID_RETREAT_MIN_NIGHTS)
     .order("check_in");

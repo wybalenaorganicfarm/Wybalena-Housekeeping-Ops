@@ -25,6 +25,9 @@ const KNOWN_FNS = new Set([
   // messages. It was scheduled in the DB but missing from this allowlist and
   // from the Schedule page, so it could not be paused or re-timed from the app.
   "notify-manager-roster",
+  // Daily 3pm sweep that re-offers spots freed by cancellations with plenty of
+  // notice (the ones deferred by cancelOffer rather than re-offered on the spot).
+  "cancellation-reoffer",
 ]);
 
 // Guard: "m h dom mon dow", each field digits / * / , / - / /. Keeps obviously

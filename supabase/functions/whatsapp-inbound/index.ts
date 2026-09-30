@@ -445,9 +445,9 @@ Deno.serve(async (req) => {
         // not hand it straight back to her (the 04/10 complaint). An admin
         // removal via cancel-accepted passes no flag and keeps her eligible.
         const outcome = await cancelOffer(sb, assignmentId, true);
-        const outcomeNote = outcome === "reoffered"
-          ? `All tiers had already been offered, so the shift has been re-offered to everyone still available (excluding ${cleaner.full_name}).`
-          : "The shift has not reached Tier 3 yet, so the freed spot is included in the next scheduled escalation. You can also assign a cleaner manually.";
+        const outcomeNote = outcome === "urgent"
+          ? `This shift is within the urgent window, so the freed spot has been re-offered immediately to everyone still available (excluding ${cleaner.full_name}).`
+          : "There's plenty of notice, so the freed spot will be re-offered at the next 3pm run (alongside the day's other offers). You can also assign a cleaner manually now.";
         await sendOutcome(cleaner.phone, "cancelled_confirmation", "Shift Cancelled", sb, shiftRef);
         // Raise an alert so the admin sees it on the Dashboard + Alerts and can
         // step in / assign manually. Dedupe one open alert per shift.

@@ -54,6 +54,15 @@ schedule, it is not done until an admin can see it and turn it off:
   Schedule page.
 - **Sends a message** → the wording belongs in `message_templates`, never
   hardcoded, so it shows on the Message Templates page.
+- **Uses a timing threshold or numeric knob** (a wait, a window, a horizon, a
+  "within N hours" rule) → store it in `app_settings`, load it via a `settings.ts`
+  helper, and give it an Edit control on the Schedule page. Never hardcode a
+  duration a client might want to tune (e.g. the 72h cancellation urgency window,
+  the booking-sync horizon). A magic number in an edge function is not editable.
 
 Switches default to ON and treat a missing/malformed value as ON: the behaviour
 predates the setting, so a silent miss is worse than an unexpected send.
+
+The venue has repeatedly found automations that were NOT on the Schedule page
+(the manager roster messages, the cancellation re-offer). Treat "is every new
+behaviour represented on the Schedule page?" as part of "done", not a follow-up.

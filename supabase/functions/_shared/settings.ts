@@ -85,6 +85,23 @@ export const DEFAULT_CANCELLATION_COOLOFF: CancellationCooloff = { cooloffHours:
 
 export const COOLOFF_LIMITS = { cooloffHours: { min: 0, max: 336 } };  // up to 14 days
 
+// The notice threshold that decides how a freed spot is re-offered after a
+// cancellation. More than this many hours before the shift → the re-offer waits
+// for the next 3pm run (cancellation-reoffer), so cleaners aren't pinged at a
+// random hour. This much notice or less → the spot is urgent and goes out
+// immediately to everyone available. See 20260928120000_deferred_cancellation_reoffer.sql.
+//
+// HOURS, compared at the cancellation event against the shift's start datetime —
+// same reasoning as the cooling-off above: an event-time comparison, so hours are
+// exact. 0 makes every cancellation urgent (immediate re-offer, no 3pm wait).
+export interface CancellationReoffer {
+  urgentWithinHours: number;
+}
+
+export const DEFAULT_CANCELLATION_REOFFER: CancellationReoffer = { urgentWithinHours: 72 };
+
+export const REOFFER_LIMITS = { urgentWithinHours: { min: 0, max: 336 } };  // up to 14 days
+
 // Event-driven notification switches.
 //
 // These fire on an EVENT (a cleaner cancels), not on a schedule, so they have no
@@ -146,6 +163,29 @@ export async function loadCancellationCooloff(sb: SupabaseClient): Promise<Cance
     };
   } catch {
     return DEFAULT_CANCELLATION_COOLOFF;
+  }
+}
+
+export async function loadCancellationReoffer(sb: SupabaseClient): Promise<CancellationReoffer> {
+  try {
+    const { data } = await sb
+      .from("app_settings").select("value").eq("key", "cancellation_reoffer").maybeSingle();
+    const v = (data as { value?: Record<string, unknown> } | null)?.value;
+    if (!v) return DEFAULT_CANCELLATION_REOFFER;
+    return {
+      // `?? undefined` before clamping so an explicit null falls back to the
+      // default rather than clamping to 0 (which would make every cancellation
+      // urgent). 0 is legitimate ("always immediate") but must be chosen, not
+      // arrived at by a malformed row — same idiom as the cooling-off loader.
+      urgentWithinHours: clampInt(
+        v.urgent_within_hours ?? undefined,
+        REOFFER_LIMITS.urgentWithinHours.min,
+        REOFFER_LIMITS.urgentWithinHours.max,
+        DEFAULT_CANCELLATION_REOFFER.urgentWithinHours,
+      ),
+    };
+  } catch {
+    return DEFAULT_CANCELLATION_REOFFER;
   }
 }
 

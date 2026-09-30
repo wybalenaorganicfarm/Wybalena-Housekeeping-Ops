@@ -465,6 +465,36 @@ export async function updateCancellationCooloff(next: CancellationCooloff): Prom
   return error ? friendlyError(error.message) : null;
 }
 
+// ---- Cancellation re-offer timing -------------------------------------------
+// The notice threshold that decides how a freed spot is re-offered. More than this
+// many hours before the shift → the re-offer waits for the daily 3pm run. This
+// much notice or less → it goes out immediately to everyone available. 0 makes
+// every cancellation immediate. Mirrors the settings loader in
+// supabase/functions/_shared/settings.ts (DEFAULT_CANCELLATION_REOFFER).
+
+export interface CancellationReoffer { urgent_within_hours: number }
+
+export const CANCELLATION_REOFFER_DEFAULT: CancellationReoffer = { urgent_within_hours: 72 };
+export const CANCELLATION_REOFFER_LIMITS = {
+  urgent_within_hours: { min: 0, max: 336 },  // up to 14 days
+};
+
+export async function getCancellationReoffer(): Promise<CancellationReoffer> {
+  const { data, error } = await supabase
+    .from("app_settings").select("value").eq("key", "cancellation_reoffer").maybeSingle();
+  if (error || !data) return CANCELLATION_REOFFER_DEFAULT;
+  const v = (data as { value: Partial<CancellationReoffer> }).value ?? {};
+  return {
+    urgent_within_hours: Number(v.urgent_within_hours ?? CANCELLATION_REOFFER_DEFAULT.urgent_within_hours),
+  };
+}
+
+export async function updateCancellationReoffer(next: CancellationReoffer): Promise<string | null> {
+  const { error } = await supabase
+    .from("app_settings").update({ value: next } as never).eq("key", "cancellation_reoffer");
+  return error ? friendlyError(error.message) : null;
+}
+
 // ---- Event-driven notification switches -------------------------------------
 // Behaviour that fires on an EVENT rather than a schedule, so it has no cron job
 // and cannot appear on the Schedule page as a timed row. Still fully on/off-able
