@@ -483,9 +483,30 @@ Deno.serve(async (req) => {
         break;
       }
       case "cancel_cancel": { // tapped "No" on the cancel confirmation
-        await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_cancel_kept",
-          "No problem — nothing was cancelled. You're still on this shift.", tplVars));
-        results.push({ id: r.providerMessageId, action: "cancel_cancel" });
+        // "No, keep me on" is only true if she is STILL accepted. A stale cancel
+        // prompt can resolve to a row she already cancelled (button id / quoted
+        // confirm id both bypass the status filter that the fallback path applies),
+        // and the shift may since have been re-offered and FILLED by someone else.
+        // Replying "you're still on this shift" then is a flat lie — the exact
+        // Denny 22 Oct case. So confirm her real state before reassuring her.
+        if (assn?.status === "accepted") {
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_cancel_kept",
+            "No problem — nothing was cancelled. You're still on this shift.", tplVars));
+          results.push({ id: r.providerMessageId, action: "cancel_cancel" });
+          break;
+        }
+        // Not accepted: tell her the truth rather than falsely reassure. If the
+        // shift has already been filled, say so; otherwise she simply isn't on it.
+        const filled = ctx.status === "fully_staffed";
+        await sendMessage(cleaner.phone, await renderTemplate(sb,
+          filled ? "reply_shift_already_filled" : "reply_not_on_shift",
+          filled
+            ? "That shift has already been filled by someone else, so you're not on it. Nothing has changed."
+            : "You're not currently on this shift, so there was nothing to keep. Nothing has changed.",
+          tplVars));
+        await logResponse("response.cancel_kept_stale", "warning",
+          `${cleaner.full_name} tapped "keep me on" for the ${dateLabel} shift, but her row is "${assn?.status ?? "missing"}"${filled ? " and the shift is already filled" : ""} — told her the true state instead of "you're still on".`);
+        results.push({ id: r.providerMessageId, action: "cancel_cancel", result: filled ? "already_filled" : "not_active" });
         break;
       }
       default: {
