@@ -115,11 +115,17 @@ Deno.serve(async (req) => {
   // and not even that once rows are updated — so a batch arrived as 16 Sept,
   // 21 Sept, 7 Sept. Soonest shift first is chronological and the right priority.
 
+  // A past shift can't be staffed, so it must never be adopted, offered or alerted
+  // — otherwise a stale understaffed shift keeps firing offers and the URGENT
+  // Tier 3 email every day (the 4 Oct shift that emailed on the 6th). Gate both
+  // queries on shift_date >= today (venue-local).
+  //
   // (a) Candidates for adoption: confirmed, never offered, not on either chain.
   const { data: unclaimed } = await sb
     .from("shifts").select(SHIFT_COLS)
     .eq("status", "confirmed")
     .is("staffing_track", null)
+    .gte("shift_date", today)
     .order("shift_date").order("start_time");
 
   // (b) Shifts already on this chain. fully_staffed and cancelled drop out.
@@ -127,6 +133,7 @@ Deno.serve(async (req) => {
     .from("shifts").select(SHIFT_COLS)
     .eq("staffing_track", "catchup")
     .in("status", ["confirmed", "staffing"])
+    .gte("shift_date", today)
     .order("shift_date").order("start_time");
 
   const shifts = [...(unclaimed ?? []), ...(mine ?? [])] as unknown as ShiftRow[];

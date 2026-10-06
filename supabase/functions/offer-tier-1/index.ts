@@ -5,6 +5,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { offerTier } from "../_shared/engine.ts";
+import { venueDay } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 import { notifyOfferFailure, type OfferFailure } from "../_shared/managerSummary.ts";
 
@@ -24,6 +25,9 @@ Deno.serve(async (req) => {
     .select("id, shift_date, shift_type, start_time")
     .eq("status", "confirmed")
     .is("staffing_track", null)
+    // A past shift can't be staffed, so never send fresh offers for one (the stale
+    // understaffed shift that kept emailing). venue-local today.
+    .gte("shift_date", venueDay(new Date()))
     // Soonest shift first — this loop sends in sequence, and unordered rows come
     // back in physical storage order, which is not chronological.
     .order("shift_date")

@@ -4,6 +4,7 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
+import { venueDay } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 import { notifyOfferFailure, type OfferFailure } from "../_shared/managerSummary.ts";
 
@@ -43,6 +44,8 @@ Deno.serve(async (req) => {
     .eq("status", "staffing")
     .eq("current_tier", chain[0])
     .in("staffing_track", ["weekly", "catchup"])
+    // A past shift can't be staffed, so never escalate one (venue-local today).
+    .gte("shift_date", venueDay(new Date()))
     // Soonest shift first — this loop sends in sequence, and unordered rows come
     // back in physical storage order, which is not chronological.
     .order("shift_date")

@@ -17,6 +17,7 @@ import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { acceptedCount, allCurrentTierOffersReminded, daysSinceCurrentTierOffer, nextOfferableTier, offerTier, tierChain } from "../_shared/engine.ts";
 import { raiseTier3Alert } from "../_shared/tier3Alert.ts";
+import { venueDay } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "escalate-tier-3";
@@ -70,12 +71,20 @@ Deno.serve(async (req) => {
   // raiseTier3Alert dedupes one open alert per shift and emails only alongside a
   // newly-raised one, so a shift already alerted, or staffed in the meantime, is
   // never re-alerted.
+  // A shift whose date has already passed can't be staffed, so it must never be
+  // alerted or escalated — otherwise a stale understaffed shift keeps firing the
+  // URGENT email every day (the client got one for a 4 Oct shift on the 6th). Gate
+  // both passes on shift_date >= today (venue-local, so a 9am checkout clean isn't
+  // cut off a day early by UTC).
+  const today = venueDay(new Date());
+
   const REMINDER_BACKSTOP_DAYS = 2;
   const { data: lastTierShifts } = await sb
     .from("shifts")
     .select("id, shift_date, shift_type, required_cleaners")
     .eq("status", "staffing")
     .eq("current_tier", lastTier)
+    .gte("shift_date", today)
     // Same scope as Pass 2 below. Without this, a shift with no staffing_track
     // (reachable via a manual offer on an already-`staffing` shift) was alerted
     // and emailed as URGENT here while Pass 2 never escalated it — a recurring
@@ -100,6 +109,7 @@ Deno.serve(async (req) => {
     .eq("status", "staffing")
     .in("current_tier", chain.slice(1))
     .in("staffing_track", ["weekly", "catchup"])
+    .gte("shift_date", today)
     // Soonest shift first — this loop sends in sequence, and unordered rows come
     // back in physical storage order, which is not chronological.
     .order("shift_date")

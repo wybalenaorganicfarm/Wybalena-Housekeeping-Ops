@@ -40,7 +40,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendMessage } from "./adapters/whatsapp.ts";
 import { fillVars, loadTemplate } from "./templates.ts";
-import { prettyDate } from "./datetime.ts";
+import { prettyDate, venueDay } from "./datetime.ts";
 import { writeAuditLog } from "./auditLog.ts";
 
 export type Tier = "tier_1" | "tier_2" | "tier_3";
@@ -232,13 +232,17 @@ export async function remindTier(
   // chains are reminded here, and the current_tier + reminder_sent_at gates
   // (each offer reminded at most once, only while its shift is still at this
   // tier) prevent the duplicate-reminder flood on either track.
+  // A past shift can't be staffed, so don't remind anyone about one (venue-local
+  // today). Filtered on the embedded shift via the !inner join in PENDING_COLS.
+  const today = venueDay(new Date());
   const { data: pending } = await sb
     .from("shift_assignments")
     .select(PENDING_COLS)
     .eq("status", "offered")
     .eq("tier_at_offer", tier)
     .is("reminder_sent_at", null)
-    .eq("shifts.current_tier", tier);
+    .eq("shifts.current_tier", tier)
+    .gte("shifts.shift_date", today);
   // Ordering is applied in sendReminders (byShiftDateTime) — see the note there
   // for why it cannot be done with an embedded .order() on a to-one relation.
 
