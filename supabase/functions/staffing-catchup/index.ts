@@ -138,6 +138,24 @@ Deno.serve(async (req) => {
 
   const shifts = [...(unclaimed ?? []), ...(mine ?? [])] as unknown as ShiftRow[];
 
+  // When did the weekly Tier 1 job (offer-tier-1) last actually run? It writes an
+  // audit entry on EVERY run — even when it offers nothing — so the latest such
+  // entry is a reliable "the weekly job has run" marker. We use it to close a gap:
+  // a shift confirmed AFTER today's weekly run has already been missed by it and
+  // won't be seen again until next week, so it must be adopted now rather than made
+  // to wait the usual settle day. Without this, a shift confirmed mid-morning on
+  // the weekly day (after an earlier-moved weekly slot) got no offer until the
+  // next day — the public-holiday confirmation the venue reported.
+  const { data: lastWeekly } = await sb
+    .from("audit_logs")
+    .select("created_at")
+    .eq("source", "offer-tier-1")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastWeeklyRunAt = (lastWeekly as { created_at?: string } | null)?.created_at ?? null;
+  const weeklyRanToday = lastWeeklyRunAt != null && venueDay(new Date(lastWeeklyRunAt)) === today;
+
   // ---- Phase 1: decide what each shift is owed -----------------------------
   async function decide(s: ShiftRow): Promise<Plan> {
     // Adoption: this shift missed the weekly Tier 1 slot.
@@ -146,16 +164,27 @@ Deno.serve(async (req) => {
       const at = Date.parse(confirmedAt);
       // Grace period after confirmation before the first offer. Defaults to 0.
       if (offerGraceHours > 0 && at && now - at < offerGraceHours * HOUR) return SKIP;
-      // Wait a full venue-local day before adopting. A shift confirmed today may
-      // still be picked up by this week's offer-tier-1 slot, and whichever job
-      // offers it first owns it — this gate makes sure that is the weekly job
-      // whenever the weekly job is still going to get there.
-      if (daysBetweenDays(venueDay(new Date(at || now)), today) < escalationWaitDays) return SKIP;
+      // The weekly job already ran today AND this shift was confirmed after it ran:
+      // the weekly slot has missed it and won't return until next week, so adopt it
+      // now instead of waiting the settle day. (offerGraceHours above still applies,
+      // so an admin who wants a deliberate pause after confirmation still gets it.)
+      const missedTodaysWeeklyRun =
+        weeklyRanToday && at && lastWeeklyRunAt != null && at > Date.parse(lastWeeklyRunAt);
+      if (!missedTodaysWeeklyRun) {
+        // Otherwise wait a full venue-local day before adopting. A shift confirmed
+        // today may still be picked up by this week's offer-tier-1 slot, and
+        // whichever job offers it first owns it — this gate makes sure that is the
+        // weekly job whenever the weekly job is still going to get there. It also
+        // stops catch-up racing ahead of a weekly run that hasn't happened yet.
+        if (daysBetweenDays(venueDay(new Date(at || now)), today) < escalationWaitDays) return SKIP;
+      }
       return {
         kind: "offer",
         tier: "tier_1",
         track: "catchup",
-        reason: `confirmed on ${prettyDate(venueDay(new Date(at || now)))}, after the weekly Tier 1 slot had run`,
+        reason: missedTodaysWeeklyRun
+          ? `confirmed after today's weekly Tier 1 run had already gone out`
+          : `confirmed on ${prettyDate(venueDay(new Date(at || now)))}, after the weekly Tier 1 slot had run`,
       };
     }
 
