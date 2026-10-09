@@ -636,6 +636,17 @@ export async function reofferToUnaccepted(
     .eq("shift_id", shiftId);
   const rows = existing ?? [];
   const onShift = new Set(rows.filter((r) => r.status === "accepted").map((r) => r.cleaner_id));
+  // Cleaners who ALREADY hold a live open offer for this shift. They have been
+  // asked and simply haven't replied yet — re-offering reopens their row and fires
+  // a second identical "a spot has opened up" message. When two cleaners cancel the
+  // same shift inside the urgent window, the first cancellation re-offers everyone
+  // available (status -> offered), and without this the second cancellation re-sends
+  // to every one of them again. Excluded so each open offer is sent once, no matter
+  // how many cancellations land. (A re-offer still re-asks declined / no-response /
+  // cancelled cleaners from an earlier round — only a CURRENTLY open offer is held.)
+  const alreadyOffered = new Set(
+    rows.filter((r) => r.status === "offered" || r.status === "team_lead").map((r) => r.cleaner_id),
+  );
   // Cleaners who dropped THIS shift themselves and are still inside the
   // cooling-off window. Excluded below — see the note above. Scoped to this
   // shift only: cancelling the 4 Oct shift must not make her unofferable for
@@ -666,10 +677,13 @@ export async function reofferToUnaccepted(
     .order("tier")
     .order("full_name");
 
-  // Everyone not currently on the shift and not inside their cooling-off window.
-  // No slice to openSpots — this is the last ask, so it goes wide, and the
-  // accepts that reach the target close the rest via markFullyStaffed.
-  const candidates = (pool ?? []).filter((c) => !onShift.has(c.id) && !coolingOff.has(c.id));
+  // Everyone not currently on the shift, not holding a live open offer already,
+  // and not inside their cooling-off window. No slice to openSpots — this is the
+  // last ask, so it goes wide, and the accepts that reach the target close the
+  // rest via markFullyStaffed.
+  const candidates = (pool ?? []).filter(
+    (c) => !onShift.has(c.id) && !alreadyOffered.has(c.id) && !coolingOff.has(c.id),
+  );
   if (candidates.length === 0) {
     return emptyOffer(shift.shift_date, openSpots, false);
   }
