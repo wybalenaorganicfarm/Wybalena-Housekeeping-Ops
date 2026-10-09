@@ -59,13 +59,17 @@ Deno.serve(async (req) => {
       .eq("shift_id", s.id)
       .eq("status", "accepted");
     let shiftMessaged = 0;
-    const rosterNames: string[] = [];
+    // Collect each confirmed cleaner with the fields needed to ORDER the roster:
+    // the Cleaning Manager first, then Tier 1 → 2 → 3, alphabetical within a tier.
+    // The venue reads top-down, so regular Tier 1 cleaners should head the list and
+    // fill-ins from lower tiers sit beneath them.
+    const roster: { name: string; isLead: boolean; tier: string }[] = [];
     for (const a of accepted ?? []) {
       const { data: c } = await sb
-        .from("cleaners").select("full_name, phone, is_active").eq("id", a.cleaner_id).maybeSingle();
+        .from("cleaners").select("full_name, phone, is_active, is_team_leader, tier").eq("id", a.cleaner_id).maybeSingle();
       // Rostered either way — the lead needs the full confirmed list, including
       // cleaners we can't WhatsApp.
-      if (c?.full_name) rosterNames.push(c.full_name);
+      if (c?.full_name) roster.push({ name: c.full_name, isLead: !!c.is_team_leader, tier: c.tier ?? "tier_3" });
       // Don't send while the cleaner is currently Inactive.
       if (c?.phone && c.is_active) {
         await sendMessage(
@@ -78,6 +82,13 @@ Deno.serve(async (req) => {
         shiftMessaged++;
       }
     }
+    // Manager first (rank 0), then by tier number, then alphabetical.
+    const tierRank: Record<string, number> = { tier_1: 1, tier_2: 2, tier_3: 3 };
+    const rosterNames = roster
+      .sort((a, b) =>
+        (a.isLead ? 0 : (tierRank[a.tier] ?? 9)) - (b.isLead ? 0 : (tierRank[b.tier] ?? 9)) ||
+        a.name.localeCompare(b.name))
+      .map((r) => r.name);
     rosters.push({
       shiftId: s.id,
       shiftDate: s.shift_date,

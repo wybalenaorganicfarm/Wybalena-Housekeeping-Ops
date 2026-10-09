@@ -28,11 +28,24 @@ const TIER_LABEL: Record<string, string> = {
   tier_3: "Tier 3",
 };
 
-// Exported so notify-manager-roster renders the same "Standard" / "Deep Full
-// Venue" labels in the manager's rostered notification as the roster summary uses
-// — one source of truth for clean-type display, never a raw enum in a message.
+// Canonical clean-type labels cleaners and the manager actually read — the same
+// wording the app shows (src/lib/format.ts SHIFT_TYPE_LABEL). A raw enum like
+// "standard" or a bare "Standard" is never what should appear in a message; it is
+// "Standard Clean", "Deep Clean", etc. Shared by notify-manager-roster and the
+// roster summary so clean-type display has one source of truth.
+const SHIFT_TYPE_LABEL: Record<string, string> = {
+  standard: "Standard Clean",
+  mid_retreat: "Mid-Retreat Clean",
+  deep_full_venue: "Deep Clean",
+  wipeover: "Wipeover Clean",
+  other: "Other",
+};
+
+// Exported so every message renders the same clean-type label. Falls back to a
+// title-cased version of the raw value for any type not in the map, so a new enum
+// value degrades to something readable rather than throwing.
 export function prettyType(t: string): string {
-  return (t ?? "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  return SHIFT_TYPE_LABEL[t] ?? (t ?? "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 // Build the day-before roster message: one block per shift with date/time, type

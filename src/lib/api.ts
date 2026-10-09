@@ -68,6 +68,26 @@ export async function addCleanerNote(cleanerId: string, body: string): Promise<s
   return error ? friendlyError(error.message) : null;
 }
 
+// Edit an existing note's text. RLS (cleaner_notes_admin_write, "for all") allows
+// admin / super_admin / operations_manager to update; team leads can only insert,
+// so the UI hides edit/delete from them. `.select()` so a row blocked by RLS comes
+// back empty rather than looking like a silent success.
+export async function updateCleanerNote(id: string, body: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("cleaner_notes").update({ body } as never).eq("id", id).select("id");
+  if (error) return friendlyError(error.message);
+  if (!data || data.length === 0) return "You don't have permission to edit this note, or it no longer exists.";
+  return null;
+}
+
+export async function deleteCleanerNote(id: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("cleaner_notes").delete().eq("id", id).select("id");
+  if (error) return friendlyError(error.message);
+  if (!data || data.length === 0) return "You don't have permission to delete this note, or it no longer exists.";
+  return null;
+}
+
 export async function getStaffing(): Promise<Record<string, ShiftStaffing>> {
   const rows = unwrapRows<ShiftStaffing>(await supabase.from("shift_staffing").select("*"));
   const map: Record<string, ShiftStaffing> = {};

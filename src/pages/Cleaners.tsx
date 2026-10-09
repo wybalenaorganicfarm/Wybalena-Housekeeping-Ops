@@ -609,7 +609,7 @@ export function Cleaners() {
 
       {showAdd && <AddCleanerModal existing={cleaners} onClose={() => setShowAdd(false)} onSaved={load} />}
       {editing && <EditCleanerModal cleaner={editing} existing={cleaners} onClose={() => setEditing(null)} onSaved={load} />}
-      {notesFor && <CleanerNotesModal cleaner={notesFor} onClose={() => { setNotesFor(null); getLatestCleanerNotes().then(setLatestNotes).catch(() => {}); }} />}
+      {notesFor && <CleanerNotesModal cleaner={notesFor} canModify={canEdit} onClose={() => { setNotesFor(null); getLatestCleanerNotes().then(setLatestNotes).catch(() => {}); }} />}
       {toRemove && (
         <ConfirmDialog
           title="Remove cleaner"

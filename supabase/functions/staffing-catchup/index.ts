@@ -40,7 +40,7 @@ import { raiseTier3Alert } from "../_shared/tier3Alert.ts";
 import { loadStaffingCatchup } from "../_shared/settings.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 import { notifyOfferFailure, type OfferFailure } from "../_shared/managerSummary.ts";
-import { daysBetweenDays, prettyDate, venueDay } from "../_shared/datetime.ts";
+import { prettyDate, venueDay } from "../_shared/datetime.ts";
 
 const SOURCE = "staffing-catchup";
 const LABEL = "Staffing Catch-Up";
@@ -100,6 +100,46 @@ async function hasAnyOffer(
   return (count ?? 0) > 0;
 }
 
+// Today's day-of-week in venue-local terms, 0=Sun..6=Sat — the same numbering
+// cron uses for its weekday field (where 7 also means Sunday).
+function venueWeekday(d: Date): number {
+  const name = new Intl.DateTimeFormat("en-US", { timeZone: "Australia/Sydney", weekday: "short" }).format(d);
+  return { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[name] ?? d.getUTCDay();
+}
+
+// Does the weekly Tier 1 job (offer-tier-1) run on TODAY's weekday? Read from its
+// own cron schedule so an admin re-timing it (including the weekday) is respected.
+// Only the weekday field matters here — the time within the day is handled by the
+// "already ran today?" audit check at the call site. A schedule we can't read or
+// parse falls back to TRUE (assume it runs today), the safe default: catch-up then
+// keeps deferring new shifts rather than risk racing the weekly job onto the wrong
+// chain. The old hardcoded wait already erred that way, so this is no worse.
+async function weeklyOfferRunsToday(sb: ReturnType<typeof serviceClient>): Promise<boolean> {
+  try {
+    const { data } = await sb.rpc("admin_list_cron_jobs");
+    const rows = (data ?? []) as { fn?: string; schedule?: string }[];
+    const weekly = rows.find((r) => r.fn === "offer-tier-1");
+    if (!weekly?.schedule) return true;
+    // cron: "m h dom mon dow". We need the dow (5th) field.
+    const dow = weekly.schedule.trim().split(/\s+/)[4];
+    if (!dow || dow === "*") return true; // runs every day → always "coming today"
+    const todayDow = venueWeekday(new Date());
+    // Support comma lists and simple ranges in the dow field; treat 7 as Sunday(0).
+    const matches = dow.split(",").some((part) => {
+      const norm = (n: number) => (n === 7 ? 0 : n);
+      const range = part.split("-").map((x) => norm(Number(x)));
+      if (range.length === 2 && Number.isFinite(range[0]) && Number.isFinite(range[1])) {
+        const [a, b] = range;
+        return a <= b ? todayDow >= a && todayDow <= b : todayDow >= a || todayDow <= b;
+      }
+      return Number.isFinite(range[0]) && todayDow === range[0];
+    });
+    return matches;
+  } catch {
+    return true;
+  }
+}
+
 Deno.serve(async (req) => {
   const pre = handleOptions(req);
   if (pre) return pre;
@@ -138,14 +178,19 @@ Deno.serve(async (req) => {
 
   const shifts = [...(unclaimed ?? []), ...(mine ?? [])] as unknown as ShiftRow[];
 
-  // When did the weekly Tier 1 job (offer-tier-1) last actually run? It writes an
-  // audit entry on EVERY run — even when it offers nothing — so the latest such
-  // entry is a reliable "the weekly job has run" marker. We use it to close a gap:
-  // a shift confirmed AFTER today's weekly run has already been missed by it and
-  // won't be seen again until next week, so it must be adopted now rather than made
-  // to wait the usual settle day. Without this, a shift confirmed mid-morning on
-  // the weekly day (after an earlier-moved weekly slot) got no offer until the
-  // next day — the public-holiday confirmation the venue reported.
+  // Is the weekly Tier 1 job (offer-tier-1) STILL GOING TO RUN LATER TODAY? If so,
+  // catch-up must not adopt a freshly-confirmed shift yet — the weekly job should
+  // own it, and catch-up racing ahead would put it on the wrong chain. If the
+  // weekly job is NOT coming today (it is not its scheduled weekday, or it already
+  // ran), then catch-up is the only thing that will offer this shift, so it adopts
+  // immediately — no "wait a day". That blanket one-day wait was the bug: a shift
+  // confirmed mid-morning on a NON-weekly day still got no offer on that afternoon's
+  // catch-up run, it was held to the next day.
+  //
+  // "Still coming today" = today is the weekly job's scheduled weekday AND it has
+  // not run yet today. The weekday comes from the job's own cron schedule (so an
+  // admin re-timing it is respected); whether it ran comes from its audit trail,
+  // which it writes on EVERY run.
   const { data: lastWeekly } = await sb
     .from("audit_logs")
     .select("created_at")
@@ -155,6 +200,8 @@ Deno.serve(async (req) => {
     .maybeSingle();
   const lastWeeklyRunAt = (lastWeekly as { created_at?: string } | null)?.created_at ?? null;
   const weeklyRanToday = lastWeeklyRunAt != null && venueDay(new Date(lastWeeklyRunAt)) === today;
+  const weeklyRunsToday = await weeklyOfferRunsToday(sb);
+  const weeklyStillComingToday = weeklyRunsToday && !weeklyRanToday;
 
   // ---- Phase 1: decide what each shift is owed -----------------------------
   async function decide(s: ShiftRow): Promise<Plan> {
@@ -164,27 +211,17 @@ Deno.serve(async (req) => {
       const at = Date.parse(confirmedAt);
       // Grace period after confirmation before the first offer. Defaults to 0.
       if (offerGraceHours > 0 && at && now - at < offerGraceHours * HOUR) return SKIP;
-      // The weekly job already ran today AND this shift was confirmed after it ran:
-      // the weekly slot has missed it and won't return until next week, so adopt it
-      // now instead of waiting the settle day. (offerGraceHours above still applies,
-      // so an admin who wants a deliberate pause after confirmation still gets it.)
-      const missedTodaysWeeklyRun =
-        weeklyRanToday && at && lastWeeklyRunAt != null && at > Date.parse(lastWeeklyRunAt);
-      if (!missedTodaysWeeklyRun) {
-        // Otherwise wait a full venue-local day before adopting. A shift confirmed
-        // today may still be picked up by this week's offer-tier-1 slot, and
-        // whichever job offers it first owns it — this gate makes sure that is the
-        // weekly job whenever the weekly job is still going to get there. It also
-        // stops catch-up racing ahead of a weekly run that hasn't happened yet.
-        if (daysBetweenDays(venueDay(new Date(at || now)), today) < escalationWaitDays) return SKIP;
-      }
+      // Only defer while the weekly job is still going to run today — let it take
+      // the shift. On any other run, catch-up is the shift's only route to an
+      // offer, so adopt it now rather than holding it to tomorrow.
+      if (weeklyStillComingToday) return SKIP;
       return {
         kind: "offer",
         tier: "tier_1",
         track: "catchup",
-        reason: missedTodaysWeeklyRun
+        reason: weeklyRanToday
           ? `confirmed after today's weekly Tier 1 run had already gone out`
-          : `confirmed on ${prettyDate(venueDay(new Date(at || now)))}, after the weekly Tier 1 slot had run`,
+          : `confirmed on a day the weekly Tier 1 slot does not run`,
       };
     }
 
