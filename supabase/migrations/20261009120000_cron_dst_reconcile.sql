@@ -4,7 +4,7 @@
 -- THE PROBLEM
 --   pg_cron fires on a FIXED UTC expression. The venue runs Australia/Sydney,
 --   which switches AEST (UTC+10) ↔ AEDT (UTC+11) twice a year. When the app saves
---   "3 PM", it converts to the UTC time that is 3 PM *at that moment* and stores
+--   "3 PM", it converts to t he UTC time that is 3 PM *at that moment* and stores
 --   it. Months later the clocks shift, that fixed UTC time is now 2 PM or 4 PM
 --   local, and every job drifts an hour — exactly what the venue hit this week.
 --   pg_cron has no per-job timezone, so a stored expression cannot follow DST on
