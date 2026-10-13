@@ -550,11 +550,19 @@ export function Cleaners() {
                           </span>
                         )}
                       </div>
-                      <div style={{ ...cell, display: "flex", alignItems: "center", gap: 8, paddingRight: 12 }}>
-                        <div style={{ flex: 1, height: 5, borderRadius: 3, background: "#eceadf", overflow: "hidden" }}>
+                      <div style={{ ...cell, display: "flex", flexDirection: "column", gap: 4, paddingRight: 12 }}>
+                        <div style={{ height: 5, borderRadius: 3, background: "#eceadf", overflow: "hidden" }}>
                           <div style={{ width: `${rate ?? 0}%`, height: "100%", background: col }} />
                         </div>
-                        <span style={{ fontSize: 11, color: c.muted2, whiteSpace: "nowrap" }}>{acc}✓ {dec}✕</span>
+                        {/* Airtable parity: accepted / declined / cancelled shown
+                            separately, not folded into one number, so a decline (said
+                            no up front) reads differently from a cancellation (pulled
+                            out after accepting). */}
+                        <div style={{ display: "flex", gap: 9, fontSize: 10.5, whiteSpace: "nowrap", lineHeight: 1.2 }}>
+                          <span title="Accepted" style={{ color: "#2c6446", fontWeight: 600 }}>{acc} accepted</span>
+                          <span title="Declined" style={{ color: "#9a7320", fontWeight: 600 }}>{dec} declined</span>
+                          <span title="Cancelled after accepting" style={{ color: "#a8392b", fontWeight: 600 }}>{can} cancelled</span>
+                        </div>
                       </div>
                       <div style={{ ...cell, textAlign: "center", fontSize: 13, fontWeight: 600, color: col }}>{rate === null ? "—" : `${rate}%`}</div>
                       {/* Latest note preview, far right. Click to open the full
