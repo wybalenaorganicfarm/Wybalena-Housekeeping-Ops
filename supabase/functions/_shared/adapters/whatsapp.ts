@@ -319,6 +319,35 @@ export async function sendOutcome(
   );
 }
 
+// The one-tap decline outcome: "Shift declined" plus a single *Accept* button to
+// UNDO a mis-tap. The button reuses the normal `accept:<id>` payload, so tapping it
+// flows straight into the webhook's accept handler, which re-claims the slot (the
+// claim RPC now allows a `declined` row). Replaces the old two-step decline confirm
+// — a cleaner declining several shifts no longer confirms each one, and a wrong tap
+// is one button away from being reversed.
+export async function sendDeclineWithUndo(
+  toPhone: string,
+  assignmentId: string,
+  sb?: SupabaseClient,
+  shift?: ShiftVars,
+): Promise<SendResult> {
+  const t = sb ? await loadTemplate(sb, "declined_undo") : null;
+  const v = shiftVars(shift);
+  return sendButtons(
+    toPhone,
+    t?.body
+      ? fillVars(t.body, v)
+      : `Shift Declined ❌\n\n📅 Date: ${v.shift_date}\n⏰ Time: ${v.start_time}\n\nTapped by mistake? Tap *Accept offer* to undo.`,
+    [{ id: `accept:${assignmentId}`, title: btnTitle(t, "accept", "↩️ Accept offer") }],
+    {
+      footer: t?.footer ?? "Wybalena Organic Farm",
+      fallbackText:
+        `Shift Declined ❌ — ${v.shift_date} at ${v.start_time}.\n\n` +
+        `Tapped by mistake? Reply "Accept" to undo and take the shift back.`,
+    },
+  );
+}
+
 // Parse an inbound Whapi webhook payload into a normalized reply.
 // Keyword baseline: first token = action, optional second token = offer code.
 // If the Whapi plan supports interactive buttons, map the button payload here.
@@ -452,6 +481,10 @@ function strictTextAction(s: string): InboundReply["action"] {
   if (u === "YES DECLINE") return "decline_confirm";
   if (u === "NO KEEP SHIFT") return "cancel_cancel";
   if (u === "NO KEEP OFFER" || u === "NO GO BACK") return "decline_cancel";
+  // The decline-undo button echoes as "ACCEPT OFFER" — treat it as an accept, so a
+  // client that sends the button title as plain text (no interactive payload) still
+  // undoes the decline.
+  if (u === "ACCEPT OFFER") return "accept";
   // Offer button titles, optionally with a legacy offer code ("ACCEPT 4823").
   // Note: bare YES/NO/Y/N/1/2/3 are deliberately NOT accepted — they collide with
   // ordinary conversation.

@@ -7,7 +7,7 @@
 // cleaner (phone) + offer (offer_code) -> apply accept/decline/cancel -> reply.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { parseInbound, sendAcceptConfirm, sendCancelConfirm, sendDeclineConfirm, sendMessage, sendOutcome } from "../_shared/adapters/whatsapp.ts";
+import { parseInbound, sendAcceptConfirm, sendCancelConfirm, sendDeclineWithUndo, sendMessage, sendOutcome } from "../_shared/adapters/whatsapp.ts";
 import { hoursUntilShift, prettyDate, prettyDateTime, prettyTime } from "../_shared/datetime.ts";
 import { acceptOffer, cancelOffer, declineOffer } from "../_shared/engine.ts";
 import { renderTemplate } from "../_shared/templates.ts";
@@ -372,13 +372,32 @@ Deno.serve(async (req) => {
           results.push({ id: r.providerMessageId, action: "decline", result: "already_declined" });
           break;
         }
-        // Re-verify before declining. Store the prompt's id separately so a later
-        // reply to the original offer still resolves.
-        const res = await sendDeclineConfirm(cleaner.phone, assignmentId, sb, shiftRef);
-        if (res?.providerMessageId) {
-          await sb.from("shift_assignments").update({ confirm_message_id: res.providerMessageId, confirm_sent_at: new Date().toISOString(), confirm_kind: "decline" }).eq("id", assignmentId);
+        // One-tap decline (venue request Oct 2026): decline NOW, no "are you sure?"
+        // step, and offer an Accept button to undo a mis-tap. A cleaner clearing
+        // several offers no longer has to confirm each one. Only an OPEN offer can
+        // be declined — same guard the old decline_confirm had.
+        if (assn?.status !== "offered") {
+          await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_not_on_shift",
+            "You're not currently on this shift, so there's nothing to decline.", tplVars));
+          results.push({ id: r.providerMessageId, action: "decline", result: "not_active" });
+          break;
         }
-        results.push({ id: r.providerMessageId, action: "decline", result: "confirm_requested" });
+        const declined = await declineOffer(sb, assignmentId);
+        if (!declined) {
+          await logResponse("response.declined", "warning",
+            `${cleaner.full_name}'s decline of the shift on ${dateLabel} FAILED to save — not removed from the offer list. Needs manual follow-up.`);
+          results.push({ id: r.providerMessageId, action: "decline", result: "write_failed" });
+          break;
+        }
+        const ack = await sendDeclineWithUndo(cleaner.phone, assignmentId, sb, shiftRef);
+        await logResponse(
+          "response.declined",
+          ack?.ok === false ? "warning" : "success",
+          ack?.ok === false
+            ? `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list, but the WhatsApp confirmation (with the undo button) FAILED to send.`
+            : `${cleaner.full_name} declined the shift on ${dateLabel}. Removed from offer list. Sent a one-tap undo button.`,
+        );
+        results.push({ id: r.providerMessageId, action: "decline", ack_sent: ack?.ok !== false });
         break;
       }
       case "decline_confirm": { // tapped "Yes"
