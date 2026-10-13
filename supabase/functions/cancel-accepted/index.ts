@@ -10,9 +10,10 @@
 // working cleaner. Guard at both layers — the modal hides it, the endpoint refuses.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller, isWriter } from "../_shared/authz.ts";
+import { getCaller, canEditRoster } from "../_shared/authz.ts";
 import { cancelOffer } from "../_shared/engine.ts";
 import { notifyCleaner } from "../_shared/notifyCleaner.ts";
+import { notifyLeadRosterChange } from "../_shared/managerSummary.ts";
 import { prettyDate } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
@@ -22,7 +23,7 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
+  if (!caller || !canEditRoster(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { assignmentId } = await req.json().catch(() => ({}));
   if (!assignmentId) return json({ error: "assignmentId required" }, 400);
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
   // out a team_lead reservation row, which is status='team_lead'; this is the
   // belt-and-braces check on the cleaner's flag for the wipeover boundary.)
   const { data: sh } = await sb
-    .from("shifts").select("shift_date, shift_type").eq("id", a.shift_id).maybeSingle();
+    .from("shifts").select("shift_date, shift_type, start_time, required_cleaners").eq("id", a.shift_id).maybeSingle();
   const { data: cl } = await sb
     .from("cleaners").select("full_name, is_team_leader").eq("id", a.cleaner_id).maybeSingle();
   if (cl?.is_team_leader && sh?.shift_type !== "wipeover") {
@@ -77,6 +78,26 @@ Deno.serve(async (req) => {
     shift_id: a.shift_id,
     cleaner_id: a.cleaner_id,
     triggered_by: "manual",
+  });
+
+  // If this removal is within the final 24h, send the Cleaning Manager the short
+  // roster-change note (with a link to the shift) so she can act over a weekend.
+  // No-op outside 24h or if the switch is off.
+  const { count: acceptedNow } = await sb
+    .from("shift_assignments").select("id", { count: "exact", head: true })
+    .eq("shift_id", a.shift_id).eq("status", "accepted");
+  await notifyLeadRosterChange(sb, {
+    kind: "dropped",
+    cleanerName: cl?.full_name ?? "A cleaner",
+    shiftDate: sh?.shift_date ?? "",
+    startTime: sh?.start_time ?? "",
+    shiftType: sh?.shift_type,
+    shiftId: a.shift_id,
+    cleanerId: a.cleaner_id,
+    remaining: acceptedNow ?? null,
+    required: sh?.required_cleaners ?? null,
+    source: "cancel-accepted",
+    triggeredBy: "manual",
   });
 
   return json({ ok: true, outcome, notified });

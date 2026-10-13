@@ -5,7 +5,7 @@
 // Caller must be admin or super_admin (Spec §7.3).
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller, isWriter } from "../_shared/authz.ts";
+import { getCaller, canEditRoster } from "../_shared/authz.ts";
 import { offerToCleaner } from "../_shared/engine.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
+  if (!caller || !canEditRoster(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { shiftId, cleanerId } = await req.json().catch(() => ({}));
   if (!shiftId || !cleanerId) return json({ error: "shiftId and cleanerId required" }, 400);

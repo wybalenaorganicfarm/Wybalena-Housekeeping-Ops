@@ -30,3 +30,13 @@ export function isWriter(role: Caller["role"]): boolean {
 export function canManageCleaners(role: Caller["role"]): boolean {
   return isWriter(role) || role === "team_leader";
 }
+
+// Edit Roster (manual-assign / add / remove / withdraw on a shift). Writers get it,
+// AND the Cleaning Manager (team_leader) — so she can fill or adjust a shift's
+// roster over a weekend — but NOT the rest of a writer's powers (confirm/cancel/
+// delete a shift, edit shift details, Schedule, Users, Logs). The individual
+// endpoints keep their own extra guards (e.g. cancel-accepted still refuses to
+// remove the Cleaning Manager herself off a non-wipeover shift).
+export function canEditRoster(role: Caller["role"]): boolean {
+  return isWriter(role) || role === "team_leader";
+}

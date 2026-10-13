@@ -8,9 +8,14 @@ interface AuthState {
   userId: string | null;
   profile: Profile | null;
   role: UserRole | null;
-  canEdit: boolean; // admin + super_admin: full access; team_leader read-only
+  canEdit: boolean; // admin + super_admin + operations_manager: full access
+  // Edit Roster (manual-assign) powers. Writers get it, AND the Cleaning Manager
+  // (team_leader) — so she can add/remove cleaners on a shift over a weekend —
+  // but WITHOUT the rest of canEdit (New Shift, Edit Shift details, Confirm,
+  // Cancel/Delete, Schedule, Users, Logs). Scoped deliberately narrow.
+  canEditRoster: boolean;
   isSuperAdmin: boolean;
-  isTeamLead: boolean; // read-only, except cleaner status + notes
+  isTeamLead: boolean; // read-only, except cleaner status + notes + Edit Roster
   needsPassword: boolean; // arrived via invite/recovery link, must set a password
   signIn: (email: string, password: string) => Promise<string | null>;
   setPassword: (password: string) => Promise<string | null>;
@@ -92,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profile,
     role,
     canEdit: role === "admin" || role === "super_admin" || role === "operations_manager",
+    canEditRoster: role === "admin" || role === "super_admin" || role === "operations_manager" || role === "team_leader",
     isSuperAdmin: role === "super_admin",
     isTeamLead: role === "team_leader",
     needsPassword,

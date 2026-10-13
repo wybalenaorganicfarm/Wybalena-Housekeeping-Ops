@@ -210,13 +210,20 @@ export interface RowAction {
   urgent: boolean;
 }
 
-export function rowAction(s: Shift, opts: { canEdit: boolean; urgent: boolean }): RowAction {
-  if (!opts.canEdit) return { kind: "none", label: "", urgent: false };
+// `canEditRoster` (the Cleaning Manager) gets the Edit Roster actions but NOT
+// Confirm — confirming a shift stays a writer-only action. Defaults to canEdit so
+// existing callers that pass only canEdit are unchanged.
+export function rowAction(s: Shift, opts: { canEdit: boolean; urgent: boolean; canEditRoster?: boolean }): RowAction {
+  const canRoster = opts.canEditRoster ?? opts.canEdit;
+  if (!opts.canEdit && !canRoster) return { kind: "none", label: "", urgent: false };
 
   switch (s.status) {
     // Nothing has been sent yet — confirming is what starts the offer chain.
+    // Confirm is writer-only; a roster-only user sees nothing to do here.
     case "pending_confirmation":
-      return { kind: "confirm", label: "Confirm", urgent: false };
+      return opts.canEdit
+        ? { kind: "confirm", label: "Confirm", urgent: false }
+        : { kind: "none", label: "", urgent: false };
 
     // Offers are out and spots remain — open the manual assign screen. The venue
     // calls this action "Edit Roster" (one label for every status, matching the

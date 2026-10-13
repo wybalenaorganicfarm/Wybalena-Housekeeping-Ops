@@ -49,7 +49,7 @@ const filterStyle = {
 } as const;
 
 export function Shifts() {
-  const { canEdit } = useAuth();
+  const { canEdit, canEditRoster } = useAuth();
   const escLabel = useEscalationLabel();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [staffing, setStaffing] = useState<Record<string, ShiftStaffing>>({});
@@ -312,7 +312,7 @@ export function Shifts() {
                             they cannot drift apart and no status can silently
                             render an empty cell. */}
                         {(() => {
-                          const act = rowAction(s, { canEdit, urgent });
+                          const act = rowAction(s, { canEdit, canEditRoster, urgent });
                           if (act.kind === "none") return null;
                           if (act.kind === "confirm") {
                             return <Button kind="secondary" disabled={confirming.has(s.id)} onClick={() => setAskConfirmId(s.id)} style={{ padding: "7px 13px", fontSize: 12 }}>{confirming.has(s.id) ? "Confirming…" : act.label}</Button>;

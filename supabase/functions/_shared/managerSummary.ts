@@ -8,10 +8,25 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendMessage } from "./adapters/whatsapp.ts";
 import { sendEmail } from "./adapters/email.ts";
 import { opsManager } from "./admin.ts";
-import { prettyDate, prettyTime } from "./datetime.ts";
+import { hoursUntilShift, prettyDate, prettyTime } from "./datetime.ts";
 import { renderTemplate } from "./templates.ts";
 import { loadNotificationSwitches } from "./settings.ts";
 import { writeAuditLog } from "./auditLog.ts";
+
+// The app base URL for the "open this shift" link in roster-change notes. Same env
+// + default as confirm-reminder. The Dashboard reads ?edit=<shiftId> and opens
+// that shift's drawer (Confirm + Edit Roster), so the link lands the manager right
+// on the shift that changed.
+function shiftLink(shiftId?: string | null): string {
+  const base = (Deno.env.get("APP_URL") ?? "https://wybalena-housekeeping-ops.vercel.app").replace(/\/$/, "");
+  return shiftId ? `${base}/?edit=${shiftId}` : base;
+}
+
+// How close to the shift counts as "final 24h". A roster change (a cleaner drops
+// off or a late acceptance fills a spot) this close is worth telling the manager
+// about immediately, because there's no time left for the normal flow to settle it
+// before the day-before roster — or the roster has already gone out.
+const ROSTER_CHANGE_WINDOW_HOURS = 24;
 
 // One of tomorrow's shifts and the cleaners who accepted it.
 export interface ShiftRoster {
@@ -258,6 +273,84 @@ export async function notifyLeadCancellation(
       ? `Team lead notified — ${opts.cleanerName} cancelled their spot on ${when}.`
       : `Failed to notify the team lead that ${opts.cleanerName} cancelled their spot on ${when}.`,
     detail: { cleaner: opts.cleanerName, shift_date: opts.shiftDate, remaining: opts.remaining, required: opts.required },
+    source: opts.source,
+    shift_id: opts.shiftId ?? undefined,
+    cleaner_id: opts.cleanerId ?? undefined,
+    triggered_by: opts.triggeredBy ?? "webhook",
+  });
+}
+
+// Short "the roster for a shift in the next 24h has changed" note to the Cleaning
+// Manager, with a link to open that shift. Fires when a cleaner drops off OR a late
+// acceptance fills a spot inside the final 24h — the window where the day-before
+// roster has gone out (or is about to) and she needs to know without waiting for
+// the next summary. Outside 24h this is a silent no-op (the normal flow / the 3pm
+// re-offer handles it and she'll see it on the day-before roster).
+//
+// Gated on its own switch (leadRosterChange24h, Schedule page) so it can be turned
+// off independently of the urgent-cancellation alert. Silent no-op with no active
+// team lead or no phone.
+export async function notifyLeadRosterChange(
+  sb: SupabaseClient,
+  opts: {
+    kind: "dropped" | "joined";   // a cleaner left the shift, or newly accepted it
+    cleanerName: string;
+    shiftDate: string;            // YYYY-MM-DD
+    startTime: string;            // HH:MM(:SS)
+    shiftType?: string | null;
+    shiftId?: string | null;
+    cleanerId?: string | null;
+    remaining?: number | null;    // cleaners now confirmed
+    required?: number | null;     // cleaners the shift needs
+    source: string;
+    triggeredBy?: "webhook" | "manual" | "cron";
+  },
+): Promise<void> {
+  const switches = await loadNotificationSwitches(sb);
+  if (!switches.leadRosterChange24h) return;
+
+  // Only within the final 24h before the shift. hoursUntilShift is DST-aware and
+  // returns +Infinity on a malformed date, so a bad row never counts as "within".
+  const hoursOut = hoursUntilShift(opts.shiftDate, opts.startTime);
+  if (!(hoursOut >= 0 && hoursOut <= ROSTER_CHANGE_WINDOW_HOURS)) return;
+
+  const { data: lead } = await sb
+    .from("profiles").select("phone").eq("role", "team_leader").eq("is_active", true).limit(1).maybeSingle();
+  if (!lead?.phone) return;
+
+  const when = `${prettyDate(opts.shiftDate)} at ${prettyTime(opts.startTime)}`;
+  const type = opts.shiftType ? `${prettyType(opts.shiftType)} · ` : "";
+  const count = opts.remaining != null && opts.required != null
+    ? ` (now ${opts.remaining}/${opts.required})`
+    : "";
+  const verb = opts.kind === "dropped" ? "has dropped off" : "has joined";
+  const link = shiftLink(opts.shiftId);
+
+  const fallback =
+    `🔄 *Roster update — tomorrow's shift*\n\n` +
+    `${opts.cleanerName} ${verb} the ${type}${when} shift${count}.\n\n` +
+    `View the shift: ${link}`;
+
+  const text = await renderTemplate(sb, "lead_roster_change", fallback, {
+    cleaner_name: opts.cleanerName,
+    change: verb,
+    shift_type: opts.shiftType ? prettyType(opts.shiftType) : "",
+    shift_date: prettyDate(opts.shiftDate),
+    start_time: prettyTime(opts.startTime),
+    remaining: opts.remaining ?? "",
+    required: opts.required ?? "",
+    shift_link: link,
+  });
+
+  const sent = await sendMessage(lead.phone, text);
+  await writeAuditLog(sb, {
+    event_type: "notification.lead_roster_change",
+    event_label: "Team Lead Notified",
+    status: sent.ok ? "success" : "failed",
+    summary: sent.ok
+      ? `Team lead sent a roster-change note — ${opts.cleanerName} ${verb} the ${when} shift (within 24h).`
+      : `Failed to send the roster-change note to the team lead for the ${when} shift.`,
+    detail: { kind: opts.kind, cleaner: opts.cleanerName, shift_date: opts.shiftDate, remaining: opts.remaining, required: opts.required },
     source: opts.source,
     shift_id: opts.shiftId ?? undefined,
     cleaner_id: opts.cleanerId ?? undefined,

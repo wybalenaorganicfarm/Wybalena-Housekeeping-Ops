@@ -268,6 +268,13 @@ export function Schedule() {
                   busy={switchBusy}
                   onToggle={() => toggleSwitch("lead_cleaner_cancelled")}
                 />
+                <SwitchRow
+                  label="Roster-change notes (final 24 hours)"
+                  desc="Within the last 24 hours before a shift, sends the Cleaning Manager a short note — with a link to open the shift — whenever the roster changes: a cleaner drops off, or one newly accepts / is added. Lets her keep on top of last-minute changes over a weekend. Outside the final 24 hours nothing is sent. Wording is on the Message Templates page."
+                  on={switches.lead_roster_change_24h}
+                  busy={switchBusy}
+                  onToggle={() => toggleSwitch("lead_roster_change_24h")}
+                />
               </Section>
             </>
           )}

@@ -60,7 +60,7 @@ const AGENDA_GRID = "150px 96px 140px minmax(140px,1fr) 190px 172px 110px";
 const agendaRow = { display: "grid", gridTemplateColumns: AGENDA_GRID, alignItems: "center" } as const;
 
 export function Dashboard() {
-  const { canEdit, isTeamLead, profile } = useAuth();
+  const { canEdit, canEditRoster, isTeamLead, profile } = useAuth();
   const escLabel = useEscalationLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -293,7 +293,7 @@ export function Dashboard() {
                               had already drifted (this one fell back to "View",
                               that one to nothing). */}
                           {(() => {
-                            const act = rowAction(s, { canEdit, urgent });
+                            const act = rowAction(s, { canEdit, canEditRoster, urgent });
                             if (act.kind === "none") {
                               // Read-only users still get a way into the details.
                               return <Button kind="secondary" onClick={() => setDrawer(s)} style={{ padding: "7px 13px", fontSize: 12 }}>View</Button>;

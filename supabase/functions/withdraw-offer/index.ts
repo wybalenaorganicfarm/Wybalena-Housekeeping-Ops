@@ -5,7 +5,7 @@
 // commits regardless. Caller must be admin or super_admin.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller, isWriter } from "../_shared/authz.ts";
+import { getCaller, canEditRoster } from "../_shared/authz.ts";
 import { withdrawOffer } from "../_shared/engine.ts";
 import { notifyCleaner } from "../_shared/notifyCleaner.ts";
 import { prettyDate } from "../_shared/datetime.ts";
@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
+  if (!caller || !canEditRoster(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { assignmentId } = await req.json().catch(() => ({}));
   if (!assignmentId) return json({ error: "assignmentId required" }, 400);

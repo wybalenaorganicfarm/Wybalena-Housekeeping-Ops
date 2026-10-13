@@ -521,11 +521,17 @@ export async function updateCancellationReoffer(next: CancellationReoffer): Prom
 // by an admin, per the venue's standing requirement that everything the system
 // does is visible and editable.
 
-export interface NotificationSwitches { lead_cleaner_cancelled: boolean }
+export interface NotificationSwitches {
+  lead_cleaner_cancelled: boolean;
+  lead_roster_change_24h: boolean;
+}
 
 // Defaults ON: each notification existed before its switch did, so an absent or
 // malformed row must reproduce current behaviour, not silently go quiet.
-export const NOTIFICATION_SWITCHES_DEFAULT: NotificationSwitches = { lead_cleaner_cancelled: true };
+export const NOTIFICATION_SWITCHES_DEFAULT: NotificationSwitches = {
+  lead_cleaner_cancelled: true,
+  lead_roster_change_24h: true,
+};
 
 export async function getNotificationSwitches(): Promise<NotificationSwitches> {
   const { data, error } = await supabase
@@ -534,7 +540,10 @@ export async function getNotificationSwitches(): Promise<NotificationSwitches> {
   const v = (data as { value: Partial<NotificationSwitches> }).value ?? {};
   // Only an explicit false is off — mirrors loadNotificationSwitches() on the
   // Edge Function side so the app and the sender never disagree.
-  return { lead_cleaner_cancelled: v.lead_cleaner_cancelled !== false };
+  return {
+    lead_cleaner_cancelled: v.lead_cleaner_cancelled !== false,
+    lead_roster_change_24h: v.lead_roster_change_24h !== false,
+  };
 }
 
 export async function updateNotificationSwitches(next: NotificationSwitches): Promise<string | null> {

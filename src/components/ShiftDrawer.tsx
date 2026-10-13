@@ -31,7 +31,7 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
   bookingHasCheckoutClean?: (bookingId: string) => boolean;
   onClose: () => void; onChanged: () => void; onAssign: (s: Shift) => void; onViewBooking?: (b: Booking) => void;
 }) {
-  const { canEdit } = useAuth();
+  const { canEdit, canEditRoster } = useAuth();
   // Local, refreshable copy of the shift — the prop is a snapshot from the list
   // and would otherwise show stale data (e.g. edited special instructions) until
   // the drawer is reopened.
@@ -345,7 +345,7 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
           {/* responders */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: c.muted2, fontWeight: 600 }}>Cleaner responses</span>
-            {canEdit && <button onClick={() => onAssign(s)} style={{ background: "none", border: "none", fontSize: 12, fontWeight: 600, color: c.green, cursor: "pointer" }}>Edit Roster →</button>}
+            {canEditRoster && <button onClick={() => onAssign(s)} style={{ background: "none", border: "none", fontSize: 12, fontWeight: 600, color: c.green, cursor: "pointer" }}>Edit Roster →</button>}
           </div>
           <div style={{ background: "#fff", border: `1px solid ${c.border}`, borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
             {responders.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: c.faint, textAlign: "center" }}>No offers yet.</div>}
@@ -369,17 +369,20 @@ export function ShiftDrawer({ shift, booking, bookings, bookingHasCheckoutClean,
           </div>
         </div>
 
-        {canEdit && s.status !== "cancelled" && (
+        {/* The footer appears for anyone who can act on the shift. The Cleaning
+            Manager (canEditRoster but not canEdit) sees ONLY Edit Roster; writers
+            see the full set. */}
+        {(canEdit || canEditRoster) && s.status !== "cancelled" && (
           <div style={{ flex: "none", padding: "14px 22px", borderTop: `1px solid ${c.border}`, background: "#fff", display: "flex", alignItems: "center", gap: 9 }}>
-            {s.status === "pending_confirmation" && (
+            {canEdit && s.status === "pending_confirmation" && (
               <button onClick={() => setAskConfirm(true)} disabled={confirming} style={{ flex: 1, background: c.green, color: "#fff", border: "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: confirming ? "wait" : "pointer", opacity: confirming ? 0.6 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                 {confirming ? <Spin size={15} color="#fff" /> : <Icon name="check" size={15} strokeWidth={2.4} />} {confirming ? "Confirming…" : "Confirm shift"}
               </button>
             )}
-            <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: s.status === "pending_confirmation" ? "#fff" : c.green, color: s.status === "pending_confirmation" ? c.body : "#fff", border: s.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit Shift</button>
-            <button onClick={() => onAssign(s)} style={{ background: "#fff", color: c.body, border: `1px solid ${c.border3}`, borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit Roster</button>
-            <button onClick={() => setAskCancel(true)} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-            <button onClick={() => setAskDelete(true)} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>
+            {canEdit && <button onClick={() => setShowEdit(true)} style={{ flex: 1, background: s.status === "pending_confirmation" ? "#fff" : c.green, color: s.status === "pending_confirmation" ? c.body : "#fff", border: s.status === "pending_confirmation" ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit Shift</button>}
+            {canEditRoster && <button onClick={() => onAssign(s)} style={{ flex: canEdit ? undefined : 1, background: canEdit ? "#fff" : c.green, color: canEdit ? c.body : "#fff", border: canEdit ? `1px solid ${c.border3}` : "none", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Edit Roster</button>}
+            {canEdit && <button onClick={() => setAskCancel(true)} style={{ background: "#fff", color: "#a8392b", border: "1px solid #e5c6c0", borderRadius: 7, padding: "10px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>}
+            {canEdit && <button onClick={() => setAskDelete(true)} title="Delete shift" style={{ background: c.danger, color: "#fff", border: "none", borderRadius: 7, padding: "10px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center" }}><Icon name="trash" size={15} strokeWidth={2} /></button>}
           </div>
         )}
       </div>

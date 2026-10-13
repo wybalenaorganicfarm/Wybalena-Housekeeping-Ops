@@ -8,10 +8,10 @@
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
 import { parseInbound, sendAcceptConfirm, sendCancelConfirm, sendDeclineConfirm, sendMessage, sendOutcome } from "../_shared/adapters/whatsapp.ts";
-import { prettyDate, prettyDateTime, prettyTime } from "../_shared/datetime.ts";
+import { hoursUntilShift, prettyDate, prettyDateTime, prettyTime } from "../_shared/datetime.ts";
 import { acceptOffer, cancelOffer, declineOffer } from "../_shared/engine.ts";
 import { renderTemplate } from "../_shared/templates.ts";
-import { notifyLeadCancellation } from "../_shared/managerSummary.ts";
+import { notifyLeadCancellation, notifyLeadRosterChange } from "../_shared/managerSummary.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
 const SOURCE = "whatsapp-inbound";
@@ -331,6 +331,21 @@ Deno.serve(async (req) => {
           if (after.status === "fully_staffed") {
             await logResponse("response.shift_full", "success", `Shift on ${dateLabel} is now fully staffed. Remaining offered cleaners notified.`);
           }
+          // A late acceptance inside the final 24h changes a roster the manager may
+          // already have been sent — tell her (no-op outside 24h / if switched off).
+          await notifyLeadRosterChange(sb, {
+            kind: "joined",
+            cleanerName: cleaner.full_name ?? "A cleaner",
+            shiftDate: ctx.shiftDate ?? "",
+            startTime: ctx.shiftTime ?? "",
+            shiftType: ctx.shiftType,
+            shiftId: ctx.shiftId,
+            cleanerId: cleaner.id,
+            remaining: after.accepted,
+            required: after.required ?? null,
+            source: SOURCE,
+            triggeredBy: "webhook",
+          });
         } else if (res === "already_full") {
           await sendMessage(cleaner.phone, await renderTemplate(sb, "reply_shift_just_filled",
             `Sorry, the shift on ${shiftPhrase} just filled up and is now fully staffed. Thanks for responding!`, tplVars));
@@ -463,24 +478,46 @@ Deno.serve(async (req) => {
             });
           }
         }
-        // The team lead runs the shift, so they're told immediately rather than
-        // waiting for tomorrow's roster summary.
+        // The team lead runs the shift, so she's told immediately rather than
+        // waiting for tomorrow's roster summary. Two possible notes, never both:
+        //   • within the final 24h -> the richer roster-change note (has a link to
+        //     open the shift), so she can act on it over a weekend.
+        //   • 24h–72h out (still urgent) -> the plain cancellation alert.
+        // A deferred (>72h) cancellation sends neither — the 3pm run handles it.
         const afterCancel = await shiftContext(sb, assignmentId);
-        await notifyLeadCancellation(sb, {
-          cleanerName: cleaner.full_name ?? "A cleaner",
-          shiftDate: ctx.shiftDate ?? "",
-          startTime: ctx.shiftTime ?? "",
-          shiftType: ctx.shiftType,
-          shiftId: ctx.shiftId,
-          cleanerId: cleaner.id,
-          remaining: afterCancel.accepted,
-          required: afterCancel.required ?? null,
-          // Only ping Zara for urgent (within-72h) cancellations — a deferred one
-          // has plenty of notice and is handled by the 3pm run.
-          urgent: outcome === "urgent",
-          source: SOURCE,
-          triggeredBy: "webhook",
-        });
+        const hoursOut = hoursUntilShift(ctx.shiftDate ?? "", ctx.shiftTime ?? "");
+        const within24h = hoursOut >= 0 && hoursOut <= 24;
+        if (within24h) {
+          await notifyLeadRosterChange(sb, {
+            kind: "dropped",
+            cleanerName: cleaner.full_name ?? "A cleaner",
+            shiftDate: ctx.shiftDate ?? "",
+            startTime: ctx.shiftTime ?? "",
+            shiftType: ctx.shiftType,
+            shiftId: ctx.shiftId,
+            cleanerId: cleaner.id,
+            remaining: afterCancel.accepted,
+            required: afterCancel.required ?? null,
+            source: SOURCE,
+            triggeredBy: "webhook",
+          });
+        } else {
+          await notifyLeadCancellation(sb, {
+            cleanerName: cleaner.full_name ?? "A cleaner",
+            shiftDate: ctx.shiftDate ?? "",
+            startTime: ctx.shiftTime ?? "",
+            shiftType: ctx.shiftType,
+            shiftId: ctx.shiftId,
+            cleanerId: cleaner.id,
+            remaining: afterCancel.accepted,
+            required: afterCancel.required ?? null,
+            // Only ping Zara for urgent (within-72h) cancellations — a deferred one
+            // has plenty of notice and is handled by the 3pm run.
+            urgent: outcome === "urgent",
+            source: SOURCE,
+            triggeredBy: "webhook",
+          });
+        }
         await logResponse("response.cancelled", "warning", `${cleaner.full_name} cancelled their spot on ${dateLabel}. ${outcomeNote} Admin and team lead alerted.`);
         results.push({ id: r.providerMessageId, action: "cancel_confirm" });
         break;

@@ -8,9 +8,10 @@
 // super_admin.
 import { serviceClient } from "../_shared/client.ts";
 import { handleOptions, json } from "../_shared/http.ts";
-import { getCaller, isWriter } from "../_shared/authz.ts";
+import { getCaller, canEditRoster } from "../_shared/authz.ts";
 import { recomputeStaffing } from "../_shared/engine.ts";
 import { notifyCleaner } from "../_shared/notifyCleaner.ts";
+import { notifyLeadRosterChange } from "../_shared/managerSummary.ts";
 import { prettyDate } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
 
@@ -20,7 +21,7 @@ Deno.serve(async (req) => {
 
   const sb = serviceClient();
   const caller = await getCaller(req, sb);
-  if (!caller || !isWriter(caller.role)) return json({ error: "forbidden" }, 403);
+  if (!caller || !canEditRoster(caller.role)) return json({ error: "forbidden" }, 403);
 
   const { shiftId, cleanerId } = await req.json().catch(() => ({}));
   if (!shiftId || !cleanerId) return json({ error: "shiftId and cleanerId required" }, 400);
@@ -49,7 +50,8 @@ Deno.serve(async (req) => {
   // then notify best-effort.
   await recomputeStaffing(sb, shiftId);
 
-  const { data: sh } = await sb.from("shifts").select("shift_date").eq("id", shiftId).maybeSingle();
+  const { data: sh } = await sb.from("shifts")
+    .select("shift_date, start_time, shift_type, required_cleaners").eq("id", shiftId).maybeSingle();
   const notified = await notifyCleaner(
     sb, cleanerId, "booked_manually",
     `You've been booked for the ${prettyDate(sh?.shift_date)} shift.`,
@@ -68,6 +70,25 @@ Deno.serve(async (req) => {
     shift_id: shiftId,
     cleaner_id: cleanerId,
     triggered_by: "manual",
+  });
+
+  // If this manual add is within the final 24h, tell the Cleaning Manager the
+  // roster changed (with a link). No-op outside 24h or if the switch is off.
+  const { count: acceptedNow } = await sb
+    .from("shift_assignments").select("id", { count: "exact", head: true })
+    .eq("shift_id", shiftId).eq("status", "accepted");
+  await notifyLeadRosterChange(sb, {
+    kind: "joined",
+    cleanerName: cl?.full_name ?? "A cleaner",
+    shiftDate: sh?.shift_date ?? "",
+    startTime: sh?.start_time ?? "",
+    shiftType: sh?.shift_type,
+    shiftId,
+    cleanerId,
+    remaining: acceptedNow ?? null,
+    required: sh?.required_cleaners ?? null,
+    source: "add-accepted",
+    triggeredBy: "manual",
   });
 
   return json({ ok: true, notified });

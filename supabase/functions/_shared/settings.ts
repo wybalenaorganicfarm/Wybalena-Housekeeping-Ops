@@ -113,11 +113,13 @@ export const REOFFER_LIMITS = { urgentWithinHours: { min: 0, max: 336 } };  // u
 // so a missing/!malformed row must reproduce what the system already does rather
 // than silently going quiet.
 export interface NotificationSwitches {
-  leadCleanerCancelled: boolean;  // alert the Cleaning Manager when a cleaner cancels
+  leadCleanerCancelled: boolean;  // alert the Cleaning Manager when a cleaner cancels (urgent)
+  leadRosterChange24h: boolean;   // short "roster changed" note within the final 24h before a shift
 }
 
 export const DEFAULT_NOTIFICATION_SWITCHES: NotificationSwitches = {
   leadCleanerCancelled: true,
+  leadRosterChange24h: true,
 };
 
 // Only an explicit `false` turns a switch off. Anything else — absent key, null,
@@ -136,6 +138,7 @@ export async function loadNotificationSwitches(sb: SupabaseClient): Promise<Noti
     if (!v) return DEFAULT_NOTIFICATION_SWITCHES;
     return {
       leadCleanerCancelled: boolOn(v.lead_cleaner_cancelled, DEFAULT_NOTIFICATION_SWITCHES.leadCleanerCancelled),
+      leadRosterChange24h: boolOn(v.lead_roster_change_24h, DEFAULT_NOTIFICATION_SWITCHES.leadRosterChange24h),
     };
   } catch {
     return DEFAULT_NOTIFICATION_SWITCHES;
