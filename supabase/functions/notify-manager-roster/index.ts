@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
       const body = await renderTemplate(
         sb,
         "manager_rostered",
-        `You've been rostered onto the ${prettyType(sh.shift_type)} clean on ${prettyDate(sh.shift_date)} at ${prettyTime(sh.start_time)}. No action needed — this is your confirmation.`,
+        `You've been rostered onto the ${prettyType(sh.shift_type)} on ${prettyDate(sh.shift_date)} at ${prettyTime(sh.start_time)}. No action needed — this is your confirmation.`,
         {
           shift_type: prettyType(sh.shift_type),
           shift_date: prettyDate(sh.shift_date),

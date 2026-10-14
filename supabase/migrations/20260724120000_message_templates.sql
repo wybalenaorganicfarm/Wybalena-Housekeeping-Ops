@@ -140,7 +140,7 @@ values
     'Reminders',
     'Reminder — shift is tomorrow',
     'Sent the day before the shift to every cleaner who accepted.',
-    E'Reminder: your {{shift_type}} clean is tomorrow ({{shift_date}}) at {{start_time}}. See you there!',
+    E'Reminder: your {{shift_type}} is tomorrow ({{shift_date}}) at {{start_time}}. See you there!',
     null,
     null,
     null,

@@ -9,6 +9,8 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { sendEmail } from "./adapters/email.ts";
 import { opsManager } from "./admin.ts";
+import { prettyType } from "./managerSummary.ts";
+import { prettyDate } from "./datetime.ts";
 
 export async function raiseTier3Alert(
   sb: SupabaseClient,
@@ -28,7 +30,7 @@ export async function raiseTier3Alert(
       alert_type: "understaffed_urgent",
       shift_id: shift.id,
       title: "Tier 3 reached — understaffed",
-      body: `${shift.shift_type} on ${shift.shift_date} reached Tier 3 and still has open spots. Intervene manually.`,
+      body: `${prettyType(shift.shift_type)} on ${prettyDate(shift.shift_date)} reached Tier 3 and still has open spots. Intervene manually.`,
     });
     if (alertErr) {
       // Log, but STILL send the email below. The dashboard alert is one of two
@@ -41,7 +43,7 @@ export async function raiseTier3Alert(
     // send the same urgent email every single day until the shift is staffed.
     await sendEmail(
       "Wybalena URGENT: shift understaffed at Tier 3",
-      `The ${shift.shift_type} shift on ${shift.shift_date} has reached Tier 3 and is still ` +
+      `The ${prettyType(shift.shift_type)} on ${prettyDate(shift.shift_date)} has reached Tier 3 and is still ` +
         `not fully staffed. Please assign cleaners manually.`,
       (await opsManager(sb)).email ?? undefined,
     );

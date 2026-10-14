@@ -7,7 +7,7 @@ import { sendMessage } from "../_shared/adapters/whatsapp.ts";
 import { fillVars, loadTemplate } from "../_shared/templates.ts";
 import { prettyDate, prettyTime } from "../_shared/datetime.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
-import { notifyLeadRoster, type ShiftRoster } from "../_shared/managerSummary.ts";
+import { notifyLeadRoster, prettyType, type ShiftRoster } from "../_shared/managerSummary.ts";
 
 const SOURCE = "pre-shift-reminder";
 
@@ -75,8 +75,8 @@ Deno.serve(async (req) => {
         await sendMessage(
           c.phone,
           tmpl?.body
-            ? fillVars(tmpl.body, { shift_type: s.shift_type, shift_date: prettyDate(s.shift_date), start_time: prettyTime(s.start_time) })
-            : `Reminder: your ${s.shift_type} clean is tomorrow (${prettyDate(s.shift_date)}) at ${prettyTime(s.start_time)}. See you there!`,
+            ? fillVars(tmpl.body, { shift_type: prettyType(s.shift_type), shift_date: prettyDate(s.shift_date), start_time: prettyTime(s.start_time) })
+            : `Reminder: your ${prettyType(s.shift_type)} is tomorrow (${prettyDate(s.shift_date)}) at ${prettyTime(s.start_time)}. See you there!`,
         );
         messaged++;
         shiftMessaged++;

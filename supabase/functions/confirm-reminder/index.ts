@@ -8,6 +8,8 @@ import { sendEmail } from "../_shared/adapters/email.ts";
 import { reminderEmail } from "../_shared/emailTemplates.ts";
 import { opsManager } from "../_shared/admin.ts";
 import { writeAuditLog } from "../_shared/auditLog.ts";
+import { prettyType } from "../_shared/managerSummary.ts";
+import { prettyDate } from "../_shared/datetime.ts";
 
 const SOURCE = "confirm-reminder";
 
@@ -40,7 +42,7 @@ Deno.serve(async (req) => {
       alert_type: "unconfirmed_shifts",
       shift_id: s.id,
       title: "Shift still unconfirmed",
-      body: `A ${s.shift_type} shift on ${s.shift_date} is still awaiting confirmation.`,
+      body: `A ${prettyType(s.shift_type)} on ${prettyDate(s.shift_date)} is still awaiting confirmation.`,
     });
     raised++;
   }

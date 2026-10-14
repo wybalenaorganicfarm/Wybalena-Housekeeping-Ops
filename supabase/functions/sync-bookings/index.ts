@@ -224,7 +224,7 @@ Deno.serve(async (req) => {
         check_in: ev.checkIn,
         check_out: ev.checkOut,
       });
-      const summary = `${SHIFT_LABEL[sh.shift_type] ?? sh.shift_type} shift created for ${sh.shift_date} from ${ev.guestName ?? "guest"}'s booking.`;
+      const summary = `${SHIFT_LABEL[sh.shift_type] ?? sh.shift_type} created for ${sh.shift_date} from ${ev.guestName ?? "guest"}'s booking.`;
       await writeAuditLog(sb, {
         event_type: "shift.created",
         event_label: "Shift Created",

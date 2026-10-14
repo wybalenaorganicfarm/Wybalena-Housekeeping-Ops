@@ -25,7 +25,7 @@ values
     'Roster & onboarding',
     'Cleaning Manager — rostered onto a shift',
     'Sent to the Cleaning Manager when she is auto-rostered onto a (non-wipeover) shift. A notification, not an offer — she is on the shift with no action required.',
-    E'You''ve been rostered onto the {{shift_type}} clean on {{shift_date}} at {{start_time}}. No action needed — this is your confirmation.',
+    E'You''ve been rostered onto the {{shift_type}} on {{shift_date}} at {{start_time}}. No action needed — this is your confirmation.',
     null,
     'Wybalena Organic Farm',
     null,
