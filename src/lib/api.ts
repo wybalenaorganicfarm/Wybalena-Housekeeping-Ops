@@ -515,6 +515,34 @@ export async function updateCancellationReoffer(next: CancellationReoffer): Prom
   return error ? friendlyError(error.message) : null;
 }
 
+// Reliability scoring — how heavily a cancellation counts against a cleaner's
+// accept-rate % versus a decline. The % is accepted / (accepted + declined +
+// weight*cancelled). weight=1 treats them equally; the venue runs 2 so a
+// cancellation (pulled out after committing) hurts twice as much as a decline
+// (said no up front). Editable on the Schedule page. The three raw counts are
+// always shown separately regardless of this weight.
+export interface ReliabilityScoring { cancel_weight: number }
+
+export const RELIABILITY_SCORING_DEFAULT: ReliabilityScoring = { cancel_weight: 2 };
+export const RELIABILITY_SCORING_LIMITS = {
+  cancel_weight: { min: 1, max: 5 },
+};
+
+export async function getReliabilityScoring(): Promise<ReliabilityScoring> {
+  const { data, error } = await supabase
+    .from("app_settings").select("value").eq("key", "reliability_scoring").maybeSingle();
+  if (error || !data) return RELIABILITY_SCORING_DEFAULT;
+  const v = (data as { value: Partial<ReliabilityScoring> }).value ?? {};
+  const w = Number(v.cancel_weight);
+  return { cancel_weight: Number.isFinite(w) && w >= 1 ? w : RELIABILITY_SCORING_DEFAULT.cancel_weight };
+}
+
+export async function updateReliabilityScoring(next: ReliabilityScoring): Promise<string | null> {
+  const { error } = await supabase
+    .from("app_settings").update({ value: next } as never).eq("key", "reliability_scoring");
+  return error ? friendlyError(error.message) : null;
+}
+
 // ---- Event-driven notification switches -------------------------------------
 // Behaviour that fires on an EVENT rather than a schedule, so it has no cron job
 // and cannot appear on the Schedule page as a timed row. Still fully on/off-able

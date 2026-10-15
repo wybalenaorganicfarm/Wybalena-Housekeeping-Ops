@@ -8,7 +8,7 @@ import { CleanerNotesModal } from "../components/CleanerNotesModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { parsePhoneNumber, type CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
-import { addCleanerReturning, getCleaners, getLatestCleanerNotes, getReliability, removeCleaner, setCleanerStatus, setManager, stepDownManager, updateCleaner } from "../lib/api";
+import { addCleanerReturning, getCleaners, getLatestCleanerNotes, getReliability, getReliabilityScoring, RELIABILITY_SCORING_DEFAULT, removeCleaner, setCleanerStatus, setManager, stepDownManager, updateCleaner } from "../lib/api";
 import { toastError, toastOk } from "../lib/toast";
 import { acceptRate, monthYear } from "../lib/format";
 import type { Cleaner, CleanerNote, CleanerReliability, CleanerStatus, CleanerTier } from "../lib/types";
@@ -311,6 +311,7 @@ export function Cleaners() {
   const canManage = canEdit || isTeamLead; // status + notes; add/remove stays admin-only
   const [cleaners, setCleaners] = useState<Cleaner[]>([]);
   const [rel, setRel] = useState<Record<string, CleanerReliability>>({});
+  const [cancelWeight, setCancelWeight] = useState(RELIABILITY_SCORING_DEFAULT.cancel_weight);
   const [latestNotes, setLatestNotes] = useState<Record<string, CleanerNote>>({});
   const [loading, setLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState<string>(() => storedFilter(TIER_KEY, ["all", "manager", "tier_1", "tier_2", "tier_3"]));
@@ -329,8 +330,8 @@ export function Cleaners() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   async function load() {
-    const [cs, r, notes] = await Promise.all([getCleaners(), getReliability(), getLatestCleanerNotes()]);
-    setCleaners(cs); setRel(r); setLatestNotes(notes); setLoading(false);
+    const [cs, r, notes, scoring] = await Promise.all([getCleaners(), getReliability(), getLatestCleanerNotes(), getReliabilityScoring()]);
+    setCleaners(cs); setRel(r); setLatestNotes(notes); setCancelWeight(scoring.cancel_weight); setLoading(false);
   }
   useEffect(() => { load(); }, []);
   useEffect(() => { try { localStorage.setItem(TIER_KEY, tierFilter); } catch { /* private mode */ } }, [tierFilter]);
@@ -420,8 +421,8 @@ export function Cleaners() {
   if (loading) return <Spinner />;
 
   const byRate = (list: Cleaner[]) => [...list].sort((a, b) =>
-    (acceptRate(rel[b.id]?.accepted_count ?? 0, rel[b.id]?.declined_count ?? 0, rel[b.id]?.cancelled_count ?? 0) ?? -1) -
-    (acceptRate(rel[a.id]?.accepted_count ?? 0, rel[a.id]?.declined_count ?? 0, rel[a.id]?.cancelled_count ?? 0) ?? -1));
+    (acceptRate(rel[b.id]?.accepted_count ?? 0, rel[b.id]?.declined_count ?? 0, rel[b.id]?.cancelled_count ?? 0, cancelWeight) ?? -1) -
+    (acceptRate(rel[a.id]?.accepted_count ?? 0, rel[a.id]?.declined_count ?? 0, rel[a.id]?.cancelled_count ?? 0, cancelWeight) ?? -1));
 
   // The Cleaning Manager sits ABOVE the tier system, so she is matched on the
   // role rather than on `tier` — her cleaner row still carries a tier value (the
@@ -518,7 +519,7 @@ export function Cleaners() {
                 {g.rows.map((cl) => {
                   const r = rel[cl.id];
                   const acc = r?.accepted_count ?? 0, dec = r?.declined_count ?? 0, can = r?.cancelled_count ?? 0;
-                  const rate = acceptRate(acc, dec, can);
+                  const rate = acceptRate(acc, dec, can, cancelWeight);
                   const col = rateColor(rate);
                   const avBg = cl.is_team_leader ? c.green : cl.tier === "tier_1" ? c.greenMid : cl.tier === "tier_2" ? c.warn : "#c4bdb0";
                   return (
@@ -564,7 +565,10 @@ export function Cleaners() {
                           <span title="Cancelled after accepting" style={{ color: "#a8392b", fontWeight: 600 }}>{can} cancelled</span>
                         </div>
                       </div>
-                      <div style={{ ...cell, textAlign: "center", fontSize: 13, fontWeight: 600, color: col }}>{rate === null ? "—" : `${rate}%`}</div>
+                      <div
+                        title={rate === null ? "No responses yet" : `${rate}% — accepted out of all responses, where a cancellation counts ${cancelWeight}× as heavily as a decline. ${acc} accepted, ${dec} declined, ${can} cancelled.`}
+                        style={{ ...cell, textAlign: "center", fontSize: 13, fontWeight: 600, color: col }}
+                      >{rate === null ? "—" : `${rate}%`}</div>
                       {/* Latest note preview, far right. Click to open the full
                           notes thread (view/add) when the user can manage. */}
                       <div

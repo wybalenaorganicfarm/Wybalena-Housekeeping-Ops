@@ -109,8 +109,20 @@ export function shiftDateTimeLabel(dateStr: string, startTime: string): string {
 }
 
 // Acceptance rate as a whole-number percent (null when no history).
-export function acceptRate(accepted: number, declined: number, cancelled: number): number | null {
-  const total = accepted + declined + cancelled;
+// A cancellation (pulled out after accepting) counts `cancelWeight`× as heavily
+// against the score as a decline (said no up front): rate = accepted /
+// (accepted + declined + cancelWeight*cancelled). Default weight 1 = equal
+// weighting (unchanged behaviour); the venue runs 2 via the Schedule setting.
+// The denominator still counts every response, so the % can only fall, never
+// exceed what equal weighting gave.
+export function acceptRate(
+  accepted: number,
+  declined: number,
+  cancelled: number,
+  cancelWeight = 1,
+): number | null {
+  const w = Number.isFinite(cancelWeight) && cancelWeight >= 1 ? cancelWeight : 1;
+  const total = accepted + declined + w * cancelled;
   return total === 0 ? null : Math.round((accepted / total) * 100);
 }
 

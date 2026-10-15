@@ -11,6 +11,8 @@ import {
   CANCELLATION_COOLOFF_LIMITS, type CancellationCooloff,
   getCancellationReoffer, updateCancellationReoffer, CANCELLATION_REOFFER_DEFAULT,
   CANCELLATION_REOFFER_LIMITS, type CancellationReoffer,
+  getReliabilityScoring, updateReliabilityScoring, RELIABILITY_SCORING_DEFAULT,
+  RELIABILITY_SCORING_LIMITS, type ReliabilityScoring,
   getNotificationSwitches, updateNotificationSwitches, NOTIFICATION_SWITCHES_DEFAULT,
   type NotificationSwitches,
 } from "../lib/api";
@@ -79,15 +81,17 @@ export function Schedule() {
   const [editCooloff, setEditCooloff] = useState(false);
   const [reoffer, setReoffer] = useState<CancellationReoffer>(CANCELLATION_REOFFER_DEFAULT);
   const [editReoffer, setEditReoffer] = useState(false);
+  const [scoring, setScoring] = useState<ReliabilityScoring>(RELIABILITY_SCORING_DEFAULT);
+  const [editScoring, setEditScoring] = useState(false);
   const [switches, setSwitches] = useState<NotificationSwitches>(NOTIFICATION_SWITCHES_DEFAULT);
   const [switchBusy, setSwitchBusy] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [list, r, cu, co, ro, sw] = await Promise.all([
+      const [list, r, cu, co, ro, sw, sc] = await Promise.all([
         getCronSchedules(), getBookingSyncRange(), getStaffingCatchup(), getCancellationCooloff(),
-        getCancellationReoffer(), getNotificationSwitches(),
+        getCancellationReoffer(), getNotificationSwitches(), getReliabilityScoring(),
       ]);
       const map: Record<string, CronJob> = {};
       for (const j of list) map[j.fn] = j;
@@ -97,6 +101,7 @@ export function Schedule() {
       setCooloff(co);
       setReoffer(ro);
       setSwitches(sw);
+      setScoring(sc);
     } catch (e) {
       toastError(e instanceof Error ? e.message : "Failed to load schedules");
     } finally {
@@ -170,6 +175,14 @@ export function Schedule() {
     const err = await updateCancellationReoffer(next);
     if (err) return err;
     toastOk("Cancellation re-offer timing updated.");
+    await load();
+    return null;
+  }
+
+  async function saveScoring(next: ReliabilityScoring) {
+    const err = await updateReliabilityScoring(next);
+    if (err) return err;
+    toastOk("Reliability scoring updated.");
     await load();
     return null;
   }
@@ -276,6 +289,13 @@ export function Schedule() {
                   onToggle={() => toggleSwitch("lead_roster_change_24h")}
                 />
               </Section>
+
+              {/* Not a schedule or a notification — it changes how the accept-rate
+                  % on the Cleaners page is calculated. Lives here as the page where
+                  every tunable knob is surfaced. */}
+              <Section title="Cleaner reliability" hint="How the accept-rate % on the Cleaners page is scored.">
+                <ScoringRow scoring={scoring} onEdit={() => setEditScoring(true)} />
+              </Section>
             </>
           )}
         </div>
@@ -295,6 +315,9 @@ export function Schedule() {
       )}
       {editCooloff && (
         <CooloffModal cooloff={cooloff} onClose={() => setEditCooloff(false)} onSave={saveCooloff} />
+      )}
+      {editScoring && (
+        <ScoringModal scoring={scoring} onClose={() => setEditScoring(false)} onSave={saveScoring} />
       )}
     </div>
   );
@@ -652,6 +675,87 @@ function ReofferModal({ reoffer, onClose, onSave }: {
             {n % 24 === 0 ? <> ({n / 24} day{n === 24 ? "" : "s"})</> : null} notice waits for
             the next 3pm re-offer run. Within <b>{n} hours</b> of the shift, it goes out
             immediately to everyone available.
+          </>
+        )}
+      </div>
+
+      {err && <div style={{ color: c.danger, fontSize: 12.5, marginTop: 12 }}>{err}</div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+        <Button kind="secondary" onClick={onClose}>Cancel</Button>
+        <Button onClick={submit} disabled={saving || !ok}>{saving ? "Saving…" : "Save"}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function ScoringRow({ scoring, onEdit }: { scoring: ReliabilityScoring; onEdit: () => void }) {
+  const w = scoring.cancel_weight;
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "11px 14px", background: c.panel, border: `1px solid ${c.border3}`, borderRadius: 10, marginTop: 8 }}>
+      <div style={{ flex: 1, fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        <div style={{ fontWeight: 600, marginBottom: 3 }}>
+          {w === 1 ? "Cancellation counts the same as a decline" : `Cancellation counts ${w}× a decline`}
+        </div>
+        The accept-rate % on the Cleaners page is <b>accepted ÷ (accepted + declined + {w === 1 ? "cancelled" : <>{w} × cancelled</>})</b>.
+        {w === 1
+          ? <> A decline (said no up front) and a cancellation (pulled out after accepting) lower the score equally.</>
+          : <> A cancellation (pulled out after accepting) lowers the score <b>{w}×</b> as much as a decline (said no up front).</>}
+        {" "}The accepted / declined / cancelled counts are always shown separately either way.
+      </div>
+      <Button kind="secondary" onClick={onEdit} style={{ padding: "7px 12px" }}>Edit</Button>
+    </div>
+  );
+}
+
+function ScoringModal({ scoring, onClose, onSave }: {
+  scoring: ReliabilityScoring; onClose: () => void; onSave: (s: ReliabilityScoring) => Promise<string | null>;
+}) {
+  const [weight, setWeight] = useState(String(scoring.cancel_weight));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const L = RELIABILITY_SCORING_LIMITS;
+  const n = Number(weight);
+  const ok = Number.isInteger(n) && n >= L.cancel_weight.min && n <= L.cancel_weight.max;
+
+  async function submit() {
+    if (!ok) { setErr(`Enter a whole number between ${L.cancel_weight.min} and ${L.cancel_weight.max}.`); return; }
+    setSaving(true); setErr(null);
+    const e = await onSave({ cancel_weight: n });
+    setSaving(false);
+    if (e) { setErr(e); return; }
+    onClose();
+  }
+
+  const field: React.CSSProperties = {
+    width: 90, boxSizing: "border-box", padding: "8px 10px", fontSize: 13,
+    border: `1px solid ${c.border3}`, borderRadius: 7, outline: "none", color: c.ink, background: "#fff",
+  };
+
+  return (
+    <Modal title="Reliability scoring" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: c.muted, lineHeight: 1.55, marginBottom: 16 }}>
+        Each cleaner's accept-rate % is accepted out of all their responses. This sets how heavily a
+        cancellation (accepted, then pulled out) counts against that score compared with a decline
+        (said no to the offer up front). The three counts are always listed separately regardless.
+      </div>
+
+      <label style={{ display: "block", marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: c.body, marginBottom: 6 }}>A cancellation counts this many times a decline</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="number" min={L.cancel_weight.min} max={L.cancel_weight.max} value={weight}
+            onChange={(e) => setWeight(e.target.value)} style={field} />
+          <span style={{ fontSize: 12.5, color: c.muted }}>× a decline</span>
+        </div>
+      </label>
+
+      <div style={{ background: c.railGreenBg, border: `1px solid ${c.railGreenBd}`, borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: c.body, lineHeight: 1.6 }}>
+        {!ok ? `Enter a whole number between ${L.cancel_weight.min} and ${L.cancel_weight.max}.` : n === 1 ? (
+          <><b>Equal weighting.</b> accepted ÷ (accepted + declined + cancelled) — a decline and a cancellation lower the score the same amount.</>
+        ) : (
+          <>
+            accepted ÷ (accepted + declined + <b>{n} × cancelled</b>) — a cancellation lowers the
+            score <b>{n}×</b> as much as a decline.
           </>
         )}
       </div>
