@@ -111,6 +111,22 @@ export interface ShiftAssignment {
   offer_code: string | null;
 }
 
+// One row of a cleaner's rostered-shift history: the assignment joined to the
+// shift it was for. Powers the cleaner profile's "past shifts" list.
+export interface CleanerShiftHistory {
+  assignment_id: string;
+  status: AssignmentStatus;
+  tier_at_offer: CleanerTier;
+  is_manual_override: boolean;
+  offered_at: string;
+  responded_at: string | null;
+  shift_id: string;
+  shift_date: string;
+  start_time: string;
+  shift_type: ShiftType;
+  shift_status: ShiftStatus;
+}
+
 export interface Alert {
   id: string;
   alert_type: AlertType;

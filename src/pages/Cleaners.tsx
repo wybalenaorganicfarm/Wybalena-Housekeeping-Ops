@@ -5,6 +5,7 @@ import { Icon } from "../components/Icon";
 import { Avatar, Button, ConfirmDialog, Field, Input, Modal, Spin, Spinner } from "../components/ui";
 import { KebabMenu } from "../components/KebabMenu";
 import { CleanerNotesModal } from "../components/CleanerNotesModal";
+import { CleanerProfileModal } from "../components/CleanerProfileModal";
 import { PhoneInput, countryName, toE164 } from "../components/PhoneInput";
 import { parsePhoneNumber, type CountryCode } from "libphonenumber-js";
 import { PageHeader } from "../components/PageHeader";
@@ -326,6 +327,7 @@ export function Cleaners() {
   const [pendingStatus, setPendingStatus] = useState<{ cl: Cleaner; status: CleanerStatus } | null>(null);
   const [pendingManager, setPendingManager] = useState<{ cl: Cleaner; nominate: boolean } | null>(null);
   const [notesFor, setNotesFor] = useState<Cleaner | null>(null);
+  const [profileFor, setProfileFor] = useState<Cleaner | null>(null);
   const [editing, setEditing] = useState<Cleaner | null>(null);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
@@ -454,6 +456,7 @@ export function Cleaners() {
           and its scroll container scrolls horizontally so the 8 columns stay
           aligned (header + rows share the same track) instead of crushing. */}
       <style>{`
+        .cln-page .cln-name-link:hover { text-decoration: underline; text-underline-offset: 2px; }
         @media (max-width: 1024px) {
           .cln-page .cln-toolbar { padding-left: 16px; padding-right: 16px; }
           .cln-page .cln-scroll  { padding-left: 16px; padding-right: 16px; }
@@ -524,10 +527,16 @@ export function Cleaners() {
                   const avBg = cl.is_team_leader ? c.green : cl.tier === "tier_1" ? c.greenMid : cl.tier === "tier_2" ? c.warn : "#c4bdb0";
                   return (
                     <div key={cl.id} style={{ ...gridRow, padding: "11px 18px", borderBottom: `1px solid ${c.rowBd}`, opacity: cl.status === "inactive" ? 0.6 : 1 }}>
-                      <div style={{ ...cell, display: "flex", alignItems: "center", gap: 11 }}>
+                      {/* Click the cleaner to open their profile — identity,
+                          reliability breakdown, and full rostered-shift history. */}
+                      <div
+                        onClick={() => setProfileFor(cl)}
+                        title="View profile & shift history"
+                        style={{ ...cell, display: "flex", alignItems: "center", gap: 11, cursor: "pointer" }}
+                      >
                         <Avatar name={cl.full_name} size={32} bg={avBg} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <div className="cln-name-link" style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {cl.full_name}
                             {cl.is_team_leader && <span style={{ fontSize: 10, color: "#9a7320", background: "#FBF1DF", padding: "0 6px", borderRadius: 4, fontWeight: 600, marginLeft: 6 }}>Cleaning Manager</span>}
                           </div>
@@ -622,6 +631,7 @@ export function Cleaners() {
       {showAdd && <AddCleanerModal existing={cleaners} onClose={() => setShowAdd(false)} onSaved={load} />}
       {editing && <EditCleanerModal cleaner={editing} existing={cleaners} onClose={() => setEditing(null)} onSaved={load} />}
       {notesFor && <CleanerNotesModal cleaner={notesFor} canModify={canEdit} onClose={() => { setNotesFor(null); getLatestCleanerNotes().then(setLatestNotes).catch(() => {}); }} />}
+      {profileFor && <CleanerProfileModal cleaner={profileFor} reliability={rel[profileFor.id]} cancelWeight={cancelWeight} onClose={() => setProfileFor(null)} />}
       {toRemove && (
         <ConfirmDialog
           title="Remove cleaner"

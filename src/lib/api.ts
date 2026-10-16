@@ -1,7 +1,7 @@
 import { supabase, invokeFn } from "./supabase";
 import { friendlyError } from "./errors";
 import type {
-  Alert, AuditLogResolved, Booking, Cleaner, CleanerNote, CleanerReliability, MessageTemplate, MessageTemplatePatch, Profile, Shift, ShiftAssignment, ShiftStaffing,
+  Alert, AuditLogResolved, Booking, Cleaner, CleanerNote, CleanerReliability, CleanerShiftHistory, MessageTemplate, MessageTemplatePatch, Profile, Shift, ShiftAssignment, ShiftStaffing, ShiftStatus, ShiftType,
 } from "./types";
 
 // ---- Reads (governed by RLS) -----------------------------------------------
@@ -220,6 +220,46 @@ export async function getAssignmentsForShift(shiftId: string): Promise<ShiftAssi
   return unwrapRows<ShiftAssignment>(await supabase
     .from("shift_assignments").select("*").eq("shift_id", shiftId)
     .order("offered_at", { ascending: true }));
+}
+
+// Every shift a cleaner has been rostered on / offered, newest first — the
+// assignment joined to its shift. Powers the cleaner profile's shift history.
+// The embed (shift:shifts(...)) can arrive as an object or a 1-element array
+// depending on how PostgREST infers the relationship; we normalise either shape
+// and SKIP rows whose shift failed to resolve rather than render blank fields.
+export async function getCleanerShiftHistory(cleanerId: string): Promise<CleanerShiftHistory[]> {
+  type Row = Omit<ShiftAssignment, "shift_id"> & {
+    shift_id: string;
+    shift: | { id: string; shift_date: string; start_time: string; shift_type: ShiftType; status: ShiftStatus }
+           | { id: string; shift_date: string; start_time: string; shift_type: ShiftType; status: ShiftStatus }[]
+           | null;
+  };
+  const rows = unwrapRows<Row>(await supabase
+    .from("shift_assignments")
+    .select("id, shift_id, status, tier_at_offer, is_manual_override, offered_at, responded_at, shift:shifts(id, shift_date, start_time, shift_type, status)")
+    .eq("cleaner_id", cleanerId));
+
+  const out: CleanerShiftHistory[] = [];
+  for (const r of rows) {
+    const s = Array.isArray(r.shift) ? r.shift[0] : r.shift;
+    if (!s) continue; // orphaned assignment — don't render a blank row
+    out.push({
+      assignment_id: r.id,
+      status: r.status,
+      tier_at_offer: r.tier_at_offer,
+      is_manual_override: r.is_manual_override,
+      offered_at: r.offered_at,
+      responded_at: r.responded_at,
+      shift_id: s.id,
+      shift_date: s.shift_date,
+      start_time: s.start_time,
+      shift_type: s.shift_type,
+      shift_status: s.status,
+    });
+  }
+  // Newest shift first (the order a client reads a history in).
+  out.sort((a, b) => (a.shift_date < b.shift_date ? 1 : a.shift_date > b.shift_date ? -1 : 0));
+  return out;
 }
 
 // ---- Direct writes via RLS (admin+ only; team_leader blocked by policy) -----
